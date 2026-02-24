@@ -1,0 +1,108 @@
+generated: "2026-02-23"
+project: "bmad-ralph"
+project_type: "Кастомная утилита — гибрид BMad Method v6 + RALPH loop"
+selected_track: "method"
+field_type: "greenfield"
+workflow_path: "method-greenfield.yaml"
+
+workflow_status:
+  phase_0_discovery:
+    name: "Discovery"
+    optional: true
+    workflows:
+      - id: "brainstorm-project"
+        status: "completed"
+        agent: "analyst"
+        command: "/bmad:bmm:workflows:workflow-status"
+        included: true
+        completed_date: "2026-02-24"
+        output: "docs/analysis/brainstorming-session-2026-02-23.md"
+
+      - id: "research"
+        status: "completed"
+        agent: "analyst"
+        command: "/bmad:bmm:workflows:workflow-status"
+        included: true
+        completed_date: "2026-02-24"
+        output:
+          - "docs/research/research-1-serena-ralph-2026-02-24.md"
+          - "docs/research/research-2-tdd-vs-prewritten-tests-2026-02-24.md"
+          - "docs/research/research-3-e2e-in-ralph-2026-02-24.md"
+          - "docs/research/research-4-review-agents-composition-2026-02-24.md"
+          - "docs/research/research-5-human-gates-2026-02-24.md"
+          - "docs/research/llm-as-judge-variants-research-2026-02-24.md"
+
+      - id: "product-brief"
+        status: "completed"
+        agent: "analyst"
+        command: "/bmad:bmm:workflows:workflow-status"
+        included: true
+        completed_date: "2026-02-24"
+        output: "docs/analysis/product-brief-bmad-ralph-2026-02-24.md"
+
+  phase_1_planning:
+    name: "Planning"
+    required: true
+    workflows:
+      - id: "prd"
+        status: "required"
+        agent: "pm"
+        command: "/bmad:bmm:workflows:workflow-status"
+
+      - id: "validate-prd"
+        status: "optional"
+        agent: "pm"
+        command: "/bmad:bmm:workflows:workflow-status"
+
+      - id: "create-ux-design"
+        status: "conditional"
+        condition: "if_has_ui"
+        agent: "ux-designer"
+        command: "/bmad:bmm:workflows:workflow-status"
+
+  phase_2_solutioning:
+    name: "Solutioning"
+    required: true
+    workflows:
+      - id: "create-architecture"
+        status: "completed"
+        agent: "architect"
+        command: "/bmad:bmm:workflows:workflow-status"
+        completed_date: "2026-02-24"
+        output: "docs/architecture.md"
+
+      - id: "create-epics-and-stories"
+        status: "required"
+        agent: "pm"
+        command: "/bmad:bmm:workflows:workflow-status"
+
+      - id: "test-design"
+        status: "recommended"
+        agent: "tea"
+        command: "/bmad:bmm:workflows:workflow-status"
+
+      - id: "validate-architecture"
+        status: "optional"
+        agent: "architect"
+        command: "/bmad:bmm:workflows:workflow-status"
+
+      - id: "generate-project-context"
+        status: "completed"
+        agent: "architect"
+        command: "/bmad:bmm:workflows:workflow-status"
+        completed_date: "2026-02-24"
+        output: "docs/project-context.md"
+
+      - id: "implementation-readiness"
+        status: "required"
+        agent: "architect"
+        command: "/bmad:bmm:workflows:workflow-status"
+
+  phase_3_implementation:
+    name: "Implementation"
+    required: true
+    workflows:
+      - id: "sprint-planning"
+        status: "required"
+        agent: "sm"
+        command: "/bmad:bmm:workflows:workflow-status"
