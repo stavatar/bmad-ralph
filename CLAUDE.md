@@ -75,6 +75,10 @@ See `docs/project-context.md` for full architecture context.
 - **Always test zero values** for custom error types (e.g., `ExitCodeError{}`, `GateDecision{}`) — catches uninitialized field bugs
 - **Test double-wrapped errors** (`fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", err))`) — realistic multi-layer call stack scenario
 - **errors.As tests must be table-driven** with multiple field combinations, not single inline assertions
+- **Test ALL error paths:** non-happy-path os.ReadFile errors (permission denied, is-a-directory) need explicit tests — don't assume only NotExist matters
+- **yaml.v3 #395 guard:** Use `map[string]any` probe before struct unmarshal — `bytes.TrimSpace == "---"` is fragile, misses comments-only and multi-document YAML
+- **Integration test coverage:** Load() tests must cover all detectProjectRoot paths (.ralph/, .git/ fallback, CWD), not just the primary path
+- **String matching on errors:** When unavoidable (yaml.v3 doesn't export syntax error type), add justification comment explaining why errors.Is/As isn't possible
 
 ## Build & CI
 

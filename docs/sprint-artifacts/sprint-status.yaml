@@ -38,7 +38,7 @@ development_status:
   epic-1: in-progress
   1-1-project-scaffold: done
   1-2-error-types-and-context-pattern: done
-  1-3-config-struct-yaml-parsing: backlog
+  1-3-config-struct-yaml-parsing: done
   1-4-config-cli-override-go-embed-defaults: backlog
   1-5-config-remaining-params-fallback-chain: backlog
   1-6-constants-and-regex-patterns: backlog
