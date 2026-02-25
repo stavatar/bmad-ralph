@@ -86,6 +86,11 @@ See `docs/project-context.md` for full architecture context.
 - **Windows Go `os.UserHomeDir()`:** Uses `USERPROFILE` (not `HOME`). Tests must `t.Setenv` both `HOME` and `USERPROFILE`. For failure: also clear `HOMEDRIVE`/`HOMEPATH`
 - **Story File List accuracy:** NEW files = "new/added", not "modified". Check `git status` — `??` = untracked = new
 - **Parallel regex test symmetry:** When testing parallel patterns (e.g., TaskOpenRegex/TaskDoneRegex), ensure both have symmetric test cases — tab-indented, embedded marker, malformed marker. Asymmetry = coverage gap
+- **Use `errors.As` not type assertions:** Project standard requires `errors.As(err, &target)` instead of `err.(*Type)` — type assertion breaks if error wrapping changes in future Go versions. Caught in Story 1.7 review
+- **CLI arg values need constants too:** Not just flag names (`--output-format`) but also fixed values (`"json"`) should be const. AC says "constructed via constants (not inline strings)" — applies to both flag names and their fixed values
+- **Test helper `default` case required:** When using TestMain self-reexec pattern with `switch scenario`, always add `default: os.Exit(1)` — silent success on scenario typos masks test bugs
+- **Windows Go exec testing:** `go.exe` cannot execute bash scripts (`%1 is not a valid Win32 application`). Use Go test binary self-reexec pattern: `TestMain` + env var (`SESSION_TEST_HELPER`) + `os.Args[0]` as Command. Standard Go stdlib approach
+- **Windows path comparison:** Use `os.SameFile()` instead of string equality for path comparison — Windows 8.3 short names (e.g., `4689~1`) differ from long names
 
 ## Build & CI
 

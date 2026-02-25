@@ -42,7 +42,7 @@ development_status:
   1-4-config-cli-override-go-embed-defaults: done
   1-5-config-remaining-params-fallback-chain: done
   1-6-constants-and-regex-patterns: done
-  1-7-session-basic-os-exec-stdout-capture: backlog
+  1-7-session-basic-os-exec-stdout-capture: done
   1-8-session-json-parsing-sessionresult: backlog
   1-9-session-resume-support: backlog
   1-10-prompt-assembly-utility: backlog
