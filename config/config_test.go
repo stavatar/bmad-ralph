@@ -780,3 +780,174 @@ log_dir: "/custom/logs"
 		t.Errorf("LogDir = %q, want %q (config-only)", cfg.LogDir, "/custom/logs")
 	}
 }
+
+// --- Story 1.5: ResolvePath tests ---
+
+// writeFile creates a file at the given path with the specified content,
+// creating parent directories as needed.
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConfig_ResolvePath(t *testing.T) {
+	embedded := []byte("embedded content")
+
+	tests := []struct {
+		name           string
+		setup          func(t *testing.T, projectDir, homeDir string)
+		clearHome      bool // true = clear HOME/USERPROFILE so UserHomeDir fails
+		embedded       []byte
+		resolveName    string
+		wantContent    string
+		wantSource     string
+		wantErr        bool
+		wantErrContain string // substring that error message must contain
+	}{
+		{
+			name: "project level found",
+			setup: func(t *testing.T, projectDir, homeDir string) {
+				writeFile(t, filepath.Join(projectDir, ".ralph", "agents", "quality.md"), "project content")
+			},
+			resolveName: "agents/quality.md",
+			wantContent: "project content",
+			wantSource:  "project",
+		},
+		{
+			name: "global level fallback",
+			setup: func(t *testing.T, projectDir, homeDir string) {
+				writeFile(t, filepath.Join(homeDir, ".config", "ralph", "agents", "quality.md"), "global content")
+			},
+			resolveName: "agents/quality.md",
+			wantContent: "global content",
+			wantSource:  "global",
+		},
+		{
+			name:        "embedded fallback",
+			setup:       func(t *testing.T, projectDir, homeDir string) {},
+			embedded:    embedded,
+			resolveName: "agents/quality.md",
+			wantContent: "embedded content",
+			wantSource:  "embedded",
+		},
+		{
+			name: "project priority over global",
+			setup: func(t *testing.T, projectDir, homeDir string) {
+				writeFile(t, filepath.Join(projectDir, ".ralph", "agents", "quality.md"), "project wins")
+				writeFile(t, filepath.Join(homeDir, ".config", "ralph", "agents", "quality.md"), "global loses")
+			},
+			resolveName: "agents/quality.md",
+			wantContent: "project wins",
+			wantSource:  "project",
+		},
+		{
+			name:           "no file no embedded error",
+			setup:          func(t *testing.T, projectDir, homeDir string) {},
+			resolveName:    "agents/missing.md",
+			wantErr:        true,
+			wantErrContain: "config: resolve",
+		},
+		{
+			name:           "empty embedded error",
+			setup:          func(t *testing.T, projectDir, homeDir string) {},
+			embedded:       []byte{},
+			resolveName:    "agents/quality.md",
+			wantErr:        true,
+			wantErrContain: "config: resolve",
+		},
+		{
+			name: "flat name without subdirectory",
+			setup: func(t *testing.T, projectDir, homeDir string) {
+				writeFile(t, filepath.Join(projectDir, ".ralph", "quality.md"), "flat content")
+			},
+			resolveName: "quality.md",
+			wantContent: "flat content",
+			wantSource:  "project",
+		},
+		{
+			name: "UserHomeDir failure skips global uses embedded",
+			setup: func(t *testing.T, projectDir, homeDir string) {
+				// Global file exists but HOME/USERPROFILE cleared so UserHomeDir fails
+				writeFile(t, filepath.Join(homeDir, ".config", "ralph", "agents", "quality.md"), "global content")
+			},
+			clearHome:   true,
+			embedded:    embedded,
+			resolveName: "agents/quality.md",
+			wantContent: "embedded content",
+			wantSource:  "embedded",
+		},
+		{
+			name: "UserHomeDir failure no embedded error",
+			setup: func(t *testing.T, projectDir, homeDir string) {
+				// No project file, HOME cleared so global skipped, no embedded → error
+			},
+			clearHome:      true,
+			resolveName:    "agents/quality.md",
+			wantErr:        true,
+			wantErrContain: "agents/quality.md",
+		},
+		{
+			name: "unreadable project falls through to global",
+			setup: func(t *testing.T, projectDir, homeDir string) {
+				// Create project path as DIRECTORY so os.ReadFile fails with non-NotExist error
+				if err := os.MkdirAll(filepath.Join(projectDir, ".ralph", "agents", "quality.md"), 0755); err != nil {
+					t.Fatal(err)
+				}
+				writeFile(t, filepath.Join(homeDir, ".config", "ralph", "agents", "quality.md"), "global content")
+			},
+			resolveName: "agents/quality.md",
+			wantContent: "global content",
+			wantSource:  "global",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			projectDir := t.TempDir()
+			homeDir := t.TempDir()
+
+			if tt.clearHome {
+				// Clear both HOME (Linux) and USERPROFILE (Windows) so
+				// os.UserHomeDir() returns an error on all platforms.
+				t.Setenv("HOME", "")
+				t.Setenv("USERPROFILE", "")
+				t.Setenv("HOMEDRIVE", "")
+				t.Setenv("HOMEPATH", "")
+			} else {
+				// Set both HOME (Linux) and USERPROFILE (Windows) so
+				// os.UserHomeDir() returns homeDir on all platforms.
+				t.Setenv("HOME", homeDir)
+				t.Setenv("USERPROFILE", homeDir)
+			}
+
+			tt.setup(t, projectDir, homeDir)
+
+			cfg := &Config{ProjectRoot: projectDir}
+			content, source, err := cfg.ResolvePath(tt.resolveName, tt.embedded)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
+					t.Errorf("error = %q, want containing %q", err.Error(), tt.wantErrContain)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if string(content) != tt.wantContent {
+				t.Errorf("content = %q, want %q", string(content), tt.wantContent)
+			}
+			if source != tt.wantSource {
+				t.Errorf("source = %q, want %q", source, tt.wantSource)
+			}
+		})
+	}
+}

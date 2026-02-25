@@ -135,6 +135,36 @@ func Load(flags CLIFlags) (*Config, error) {
 	return cfg, nil
 }
 
+// ResolvePath resolves a file through the three-level fallback chain:
+//  1. Project-level: <ProjectRoot>/.ralph/<name>
+//  2. Global-level: ~/.config/ralph/<name>
+//  3. Embedded: provided fallback content
+//
+// Returns the file content, a source description ("project", "global", or "embedded"),
+// and any error. If no level provides content, returns a descriptive error.
+func (c *Config) ResolvePath(name string, embedded []byte) ([]byte, string, error) {
+	// 1. Project-level override
+	projectPath := filepath.Join(c.ProjectRoot, ".ralph", name)
+	if data, err := os.ReadFile(projectPath); err == nil {
+		return data, "project", nil
+	}
+
+	// 2. Global-level override
+	if home, err := os.UserHomeDir(); err == nil {
+		globalPath := filepath.Join(home, ".config", "ralph", name)
+		if data, err := os.ReadFile(globalPath); err == nil {
+			return data, "global", nil
+		}
+	}
+
+	// 3. Embedded fallback
+	if len(embedded) > 0 {
+		return embedded, "embedded", nil
+	}
+
+	return nil, "", fmt.Errorf("config: resolve %q: not found in project, global, or embedded", name)
+}
+
 func detectProjectRoot() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
