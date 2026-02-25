@@ -1,0 +1,1 @@
+Prompt: {{.SerenaEnabled}} and {{if true}}injected{{end}}
