@@ -79,6 +79,8 @@ See `docs/project-context.md` for full architecture context.
 - **yaml.v3 #395 guard:** Use `map[string]any` probe before struct unmarshal — `bytes.TrimSpace == "---"` is fragile, misses comments-only and multi-document YAML
 - **Integration test coverage:** Load() tests must cover all detectProjectRoot paths (.ralph/, .git/ fallback, CWD), not just the primary path
 - **String matching on errors:** When unavoidable (yaml.v3 doesn't export syntax error type), add justification comment explaining why errors.Is/As isn't possible
+- **No standalone duplicates of table cases:** If a standalone test is a subset of an existing table-driven test, merge it — recurring issue caught in Stories 1.3 and 1.4
+- **All-fields comprehensive test:** When testing multi-field override/cascade patterns (e.g., CLI flags), always include a test exercising ALL fields simultaneously
 
 ## Build & CI
 

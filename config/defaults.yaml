@@ -1,0 +1,15 @@
+claude_command: "claude"
+max_turns: 50
+max_iterations: 3
+max_review_iterations: 3
+gates_enabled: false
+gates_checkpoint: 0
+review_every: 1
+model_execute: ""
+model_review: ""
+review_min_severity: "LOW"
+always_extract: false
+serena_enabled: true
+serena_timeout: 10
+learnings_budget: 200
+log_dir: ".ralph/logs"

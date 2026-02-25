@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+// intPtr returns a pointer to the given int value.
+func intPtr(v int) *int { return &v }
+
+// boolPtr returns a pointer to the given bool value.
+func boolPtr(v bool) *bool { return &v }
+
+// strPtr returns a pointer to the given string value.
+func strPtr(v string) *string { return &v }
+
 // writeConfigYAML creates .ralph/config.yaml with given content in dir.
 func writeConfigYAML(t *testing.T, dir, content string) {
 	t.Helper()
@@ -448,5 +457,326 @@ func TestConfig_DetectProjectRootFrom_RalphPriority(t *testing.T) {
 	got := detectProjectRootFrom(child)
 	if got != grandparent {
 		t.Errorf("got %q, want %q (grandparent with .ralph/ takes priority)", got, grandparent)
+	}
+}
+
+// --- Story 1.4: CLI override and cascade tests ---
+
+func TestConfig_Load_CLIOverridesConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigYAML(t, dir, "max_turns: 75\ngates_enabled: true\nmodel_execute: sonnet\n")
+	t.Chdir(dir)
+
+	cfg, err := Load(CLIFlags{
+		MaxTurns:     intPtr(100),
+		GatesEnabled: boolPtr(false),
+		ModelExecute: strPtr("haiku"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxTurns != 100 {
+		t.Errorf("MaxTurns = %d, want 100 (CLI override)", cfg.MaxTurns)
+	}
+	if cfg.GatesEnabled {
+		t.Error("GatesEnabled = true, want false (CLI override)")
+	}
+	if cfg.ModelExecute != "haiku" {
+		t.Errorf("ModelExecute = %q, want %q (CLI override)", cfg.ModelExecute, "haiku")
+	}
+}
+
+func TestConfig_Load_ConfigOverridesEmbedded(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigYAML(t, dir, "max_turns: 75\ngates_enabled: true\nmodel_execute: sonnet\n")
+	t.Chdir(dir)
+
+	cfg, err := Load(CLIFlags{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxTurns != 75 {
+		t.Errorf("MaxTurns = %d, want 75 (config override of embedded 50)", cfg.MaxTurns)
+	}
+	if !cfg.GatesEnabled {
+		t.Error("GatesEnabled = false, want true (config override of embedded false)")
+	}
+	if cfg.ModelExecute != "sonnet" {
+		t.Errorf("ModelExecute = %q, want %q (config override of embedded empty)", cfg.ModelExecute, "sonnet")
+	}
+}
+
+func TestConfig_Load_EmbeddedDefaultUsed(t *testing.T) {
+	dir := t.TempDir()
+	// .ralph/ exists but no config.yaml → all embedded defaults
+	if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	cfg, err := Load(CLIFlags{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxTurns != 50 {
+		t.Errorf("MaxTurns = %d, want 50 (embedded default)", cfg.MaxTurns)
+	}
+	if cfg.GatesEnabled {
+		t.Error("GatesEnabled = true, want false (embedded default)")
+	}
+	if cfg.ModelExecute != "" {
+		t.Errorf("ModelExecute = %q, want empty (embedded default)", cfg.ModelExecute)
+	}
+}
+
+func TestConfig_Load_CascadeThreeLevels(t *testing.T) {
+	tests := []struct {
+		name     string
+		yaml     string   // config file content ("" = no config file created)
+		noConfig bool     // true = no .ralph/config.yaml at all
+		flags    CLIFlags // CLI flags
+		wantInt  int      // expected MaxTurns
+		wantBool bool     // expected GatesEnabled
+		wantStr  string   // expected ModelExecute
+	}{
+		// int cascade (MaxTurns: embedded=50)
+		{
+			name:    "int/CLI overrides config",
+			yaml:    "max_turns: 75\n",
+			flags:   CLIFlags{MaxTurns: intPtr(100)},
+			wantInt: 100,
+		},
+		{
+			name:    "int/config overrides embedded",
+			yaml:    "max_turns: 75\n",
+			flags:   CLIFlags{},
+			wantInt: 75,
+		},
+		{
+			name:     "int/embedded default used",
+			noConfig: true,
+			flags:    CLIFlags{},
+			wantInt:  50,
+		},
+		{
+			name:     "int/CLI overrides embedded no config",
+			noConfig: true,
+			flags:    CLIFlags{MaxTurns: intPtr(100)},
+			wantInt:  100,
+		},
+		// bool cascade (GatesEnabled: embedded=false)
+		{
+			name:     "bool/CLI true overrides config false",
+			yaml:     "gates_enabled: false\n",
+			flags:    CLIFlags{GatesEnabled: boolPtr(true)},
+			wantBool: true,
+			wantInt:  50,
+		},
+		{
+			name:     "bool/CLI false overrides config true",
+			yaml:     "gates_enabled: true\n",
+			flags:    CLIFlags{GatesEnabled: boolPtr(false)},
+			wantBool: false,
+			wantInt:  50,
+		},
+		{
+			name:     "bool/config overrides embedded",
+			yaml:     "gates_enabled: true\n",
+			flags:    CLIFlags{},
+			wantBool: true,
+			wantInt:  50,
+		},
+		{
+			name:     "bool/embedded default used",
+			noConfig: true,
+			flags:    CLIFlags{},
+			wantBool: false,
+			wantInt:  50,
+		},
+		// string cascade (ModelExecute: embedded="")
+		{
+			name:    "string/CLI overrides config",
+			yaml:    "model_execute: sonnet\n",
+			flags:   CLIFlags{ModelExecute: strPtr("haiku")},
+			wantStr: "haiku",
+			wantInt: 50,
+		},
+		{
+			name:    "string/config overrides embedded",
+			yaml:    "model_execute: sonnet\n",
+			flags:   CLIFlags{},
+			wantStr: "sonnet",
+			wantInt: 50,
+		},
+		{
+			name:     "string/embedded default used",
+			noConfig: true,
+			flags:    CLIFlags{},
+			wantStr:  "",
+			wantInt:  50,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tt.noConfig {
+				if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0755); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				writeConfigYAML(t, dir, tt.yaml)
+			}
+			t.Chdir(dir)
+
+			cfg, err := Load(tt.flags)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.MaxTurns != tt.wantInt {
+				t.Errorf("MaxTurns = %d, want %d", cfg.MaxTurns, tt.wantInt)
+			}
+			if cfg.GatesEnabled != tt.wantBool {
+				t.Errorf("GatesEnabled = %v, want %v", cfg.GatesEnabled, tt.wantBool)
+			}
+			if cfg.ModelExecute != tt.wantStr {
+				t.Errorf("ModelExecute = %q, want %q", cfg.ModelExecute, tt.wantStr)
+			}
+		})
+	}
+}
+
+func TestConfig_Load_CLIZeroOverridesNonZero(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigYAML(t, dir, "gates_checkpoint: 5\n")
+	t.Chdir(dir)
+
+	cfg, err := Load(CLIFlags{GatesCheckpoint: intPtr(0)})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.GatesCheckpoint != 0 {
+		t.Errorf("GatesCheckpoint = %d, want 0 (CLI zero override)", cfg.GatesCheckpoint)
+	}
+}
+
+func TestConfig_Load_CLIOverridesEmbeddedNoConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	// .ralph/ exists but no config.yaml
+	if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	cfg, err := Load(CLIFlags{MaxTurns: intPtr(100), GatesEnabled: boolPtr(true)})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxTurns != 100 {
+		t.Errorf("MaxTurns = %d, want 100 (CLI overrides embedded default of 50)", cfg.MaxTurns)
+	}
+	if !cfg.GatesEnabled {
+		t.Error("GatesEnabled = false, want true (CLI overrides embedded default of false)")
+	}
+}
+
+func TestConfig_Load_CLIOverridesEmptyConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigYAML(t, dir, "---\n# empty config\n")
+	t.Chdir(dir)
+
+	cfg, err := Load(CLIFlags{MaxTurns: intPtr(200)})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxTurns != 200 {
+		t.Errorf("MaxTurns = %d, want 200 (CLI override on empty config)", cfg.MaxTurns)
+	}
+}
+
+func TestConfig_Load_AllCLIFlagsOverrideFullConfig(t *testing.T) {
+	dir := t.TempDir()
+	// Full config file with all 15 parameters set to non-default values
+	writeConfigYAML(t, dir, `claude_command: "custom-claude"
+max_turns: 75
+max_iterations: 5
+max_review_iterations: 5
+gates_enabled: true
+gates_checkpoint: 3
+review_every: 2
+model_execute: "sonnet"
+model_review: "opus"
+review_min_severity: "HIGH"
+always_extract: true
+serena_enabled: false
+serena_timeout: 30
+learnings_budget: 500
+log_dir: "/custom/logs"
+`)
+	t.Chdir(dir)
+
+	// Set ALL 9 CLI flags to override config values
+	cfg, err := Load(CLIFlags{
+		MaxTurns:            intPtr(200),
+		MaxIterations:       intPtr(10),
+		MaxReviewIterations: intPtr(8),
+		GatesEnabled:        boolPtr(false),
+		GatesCheckpoint:     intPtr(0),
+		ReviewEvery:         intPtr(5),
+		ModelExecute:        strPtr("haiku"),
+		ModelReview:         strPtr("haiku"),
+		AlwaysExtract:       boolPtr(false),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// All 9 CLI-overridable fields must reflect CLI values
+	if cfg.MaxTurns != 200 {
+		t.Errorf("MaxTurns = %d, want 200", cfg.MaxTurns)
+	}
+	if cfg.MaxIterations != 10 {
+		t.Errorf("MaxIterations = %d, want 10", cfg.MaxIterations)
+	}
+	if cfg.MaxReviewIterations != 8 {
+		t.Errorf("MaxReviewIterations = %d, want 8", cfg.MaxReviewIterations)
+	}
+	if cfg.GatesEnabled {
+		t.Error("GatesEnabled = true, want false")
+	}
+	if cfg.GatesCheckpoint != 0 {
+		t.Errorf("GatesCheckpoint = %d, want 0", cfg.GatesCheckpoint)
+	}
+	if cfg.ReviewEvery != 5 {
+		t.Errorf("ReviewEvery = %d, want 5", cfg.ReviewEvery)
+	}
+	if cfg.ModelExecute != "haiku" {
+		t.Errorf("ModelExecute = %q, want %q", cfg.ModelExecute, "haiku")
+	}
+	if cfg.ModelReview != "haiku" {
+		t.Errorf("ModelReview = %q, want %q", cfg.ModelReview, "haiku")
+	}
+	if cfg.AlwaysExtract {
+		t.Error("AlwaysExtract = true, want false")
+	}
+
+	// Config-only fields (no CLI flags) must retain config file values
+	if cfg.ClaudeCommand != "custom-claude" {
+		t.Errorf("ClaudeCommand = %q, want %q (config-only, not CLI-overridable)", cfg.ClaudeCommand, "custom-claude")
+	}
+	if cfg.ReviewMinSeverity != "HIGH" {
+		t.Errorf("ReviewMinSeverity = %q, want %q (config-only)", cfg.ReviewMinSeverity, "HIGH")
+	}
+	if cfg.SerenaEnabled {
+		t.Error("SerenaEnabled = true, want false (config-only, set to false in config)")
+	}
+	if cfg.SerenaTimeout != 30 {
+		t.Errorf("SerenaTimeout = %d, want 30 (config-only)", cfg.SerenaTimeout)
+	}
+	if cfg.LearningsBudget != 500 {
+		t.Errorf("LearningsBudget = %d, want 500 (config-only)", cfg.LearningsBudget)
+	}
+	if cfg.LogDir != "/custom/logs" {
+		t.Errorf("LogDir = %q, want %q (config-only)", cfg.LogDir, "/custom/logs")
 	}
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	_ "embed" // Required for //go:embed directive
 	"errors"
 	"fmt"
 	"os"
@@ -8,6 +9,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+//go:embed defaults.yaml
+var defaultsYAML []byte
 
 // Config holds all ralph configuration parameters.
 // Parsed once at startup, passed by pointer, NEVER mutated at runtime.
@@ -30,27 +34,60 @@ type Config struct {
 	ProjectRoot         string `yaml:"-"`
 }
 
-// CLIFlags holds command-line flag values.
-// Pointer fields for "was set" tracking added in Story 1.4.
-type CLIFlags struct{}
+// CLIFlags holds command-line flag values for the three-level cascade:
+// CLI flags > config file > embedded defaults.
+// Pointer fields: nil = flag not set (use config/default), non-nil = explicitly set.
+type CLIFlags struct {
+	MaxTurns            *int
+	MaxIterations       *int
+	MaxReviewIterations *int
+	GatesEnabled        *bool
+	GatesCheckpoint     *int
+	ReviewEvery         *int
+	ModelExecute        *string
+	ModelReview         *string
+	AlwaysExtract       *bool
+}
 
 func defaultConfig() *Config {
-	return &Config{
-		ClaudeCommand:       "claude",
-		MaxTurns:            50,
-		MaxIterations:       3,
-		MaxReviewIterations: 3,
-		GatesEnabled:        false,
-		GatesCheckpoint:     0,
-		ReviewEvery:         1,
-		ModelExecute:        "",
-		ModelReview:         "",
-		ReviewMinSeverity:   "LOW",
-		AlwaysExtract:       false,
-		SerenaEnabled:       true,
-		SerenaTimeout:       10,
-		LearningsBudget:     200,
-		LogDir:              ".ralph/logs",
+	var cfg Config
+	// Embedded defaults are compiled into the binary.
+	// Parsing failure indicates corrupt defaults.yaml — programming error.
+	if err := yaml.Unmarshal(defaultsYAML, &cfg); err != nil {
+		panic("config: embedded defaults.yaml: " + err.Error())
+	}
+	return &cfg
+}
+
+// applyCLIFlags applies non-nil CLI flag values to the config, overriding
+// any values set by config file or embedded defaults.
+func applyCLIFlags(cfg *Config, flags CLIFlags) {
+	if flags.MaxTurns != nil {
+		cfg.MaxTurns = *flags.MaxTurns
+	}
+	if flags.MaxIterations != nil {
+		cfg.MaxIterations = *flags.MaxIterations
+	}
+	if flags.MaxReviewIterations != nil {
+		cfg.MaxReviewIterations = *flags.MaxReviewIterations
+	}
+	if flags.GatesEnabled != nil {
+		cfg.GatesEnabled = *flags.GatesEnabled
+	}
+	if flags.GatesCheckpoint != nil {
+		cfg.GatesCheckpoint = *flags.GatesCheckpoint
+	}
+	if flags.ReviewEvery != nil {
+		cfg.ReviewEvery = *flags.ReviewEvery
+	}
+	if flags.ModelExecute != nil {
+		cfg.ModelExecute = *flags.ModelExecute
+	}
+	if flags.ModelReview != nil {
+		cfg.ModelReview = *flags.ModelReview
+	}
+	if flags.AlwaysExtract != nil {
+		cfg.AlwaysExtract = *flags.AlwaysExtract
 	}
 }
 
@@ -71,6 +108,7 @@ func Load(flags CLIFlags) (*Config, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			applyCLIFlags(cfg, flags)
 			return cfg, nil
 		}
 		return nil, fmt.Errorf("config: read: %w", err)
@@ -84,12 +122,15 @@ func Load(flags CLIFlags) (*Config, error) {
 		return nil, fmt.Errorf("config: parse yaml: %w", err)
 	}
 	if len(probe) == 0 {
+		applyCLIFlags(cfg, flags)
 		return cfg, nil
 	}
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("config: parse yaml: %w", err)
 	}
+
+	applyCLIFlags(cfg, flags)
 
 	return cfg, nil
 }
