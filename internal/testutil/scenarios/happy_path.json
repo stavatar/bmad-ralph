@@ -1,0 +1,19 @@
+{
+  "name": "happy_path",
+  "steps": [
+    {
+      "type": "execute",
+      "exit_code": 0,
+      "session_id": "mock-exec-001",
+      "output_file": "",
+      "creates_commit": true
+    },
+    {
+      "type": "review",
+      "exit_code": 0,
+      "session_id": "mock-review-001",
+      "output_file": "review_clean.txt",
+      "creates_commit": false
+    }
+  ]
+}

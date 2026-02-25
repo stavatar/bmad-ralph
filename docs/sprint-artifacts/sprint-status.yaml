@@ -45,8 +45,8 @@ development_status:
   1-7-session-basic-os-exec-stdout-capture: done
   1-8-session-json-parsing-sessionresult: done
   1-9-session-resume-support: done
-  1-10-prompt-assembly-utility: backlog
-  1-11-test-infrastructure-mock-claude-mock-git: backlog
+  1-10-prompt-assembly-utility: done
+  1-11-test-infrastructure-mock-claude-mock-git: done
   1-12-walking-skeleton-minimal-end-to-end-pass: backlog
   1-13-cli-wiring-cobra-signal-handling-exit-codes: backlog
   epic-1-retrospective: optional

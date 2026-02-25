@@ -97,6 +97,14 @@ See `docs/project-context.md` for full architecture context.
 - **Test `is_error: true` from Claude CLI:** When parsing JSON with boolean error flags, add explicit test case documenting behavior when flag is true, even if current code ignores it. Documents a design decision
 - **json.Unmarshal cannot distinguish truncated JSON from non-JSON:** Both fail the same way. If spec says "truncated JSON = error", that requires heuristic detection (starts with `[`). Accept fallback behavior and document the deviation rather than adding fragile heuristics
 - **Stale API surface comments:** When adding new exported functions to a package, check existing comments that claim "ONLY entry point" or similar exclusivity. Update or remove them
+- **`text/template` `missingkey` is map-only:** `missingkey=error` option has NO effect on struct data — struct field resolution always errors on unknown fields regardless. Don't misattribute behavior in doc comments
+- **`template.Option` format:** Use `"missingkey=error"` (single string with `=`), NOT `"missingkey", "error"` (two args → panic)
+- **`strings.ReplaceAll` over `strings.Replace`:** Prefer `strings.ReplaceAll(s, old, new)` over `strings.Replace(s, old, new, -1)` — more idiomatic since Go 1.12
+- **Table-driven test function naming:** Bare function names like `TestFoo` need scenario suffix — `TestFoo_EdgeCases` or `TestFoo_TableDriven`. Standalone tests (`TestFoo_Simple`) already follow convention
+- **Discarded `_` RawResult breaks error assertions:** When testing subprocess errors, ALWAYS capture the RawResult — stderr message is in the RawResult, not in `err.Error()`. Discarding with `_` makes stderr content unverifiable. Caught in Story 1.11 review
+- **`t.Logf` vs `t.Errorf` in assertions:** `t.Logf` only logs, it does NOT fail the test. Always use `t.Errorf` or `t.Fatalf` inside assertion blocks. `t.Logf` inside an `if !condition` is a silent pass. Caught in Story 1.11 review
+- **Zero-value test naming must reflect ALL tested types:** If `TestFoo_ZeroValue` tests both `Foo` and `Bar`, split into `TestFoo_ZeroValue` + `TestBar_ZeroValue`. One test function per type per naming convention
+- **Mock JSON fidelity: include `is_error`/`subtype` control:** When mocking CLI tools that distinguish error vs success in JSON fields, expose control in the scenario struct. Hardcoded `"success"` breaks fidelity for error-path tests
 
 ## Build & CI
 
