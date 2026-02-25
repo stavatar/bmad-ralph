@@ -15,7 +15,8 @@ const (
 // All patterns are compiled at package scope via MustCompile.
 // Runner scanner uses: strings.Split(content, "\n") + regex match per line.
 var (
-	TaskOpenRegex = regexp.MustCompile(`^\s*- \[ \]`)
-	TaskDoneRegex = regexp.MustCompile(`^\s*- \[x\]`)
-	GateTagRegex  = regexp.MustCompile(`\[GATE\]`)
+	TaskOpenRegex    = regexp.MustCompile(`^\s*- \[ \]`)
+	TaskDoneRegex    = regexp.MustCompile(`^\s*- \[x\]`)
+	GateTagRegex     = regexp.MustCompile(`\[GATE\]`)
+	SourceFieldRegex = regexp.MustCompile(`^\s+source:\s+\S+#\S+`)
 )

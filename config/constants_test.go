@@ -105,3 +105,30 @@ func TestFeedbackPrefix_Value(t *testing.T) {
 		t.Errorf("FeedbackPrefix = %q, want %q", FeedbackPrefix, "> USER FEEDBACK:")
 	}
 }
+
+func TestSourceFieldRegex(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"two-space indent", "  source: stories/auth.md#AC-3", true},
+		{"four-space indent", "    source: stories/api.md#AC-1", true},
+		{"tab indent", "\tsource: story.md#SETUP", true},
+		{"no indent", "source: stories/auth.md#AC-3", false},
+		{"missing hash separator", "  source: stories/auth.md", false},
+		{"empty identifier after hash", "  source: stories/auth.md#", false},
+		{"empty line", "", false},
+		{"no source keyword", "  no source here", false},
+		{"no space after colon", "  source:stories/auth.md#AC-3", false},
+		{"capital S", "  Source: stories/auth.md#AC-3", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SourceFieldRegex.MatchString(tt.input)
+			if got != tt.want {
+				t.Errorf("SourceFieldRegex.MatchString(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}

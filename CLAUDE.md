@@ -113,6 +113,9 @@ See `docs/project-context.md` for full architecture context.
 - **Error wrapping consistency in helper functions:** ALL error returns in a function must wrap consistently with `fmt.Errorf("pkg: op: %w", err)` — don't leave the last return bare. Caught in Story 1.13 `ensureLogDir`
 - **Test `context.DeadlineExceeded` alongside `context.Canceled`:** They are distinct errors with different `errors.Is` behavior. Always test both even if architecture says one shouldn't occur — defensive coverage
 - **WSL/NTFS: `os.MkdirAll` on nonexistent root paths succeeds:** Use file-as-directory-component trick for guaranteed MkdirAll failure in tests, not `/nonexistent/...` paths
+- **New regex/constant tests go next to existing ones:** When adding a new regex pattern to `constants.go`, its test belongs in `constants_test.go` alongside the other regex tests — not in a separate file. Breaks discoverability otherwise. Caught in Story 2.1 review
+- **Duplicated content between code and docs needs sync test:** When a pattern string (like a regex) appears in both Go code and an embedded markdown doc, add a `strings.Contains` test case verifying the doc contains the exact pattern string. Prevents stale documentation
+- **Structural Rule #8 symmetry:** When testing a shared contract from both consumer packages, both test suites should verify the SAME set of markers. Asymmetric marker coverage (e.g., 8 in config, 4 in bridge) defeats the purpose of cross-package validation
 
 ## Build & CI
 
