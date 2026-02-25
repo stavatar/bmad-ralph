@@ -1,0 +1,5 @@
+[
+  {"type":"system","subtype":"init","session_id":"abc-123-def-456","tools":[],"model":"claude-sonnet-4-5-20250514"},
+  {"type":"assistant","message":{"content":[{"type":"text","text":"Working on it..."}]}},
+  {"type":"result","subtype":"success","session_id":"abc-123-def-456","result":"Implementation complete. All tests pass.","is_error":false,"duration_ms":8500,"duration_api_ms":7200,"total_cost_usd":0.03,"num_turns":3}
+]

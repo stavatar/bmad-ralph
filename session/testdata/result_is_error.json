@@ -1,0 +1,4 @@
+[
+  {"type":"system","subtype":"init","session_id":"abc-123-def-456","tools":[],"model":"claude-sonnet-4-5-20250514"},
+  {"type":"result","subtype":"error","session_id":"abc-123-def-456","result":"Error: task failed validation","is_error":true,"duration_ms":3000,"num_turns":2}
+]

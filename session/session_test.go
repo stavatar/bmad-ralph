@@ -38,6 +38,10 @@ func runTestHelper(scenario string) {
 		fmt.Fprint(os.Stdout, dir)
 	case "sleep":
 		time.Sleep(30 * time.Second)
+	case "json_success":
+		fmt.Fprint(os.Stdout, `[{"type":"system","subtype":"init","session_id":"integ-test-001","tools":[],"model":"claude-sonnet-4-5-20250514"},{"type":"result","subtype":"success","session_id":"integ-test-001","result":"Integration test output.","is_error":false,"duration_ms":1000,"num_turns":1}]`)
+	case "json_non_json":
+		fmt.Fprint(os.Stdout, "Error: not authenticated")
 	default:
 		fmt.Fprintf(os.Stderr, "unknown test helper scenario: %s\n", scenario)
 		os.Exit(1)

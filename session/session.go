@@ -50,7 +50,6 @@ type RawResult struct {
 }
 
 // Execute invokes the Claude CLI with the given options and captures output.
-// It is the ONLY exported entry point for the session package.
 func Execute(ctx context.Context, opts Options) (*RawResult, error) {
 	args := buildArgs(opts)
 

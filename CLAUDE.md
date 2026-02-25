@@ -91,6 +91,12 @@ See `docs/project-context.md` for full architecture context.
 - **Test helper `default` case required:** When using TestMain self-reexec pattern with `switch scenario`, always add `default: os.Exit(1)` — silent success on scenario typos masks test bugs
 - **Windows Go exec testing:** `go.exe` cannot execute bash scripts (`%1 is not a valid Win32 application`). Use Go test binary self-reexec pattern: `TestMain` + env var (`SESSION_TEST_HELPER`) + `os.Args[0]` as Command. Standard Go stdlib approach
 - **Windows path comparison:** Use `os.SameFile()` instead of string equality for path comparison — Windows 8.3 short names (e.g., `4689~1`) differ from long names
+- **Doc comments must match actual behavior:** If implementation deviates from spec (e.g., truncated JSON becomes fallback not error), update doc comments AND document deviation in story. Caught in Story 1.8 review
+- **No dead golden files:** Every testdata fixture must be loaded by at least one test. Dead fixtures create false confidence. Caught in Story 1.8 — result_empty.json was created but unused
+- **Remove unused test struct fields:** Orphan fields like `wantNilOK bool` in test structs indicate copy-paste remnants. Clean immediately
+- **Test `is_error: true` from Claude CLI:** When parsing JSON with boolean error flags, add explicit test case documenting behavior when flag is true, even if current code ignores it. Documents a design decision
+- **json.Unmarshal cannot distinguish truncated JSON from non-JSON:** Both fail the same way. If spec says "truncated JSON = error", that requires heuristic detection (starts with `[`). Accept fallback behavior and document the deviation rather than adding fragile heuristics
+- **Stale API surface comments:** When adding new exported functions to a package, check existing comments that claim "ONLY entry point" or similar exclusivity. Update or remove them
 
 ## Build & CI
 

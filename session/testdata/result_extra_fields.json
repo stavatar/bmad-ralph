@@ -1,0 +1,4 @@
+[
+  {"type":"system","subtype":"init","session_id":"abc-123-def-456","tools":[],"model":"claude-sonnet-4-5-20250514","new_system_field":"unexpected"},
+  {"type":"result","subtype":"success","session_id":"abc-123-def-456","result":"Done.","is_error":false,"duration_ms":5000,"num_turns":1,"brand_new_field":42,"nested_unknown":{"key":"val"}}
+]
