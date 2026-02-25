@@ -274,6 +274,47 @@ func TestExecuteAndParse_Integration(t *testing.T) {
 		}
 	})
 
+	t.Run("resume json round-trip", func(t *testing.T) {
+		t.Setenv("SESSION_TEST_HELPER", "resume_json")
+
+		start := time.Now()
+		// Resume/MaxTurns/OutputJSON are self-documenting: subprocess routes on
+		// SESSION_TEST_HELPER env var, not CLI args. Flag construction is tested
+		// by buildArgs unit tests in session_test.go.
+		raw, err := Execute(context.Background(), Options{
+			Command:    os.Args[0],
+			Dir:        dir,
+			Resume:     "abc-123",
+			MaxTurns:   10,
+			OutputJSON: true,
+		})
+		elapsed := time.Since(start)
+
+		if err != nil {
+			t.Fatalf("Execute() unexpected error: %v", err)
+		}
+
+		result, parseErr := ParseResult(raw, elapsed)
+		if parseErr != nil {
+			t.Fatalf("ParseResult() unexpected error: %v", parseErr)
+		}
+		if result == nil {
+			t.Fatal("ParseResult() returned nil result")
+		}
+		if result.SessionID != "resume-test-002" {
+			t.Errorf("SessionID = %q, want %q", result.SessionID, "resume-test-002")
+		}
+		if result.Output != "Resumed session output." {
+			t.Errorf("Output = %q, want %q", result.Output, "Resumed session output.")
+		}
+		if result.ExitCode != 0 {
+			t.Errorf("ExitCode = %d, want 0", result.ExitCode)
+		}
+		if result.Duration <= 0 {
+			t.Errorf("Duration = %v, want > 0 (measured)", result.Duration)
+		}
+	})
+
 	t.Run("non-JSON fallback round-trip", func(t *testing.T) {
 		t.Setenv("SESSION_TEST_HELPER", "json_non_json")
 

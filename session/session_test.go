@@ -40,6 +40,8 @@ func runTestHelper(scenario string) {
 		time.Sleep(30 * time.Second)
 	case "json_success":
 		fmt.Fprint(os.Stdout, `[{"type":"system","subtype":"init","session_id":"integ-test-001","tools":[],"model":"claude-sonnet-4-5-20250514"},{"type":"result","subtype":"success","session_id":"integ-test-001","result":"Integration test output.","is_error":false,"duration_ms":1000,"num_turns":1}]`)
+	case "resume_json":
+		fmt.Fprint(os.Stdout, `[{"type":"system","subtype":"init","session_id":"resume-test-002","tools":[],"model":"claude-sonnet-4-5-20250514"},{"type":"result","subtype":"success","session_id":"resume-test-002","result":"Resumed session output.","is_error":false,"duration_ms":500,"num_turns":1}]`)
 	case "json_non_json":
 		fmt.Fprint(os.Stdout, "Error: not authenticated")
 	default:
@@ -130,6 +132,48 @@ func TestBuildArgs_BasicPrompt(t *testing.T) {
 				"--resume", "session-456",
 				"--dangerously-skip-permissions",
 			},
+		},
+		{
+			name: "resume with max turns and output json",
+			opts: Options{
+				Resume:                     "abc-123",
+				MaxTurns:                   10,
+				OutputJSON:                 true,
+				DangerouslySkipPermissions: true,
+			},
+			want: []string{
+				"--resume", "abc-123",
+				"--max-turns", "10",
+				"--output-format", "json",
+				"--dangerously-skip-permissions",
+			},
+		},
+		{
+			name: "resume all fields set",
+			opts: Options{
+				Resume:                     "session-789",
+				Prompt:                     "ignored",
+				MaxTurns:                   5,
+				Model:                      "claude-sonnet-4-5-20250514",
+				OutputJSON:                 true,
+				DangerouslySkipPermissions: true,
+			},
+			want: []string{
+				"--resume", "session-789",
+				"--max-turns", "5",
+				"--model", "claude-sonnet-4-5-20250514",
+				"--output-format", "json",
+				"--dangerously-skip-permissions",
+			},
+		},
+		{
+			name: "empty resume with prompt",
+			opts: Options{
+				Resume:                     "",
+				Prompt:                     "test",
+				DangerouslySkipPermissions: true,
+			},
+			want: []string{"-p", "test", "--dangerously-skip-permissions"},
 		},
 		{
 			name: "empty prompt no resume",

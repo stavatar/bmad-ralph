@@ -44,7 +44,7 @@ development_status:
   1-6-constants-and-regex-patterns: done
   1-7-session-basic-os-exec-stdout-capture: done
   1-8-session-json-parsing-sessionresult: done
-  1-9-session-resume-support: backlog
+  1-9-session-resume-support: done
   1-10-prompt-assembly-utility: backlog
   1-11-test-infrastructure-mock-claude-mock-git: backlog
   1-12-walking-skeleton-minimal-end-to-end-pass: backlog
