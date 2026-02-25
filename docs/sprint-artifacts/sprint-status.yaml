@@ -47,8 +47,8 @@ development_status:
   1-9-session-resume-support: done
   1-10-prompt-assembly-utility: done
   1-11-test-infrastructure-mock-claude-mock-git: done
-  1-12-walking-skeleton-minimal-end-to-end-pass: backlog
-  1-13-cli-wiring-cobra-signal-handling-exit-codes: backlog
+  1-12-walking-skeleton-minimal-end-to-end-pass: done
+  1-13-cli-wiring-cobra-signal-handling-exit-codes: done
   epic-1-retrospective: optional
 
   # Epic 2: Story-to-Tasks Bridge (7 stories)

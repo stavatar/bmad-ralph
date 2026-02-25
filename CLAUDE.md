@@ -105,6 +105,14 @@ See `docs/project-context.md` for full architecture context.
 - **`t.Logf` vs `t.Errorf` in assertions:** `t.Logf` only logs, it does NOT fail the test. Always use `t.Errorf` or `t.Fatalf` inside assertion blocks. `t.Logf` inside an `if !condition` is a silent pass. Caught in Story 1.11 review
 - **Zero-value test naming must reflect ALL tested types:** If `TestFoo_ZeroValue` tests both `Foo` and `Bar`, split into `TestFoo_ZeroValue` + `TestBar_ZeroValue`. One test function per type per naming convention
 - **Mock JSON fidelity: include `is_error`/`subtype` control:** When mocking CLI tools that distinguish error vs success in JSON fields, expose control in the scenario struct. Hardcoded `"success"` breaks fidelity for error-path tests
+- **Every exported function needs dedicated error test:** If `RunReview` is exported, it needs `TestRunReview_<Scenario>` — testing it only inside another function's HappyPath leaves error paths uncovered. Caught in Story 1.12 review
+- **Duplicate test helpers are still duplication:** Identical function bodies with different names (e.g., `assertArgsContainFlag` vs `assertArgsContainStandaloneFlag`) must be merged. Caught in Story 1.12 review
+- **Template trim markers: APPLY, don't just document:** Story 1.10 documented `{{- if -}}` trim markers for blank line prevention. Story 1.12 repeated the same mistake in `execute.md`. When a learning exists, apply it proactively in new code
+- **CLI flag wiring needs dedicated test:** `TestRunCmd_Flags` checking flag existence is insufficient — must also test `buildCLIFlags` maps each flag to the CORRECT CLIFlags struct field. Field swap bugs are invisible to name-only tests. Caught in Story 1.13 review
+- **Flag default values must be tested:** When AC specifies exact defaults, add `DefValue` assertion alongside type check. Untested defaults can drift silently
+- **Error wrapping consistency in helper functions:** ALL error returns in a function must wrap consistently with `fmt.Errorf("pkg: op: %w", err)` — don't leave the last return bare. Caught in Story 1.13 `ensureLogDir`
+- **Test `context.DeadlineExceeded` alongside `context.Canceled`:** They are distinct errors with different `errors.Is` behavior. Always test both even if architecture says one shouldn't occur — defensive coverage
+- **WSL/NTFS: `os.MkdirAll` on nonexistent root paths succeeds:** Use file-as-directory-component trick for guaranteed MkdirAll failure in tests, not `/nonexistent/...` paths
 
 ## Build & CI
 
