@@ -4,7 +4,7 @@ globs: ["*_test.go", "**/*_test.go"]
 
 # Go Testing Patterns — bmad-ralph
 
-Detailed testing patterns from code reviews (Epics 1-3, 93 findings across 28 stories).
+Detailed testing patterns from code reviews (Epics 1-3, 105 findings across 30 stories).
 For core rules, see CLAUDE.md `## Testing Core Rules`.
 
 ## Test Naming
@@ -82,7 +82,7 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 ## Code Quality
 
 - Doc comment claims must match reality: "all" = verify exhaustively (recurring: 1.8, 1.10, 2.5, 3.1, 3.2, 3.7)
-- Stale doc comments after refactoring: when function behavior changes, update doc comment immediately — includes inline test comments referencing old behavior `[runner/runner.go, runner/runner_test.go]` (recurring: 3.2, 3.3, 3.8)
+- Stale doc comments after refactoring: when function behavior changes, update doc comment immediately — includes inline test comments referencing old behavior `[runner/runner.go, runner/runner_test.go, cmd/ralph/exit.go]` (recurring: 3.2, 3.3, 3.8, 3.9, 3.10)
 - Edge case tests must verify ALL struct fields, not just counts — e.g., `Text` field on matched entries `[runner/scan_test.go]`
 - Stale API surface comments: update "ONLY entry point" when adding new exports
 - Comment counts must match AC: "7 sections" when AC lists 8 = misleading `[runner/prompt_test.go]`
@@ -94,7 +94,11 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - Sentinel errors for future flow control: when an error will need `errors.Is` detection in a later story, define sentinel NOW `[runner/git.go]`
 - SRP for sentinels: place sentinel errors in the file that owns the concern — git errors in git.go, retry errors in runner.go, cross-package sentinels in config/errors.go `[runner/]`
 - No duplicate sentinels: check `config/errors.go` before adding new sentinels — reuse existing cross-package sentinels (e.g., `config.ErrMaxRetries`) instead of defining package-local copies `[runner/git.go→runner.go]`
+- Run `go fmt` after editing Go files: continuation line indentation must align per gofmt rules — Edit tool doesn't auto-format `[runner/runner.go]` (Story 3.9). Also document ALL files reformatted in File List `[runner/git.go, runner/scan_test.go]` (Story 3.10)
+- When enhancing error messages, don't drop existing inner error text assertions: if old test checked `"max retries exceeded"`, keep it alongside new message assertions `[runner/runner_test.go]` (Story 3.9)
 - Discarded `_` return value in production: document in test comment that related tests verify mock capability, not code path differentiation `[runner/runner_test.go]`
+- New sentinels must be added to existing sentinel unwrap test table (e.g., `config/errors_test.go:TestErrNoTasks_Is_WrappedUnwraps`): wrapped, double-wrapped, and cross-sentinel negative cases `[config/errors_test.go]` (Story 3.10)
+- AC references in code comments must match the actual AC they describe — wrong AC ref in comment is misleading `[runner/runner.go]` (Story 3.10)
 
 ## Template Testing
 

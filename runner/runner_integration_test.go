@@ -293,4 +293,3 @@ func TestRunReview_WalkingSkeleton_SessionFails(t *testing.T) {
 		t.Errorf("error prefix: want 'runner: review execute:', got %q", err.Error())
 	}
 }
-

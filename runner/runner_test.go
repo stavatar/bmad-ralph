@@ -307,16 +307,16 @@ func TestRunner_Execute_ErrNoTasks(t *testing.T) {
 func TestRunner_Execute_StartupErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name                         string
-		healthErr                    error
-		restoreErr                   error
-		wantErrContains              string
-		wantErrContainsIntermediate  string
-		wantErrContainsInner         string
-		wantErrIs                    error
-		wantHealthCheckCount         int
-		wantHeadCommitCount          int
-		wantRestoreCount             int
+		name                        string
+		healthErr                   error
+		restoreErr                  error
+		wantErrContains             string
+		wantErrContainsIntermediate string
+		wantErrContainsInner        string
+		wantErrIs                   error
+		wantHealthCheckCount        int
+		wantHeadCommitCount         int
+		wantRestoreCount            int
 	}{
 		{
 			name:                        "detached HEAD",
@@ -595,9 +595,9 @@ func TestRunner_Execute_CustomReviewFunc(t *testing.T) {
 	}
 }
 
-// TestRunner_Execute_ReviewFuncSequence verifies configurable sequence (findings N then clean) (AC6).
-// NOTE: Execute currently discards ReviewResult.Clean (Story 3.10 adds review_cycles counter).
-// This test verifies the ReviewFn CAN return varied sequences and is called the correct number of times.
+// TestRunner_Execute_ReviewFuncSequence verifies review cycle loop: findings 2 times then clean (AC1, AC4).
+// Review cycle loop: non-clean increments reviewCycles, clean breaks loop and task completes.
+// 1 task × 3 review cycles = 3 execute steps (each produces commit).
 func TestRunner_Execute_ReviewFuncSequence(t *testing.T) {
 	tmpDir := t.TempDir()
 	tasksPath := writeTasksFile(t, tmpDir, threeOpenTasks)
@@ -620,7 +620,8 @@ func TestRunner_Execute_ReviewFuncSequence(t *testing.T) {
 		),
 	}
 
-	cfg := testConfig(tmpDir, 3)
+	cfg := testConfig(tmpDir, 1)
+	cfg.MaxReviewIterations = 5 // won't hit max
 
 	// Configurable sequence: findings 2 times, then clean
 	callCount := 0
@@ -633,6 +634,7 @@ func TestRunner_Execute_ReviewFuncSequence(t *testing.T) {
 			if callCount <= 2 {
 				return runner.ReviewResult{Clean: false}, nil
 			}
+			// Clean review — maxIterations=1 exits outer loop after this task
 			return runner.ReviewResult{Clean: true}, nil
 		},
 		ResumeExtractFn: noopResumeExtractFn,
@@ -645,7 +647,13 @@ func TestRunner_Execute_ReviewFuncSequence(t *testing.T) {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
 	if callCount != 3 {
-		t.Errorf("review callCount = %d, want 3", callCount)
+		t.Errorf("review callCount = %d, want 3 (2 non-clean + 1 clean)", callCount)
+	}
+	if mock.HealthCheckCount != 1 {
+		t.Errorf("HealthCheckCount = %d, want 1 (startup only)", mock.HealthCheckCount)
+	}
+	if mock.HeadCommitCount != 6 {
+		t.Errorf("HeadCommitCount = %d, want 6 (3 pairs)", mock.HeadCommitCount)
 	}
 }
 
@@ -689,6 +697,204 @@ func TestRunner_Execute_ReviewFuncError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "review crashed") {
 		t.Errorf("inner error: want 'review crashed', got %q", err.Error())
+	}
+}
+
+// TestRunner_Execute_MaxReviewCyclesExhausted verifies ErrMaxReviewCycles with informative message
+// when all reviews return non-clean. Table-driven to prove configurable max (AC2, AC5).
+func TestRunner_Execute_MaxReviewCyclesExhausted(t *testing.T) {
+	tests := []struct {
+		name                 string
+		maxReviewIter        int
+		wantReviewCount      int
+		wantResumeCount      int
+		wantSleepCount       int
+		wantHeadCommitCount  int
+		wantHealthCheckCount int
+		wantCountFormat      string
+	}{
+		{
+			name:                 "max 3 default",
+			maxReviewIter:        3,
+			wantReviewCount:      3,
+			wantResumeCount:      0,
+			wantSleepCount:       0,
+			wantHeadCommitCount:  6,
+			wantHealthCheckCount: 1, // startup only
+			wantCountFormat:      "3/3",
+		},
+		{
+			name:                 "max 5 configurable",
+			maxReviewIter:        5,
+			wantReviewCount:      5,
+			wantResumeCount:      0,
+			wantSleepCount:       0,
+			wantHeadCommitCount:  10,
+			wantHealthCheckCount: 1, // startup only
+			wantCountFormat:      "5/5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			tasksPath := writeTasksFile(t, tmpDir, threeOpenTasks)
+
+			steps := make([]testutil.ScenarioStep, tt.maxReviewIter)
+			for i := range steps {
+				steps[i] = testutil.ScenarioStep{Type: "execute", ExitCode: 0, SessionID: fmt.Sprintf("rev-%03d", i+1)}
+			}
+			scenario := testutil.Scenario{Name: "max-review-cycles", Steps: steps}
+			testutil.SetupMockClaude(t, scenario)
+
+			// Each execute produces a commit (different SHAs)
+			pairs := make([][2]string, tt.maxReviewIter)
+			for i := range pairs {
+				pairs[i] = [2]string{fmt.Sprintf("%03d", i), fmt.Sprintf("%03d", i+1)}
+			}
+			mock := &testutil.MockGitClient{HeadCommits: headCommitPairs(pairs...)}
+
+			cfg := testConfig(tmpDir, 1) // single task
+			cfg.MaxReviewIterations = tt.maxReviewIter
+
+			re := &trackingResumeExtract{}
+			ts := &trackingSleep{}
+			reviewCount := 0
+
+			r := &runner.Runner{
+				Cfg:       cfg,
+				Git:       mock,
+				TasksFile: tasksPath,
+				ReviewFn: func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+					reviewCount++
+					return runner.ReviewResult{Clean: false}, nil // always non-clean
+				},
+				ResumeExtractFn: re.fn,
+				SleepFn:         ts.fn,
+				Knowledge:       &runner.NoOpKnowledgeWriter{},
+			}
+
+			err := r.Execute(context.Background())
+			if err == nil {
+				t.Fatal("Execute: want error, got nil")
+			}
+			if reviewCount != tt.wantReviewCount {
+				t.Errorf("reviewCount = %d, want %d", reviewCount, tt.wantReviewCount)
+			}
+			if !errors.Is(err, config.ErrMaxReviewCycles) {
+				t.Errorf("errors.Is(err, ErrMaxReviewCycles): want true, got false; err = %v", err)
+			}
+			if !strings.Contains(err.Error(), "review cycles exhausted") {
+				t.Errorf("error message: want 'review cycles exhausted', got %q", err.Error())
+			}
+			if !strings.Contains(err.Error(), "Task one") {
+				t.Errorf("error message: want 'Task one' task name, got %q", err.Error())
+			}
+			if !strings.Contains(err.Error(), "check logs") {
+				t.Errorf("error message: want 'check logs' suggestion, got %q", err.Error())
+			}
+			if !strings.Contains(err.Error(), tt.wantCountFormat) {
+				t.Errorf("error message: want %q count format, got %q", tt.wantCountFormat, err.Error())
+			}
+			if !strings.Contains(err.Error(), "max review cycles exceeded") {
+				t.Errorf("inner error: want 'max review cycles exceeded' sentinel text, got %q", err.Error())
+			}
+			if re.count != tt.wantResumeCount {
+				t.Errorf("ResumeExtractFn count = %d, want %d", re.count, tt.wantResumeCount)
+			}
+			if ts.count != tt.wantSleepCount {
+				t.Errorf("SleepFn count = %d, want %d", ts.count, tt.wantSleepCount)
+			}
+			if mock.HeadCommitCount != tt.wantHeadCommitCount {
+				t.Errorf("HeadCommitCount = %d, want %d", mock.HeadCommitCount, tt.wantHeadCommitCount)
+			}
+			if mock.HealthCheckCount != tt.wantHealthCheckCount {
+				t.Errorf("HealthCheckCount = %d, want %d", mock.HealthCheckCount, tt.wantHealthCheckCount)
+			}
+		})
+	}
+}
+
+// TestRunner_Execute_ReviewCyclesPerTask verifies review_cycles counter is per-task (AC3).
+// If counter persisted across tasks, task B's first non-clean would hit max (2 >= 2) → error.
+// Test proves NO error: counter resets when task A completes with clean review.
+func TestRunner_Execute_ReviewCyclesPerTask(t *testing.T) {
+	twoOpenTasks := "# Sprint Tasks\n\n- [ ] Task one\n- [ ] Task two\n"
+	taskOneDone := "# Sprint Tasks\n\n- [x] Task one\n- [ ] Task two\n"
+
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, twoOpenTasks)
+
+	// 4 execute steps: 2 per task (each produces commit)
+	scenario := testutil.Scenario{
+		Name: "review-per-task",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "pt-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "pt-002"},
+			{Type: "execute", ExitCode: 0, SessionID: "pt-003"},
+			{Type: "execute", ExitCode: 0, SessionID: "pt-004"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs(
+			[2]string{"aaa", "bbb"},
+			[2]string{"bbb", "ccc"},
+			[2]string{"ccc", "ddd"},
+			[2]string{"ddd", "eee"},
+		),
+	}
+
+	cfg := testConfig(tmpDir, 3) // generous for 2 tasks
+	cfg.MaxReviewIterations = 2  // low threshold — proves per-task reset
+
+	re := &trackingResumeExtract{}
+	ts := &trackingSleep{}
+	reviewCount := 0
+
+	r := &runner.Runner{
+		Cfg:       cfg,
+		Git:       mock,
+		TasksFile: tasksPath,
+		ReviewFn: func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+			reviewCount++
+			switch reviewCount {
+			case 1: // task A, review 1: non-clean
+				return runner.ReviewResult{Clean: false}, nil
+			case 2: // task A, review 2: clean → task A done
+				os.WriteFile(tasksPath, []byte(taskOneDone), 0644)
+				return runner.ReviewResult{Clean: true}, nil
+			case 3: // task B, review 1: non-clean
+				return runner.ReviewResult{Clean: false}, nil
+			default: // task B, review 2: clean → all done
+				os.WriteFile(tasksPath, []byte(allDoneTasks), 0644)
+				return runner.ReviewResult{Clean: true}, nil
+			}
+		},
+		ResumeExtractFn: re.fn,
+		SleepFn:         ts.fn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: want nil (per-task counter reset), got: %v", err)
+	}
+	if reviewCount != 4 {
+		t.Errorf("reviewCount = %d, want 4 (2 per task)", reviewCount)
+	}
+	if mock.HeadCommitCount != 8 {
+		t.Errorf("HeadCommitCount = %d, want 8 (4 pairs)", mock.HeadCommitCount)
+	}
+	if mock.HealthCheckCount != 1 {
+		t.Errorf("HealthCheckCount = %d, want 1 (startup only)", mock.HealthCheckCount)
+	}
+	if re.count != 0 {
+		t.Errorf("ResumeExtractFn count = %d, want 0 (no retries)", re.count)
+	}
+	if ts.count != 0 {
+		t.Errorf("SleepFn count = %d, want 0 (no backoff)", ts.count)
 	}
 }
 
@@ -754,8 +960,8 @@ func TestRunner_Execute_MutationAsymmetry(t *testing.T) {
 // =============================================================================
 
 // TestRunner_Execute_NoCommitDetected verifies that no-commit with MaxIterations=1
-// exhausts retries immediately and returns ErrMaxRetries (AC5).
-// Updated from Story 3.5: was ErrNoCommit, now retry logic wraps the no-commit path.
+// exhausts retries immediately and returns ErrMaxRetries with informative message.
+// At MaxIterations=1, emergency stop fires before resume extract or backoff sleep.
 func TestRunner_Execute_NoCommitDetected(t *testing.T) {
 	tmpDir := t.TempDir()
 	tasksPath := writeTasksFile(t, tmpDir, threeOpenTasks)
@@ -775,13 +981,16 @@ func TestRunner_Execute_NoCommitDetected(t *testing.T) {
 
 	cfg := testConfig(tmpDir, 1)
 
+	re := &trackingResumeExtract{}
+	ts := &trackingSleep{}
+
 	r := &runner.Runner{
 		Cfg:             cfg,
 		Git:             mock,
 		TasksFile:       tasksPath,
 		ReviewFn:        fatalReviewFn(t),
-		ResumeExtractFn: noopResumeExtractFn,
-		SleepFn:         noopSleepFn,
+		ResumeExtractFn: re.fn,
+		SleepFn:         ts.fn,
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
@@ -792,11 +1001,37 @@ func TestRunner_Execute_NoCommitDetected(t *testing.T) {
 	if !errors.Is(err, config.ErrMaxRetries) {
 		t.Errorf("errors.Is(err, ErrMaxRetries): want true, got false; err = %v", err)
 	}
-	if !strings.Contains(err.Error(), "runner:") {
-		t.Errorf("error prefix: want 'runner:', got %q", err.Error())
+
+	// Message assertions (AC2: informative stop message)
+	if !strings.Contains(err.Error(), "execute attempts exhausted") {
+		t.Errorf("error message: want 'execute attempts exhausted', got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "1/1") {
+		t.Errorf("error message: want '1/1' count format, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "Task one") {
+		t.Errorf("error message: want 'Task one' task name, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "check logs") {
+		t.Errorf("error message: want 'check logs' suggestion, got %q", err.Error())
 	}
 	if !strings.Contains(err.Error(), "max retries exceeded") {
-		t.Errorf("inner error: want 'max retries exceeded', got %q", err.Error())
+		t.Errorf("inner error: want 'max retries exceeded' sentinel text, got %q", err.Error())
+	}
+
+	// Tracking assertions: emergency stop fires before resume extract at MaxIterations=1
+	if re.count != 0 {
+		t.Errorf("ResumeExtractFn count = %d, want 0 (emergency stop before RE)", re.count)
+	}
+	if ts.count != 0 {
+		t.Errorf("SleepFn count = %d, want 0 (no backoff sleep)", ts.count)
+	}
+	if mock.HeadCommitCount != 2 {
+		t.Errorf("HeadCommitCount = %d, want 2 (before+after)", mock.HeadCommitCount)
+	}
+	// 1 startup HealthCheck only
+	if mock.HealthCheckCount != 1 {
+		t.Errorf("HealthCheckCount = %d, want 1 (startup only)", mock.HealthCheckCount)
 	}
 }
 
@@ -1114,69 +1349,108 @@ func TestRunner_Execute_CounterPerTask(t *testing.T) {
 	}
 }
 
-// TestRunner_Execute_MaxRetriesExhausted verifies ErrMaxRetries when all
-// attempts produce no-commit (AC5).
+// TestRunner_Execute_MaxRetriesExhausted verifies ErrMaxRetries with informative message
+// when all attempts produce no-commit. Table-driven to prove configurable max (AC3).
 func TestRunner_Execute_MaxRetriesExhausted(t *testing.T) {
-	tmpDir := t.TempDir()
-	tasksPath := writeTasksFile(t, tmpDir, threeOpenTasks)
-
-	scenario := testutil.Scenario{
-		Name: "max-retries",
-		Steps: []testutil.ScenarioStep{
-			{Type: "execute", ExitCode: 0, SessionID: "max-001"},
-			{Type: "execute", ExitCode: 0, SessionID: "max-002"},
-			{Type: "execute", ExitCode: 0, SessionID: "max-003"},
+	tests := []struct {
+		name                 string
+		maxIter              int
+		wantResumeCount      int
+		wantSleepCount       int
+		wantHeadCommitCount  int
+		wantHealthCheckCount int
+		wantCountFormat      string
+	}{
+		{
+			name:                 "max 3 default",
+			maxIter:              3,
+			wantResumeCount:      2,
+			wantSleepCount:       2,
+			wantHeadCommitCount:  6,
+			wantHealthCheckCount: 3, // 1 startup + 2 retry RecoverDirtyState
+			wantCountFormat:      "3/3",
+		},
+		{
+			// AC3: proves stop does NOT trigger at 3 or 4 (4 resume extracts = loop ran through attempts 1-4)
+			name:                 "max 5 configurable",
+			maxIter:              5,
+			wantResumeCount:      4,
+			wantSleepCount:       4,
+			wantHeadCommitCount:  10,
+			wantHealthCheckCount: 5, // 1 startup + 4 retry RecoverDirtyState
+			wantCountFormat:      "5/5",
 		},
 	}
-	testutil.SetupMockClaude(t, scenario)
 
-	// All attempts: same HEAD (no commit)
-	mock := &testutil.MockGitClient{
-		HeadCommits: []string{"aaa", "aaa", "aaa", "aaa", "aaa", "aaa"},
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			tasksPath := writeTasksFile(t, tmpDir, threeOpenTasks)
 
-	cfg := testConfig(tmpDir, 3)
+			steps := make([]testutil.ScenarioStep, tt.maxIter)
+			for i := range steps {
+				steps[i] = testutil.ScenarioStep{Type: "execute", ExitCode: 0, SessionID: fmt.Sprintf("max-%03d", i+1)}
+			}
+			scenario := testutil.Scenario{Name: "max-retries", Steps: steps}
+			testutil.SetupMockClaude(t, scenario)
 
-	re := &trackingResumeExtract{}
-	ts := &trackingSleep{}
+			// 2 HeadCommits (before+after) per attempt, all same SHA (no commit)
+			headCommits := make([]string, tt.maxIter*2)
+			for i := range headCommits {
+				headCommits[i] = "aaa"
+			}
+			mock := &testutil.MockGitClient{HeadCommits: headCommits}
 
-	r := &runner.Runner{
-		Cfg:             cfg,
-		Git:             mock,
-		TasksFile:       tasksPath,
-		ReviewFn:        fatalReviewFn(t),
-		ResumeExtractFn: re.fn,
-		SleepFn:         ts.fn,
-		Knowledge:       &runner.NoOpKnowledgeWriter{},
-	}
+			cfg := testConfig(tmpDir, tt.maxIter)
 
-	err := r.Execute(context.Background())
-	if err == nil {
-		t.Fatal("Execute: want error, got nil")
-	}
-	if !errors.Is(err, config.ErrMaxRetries) {
-		t.Errorf("errors.Is(err, ErrMaxRetries): want true, got false; err = %v", err)
-	}
-	if !strings.Contains(err.Error(), "runner:") {
-		t.Errorf("error prefix: want 'runner:', got %q", err.Error())
-	}
-	if !strings.Contains(err.Error(), "max retries exceeded") {
-		t.Errorf("inner error: want 'max retries exceeded', got %q", err.Error())
-	}
+			re := &trackingResumeExtract{}
+			ts := &trackingSleep{}
 
-	// AC5: ResumeExtractFn called MaxIterations-1 times (last attempt returns before RE)
-	if re.count != 2 {
-		t.Errorf("ResumeExtractFn count = %d, want 2 (MaxIterations-1)", re.count)
-	}
-	if ts.count != 2 {
-		t.Errorf("SleepFn count = %d, want 2", ts.count)
-	}
-	if mock.HeadCommitCount != 6 {
-		t.Errorf("HeadCommitCount = %d, want 6", mock.HeadCommitCount)
-	}
-	// 1 initial + 2 RecoverDirtyState (retries 1,2 only; retry 3 returns before RDS)
-	if mock.HealthCheckCount != 3 {
-		t.Errorf("HealthCheckCount = %d, want 3", mock.HealthCheckCount)
+			r := &runner.Runner{
+				Cfg:             cfg,
+				Git:             mock,
+				TasksFile:       tasksPath,
+				ReviewFn:        fatalReviewFn(t),
+				ResumeExtractFn: re.fn,
+				SleepFn:         ts.fn,
+				Knowledge:       &runner.NoOpKnowledgeWriter{},
+			}
+
+			err := r.Execute(context.Background())
+			if err == nil {
+				t.Fatal("Execute: want error, got nil")
+			}
+			if !errors.Is(err, config.ErrMaxRetries) {
+				t.Errorf("errors.Is(err, ErrMaxRetries): want true, got false; err = %v", err)
+			}
+			if !strings.Contains(err.Error(), "execute attempts exhausted") {
+				t.Errorf("error message: want 'execute attempts exhausted', got %q", err.Error())
+			}
+			if !strings.Contains(err.Error(), "Task one") {
+				t.Errorf("error message: want 'Task one' task name, got %q", err.Error())
+			}
+			if !strings.Contains(err.Error(), "check logs") {
+				t.Errorf("error message: want 'check logs' suggestion, got %q", err.Error())
+			}
+			if !strings.Contains(err.Error(), tt.wantCountFormat) {
+				t.Errorf("error message: want %q count format, got %q", tt.wantCountFormat, err.Error())
+			}
+			if !strings.Contains(err.Error(), "max retries exceeded") {
+				t.Errorf("inner error: want 'max retries exceeded' sentinel text, got %q", err.Error())
+			}
+			if re.count != tt.wantResumeCount {
+				t.Errorf("ResumeExtractFn count = %d, want %d", re.count, tt.wantResumeCount)
+			}
+			if ts.count != tt.wantSleepCount {
+				t.Errorf("SleepFn count = %d, want %d", ts.count, tt.wantSleepCount)
+			}
+			if mock.HeadCommitCount != tt.wantHeadCommitCount {
+				t.Errorf("HeadCommitCount = %d, want %d", mock.HeadCommitCount, tt.wantHeadCommitCount)
+			}
+			if mock.HealthCheckCount != tt.wantHealthCheckCount {
+				t.Errorf("HealthCheckCount = %d, want %d", mock.HealthCheckCount, tt.wantHealthCheckCount)
+			}
+		})
 	}
 }
 
@@ -1582,6 +1856,10 @@ func TestRunner_Execute_ExitErrorWithParseFailure(t *testing.T) {
 	if !errors.Is(err, config.ErrMaxRetries) {
 		t.Errorf("errors.Is(err, ErrMaxRetries): want true, got false; err = %v", err)
 	}
+	// Informative message present even on exit-error retry path
+	if !strings.Contains(err.Error(), "execute attempts exhausted") {
+		t.Errorf("error message: want 'execute attempts exhausted', got %q", err.Error())
+	}
 
 	// Retry still proceeded despite parse failure
 	if re.count != 1 {
@@ -1664,17 +1942,17 @@ func TestRunner_Execute_EmptySessionIDField(t *testing.T) {
 // TestResumeExtraction_Scenarios verifies ResumeExtraction behavior via table-driven tests.
 func TestResumeExtraction_Scenarios(t *testing.T) {
 	tests := []struct {
-		name                    string
-		sessionID               string
-		scenarioSteps           []testutil.ScenarioStep
-		knowledgeErr            error
-		wantErr                 bool
-		wantErrContains         string
-		wantErrContainsInner    string
-		wantWriteProgressCount  int
-		wantSessionInvoked      bool
-		checkArgs               func(t *testing.T, args []string)
-		checkData               func(t *testing.T, kw *trackingKnowledgeWriter)
+		name                   string
+		sessionID              string
+		scenarioSteps          []testutil.ScenarioStep
+		knowledgeErr           error
+		wantErr                bool
+		wantErrContains        string
+		wantErrContainsInner   string
+		wantWriteProgressCount int
+		wantSessionInvoked     bool
+		checkArgs              func(t *testing.T, args []string)
+		checkData              func(t *testing.T, kw *trackingKnowledgeWriter)
 	}{
 		{
 			name:      "valid session ID",

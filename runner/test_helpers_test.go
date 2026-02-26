@@ -139,10 +139,11 @@ func argValueAfterFlag(args []string, flag string) string {
 // ClaudeCommand is set to os.Args[0] (self-reexec mock pattern).
 func testConfig(tmpDir string, maxIter int) *config.Config {
 	return &config.Config{
-		ClaudeCommand: os.Args[0],
-		MaxTurns:      5,
-		MaxIterations: maxIter,
-		ProjectRoot:   tmpDir,
+		ClaudeCommand:       os.Args[0],
+		MaxTurns:            5,
+		MaxIterations:       maxIter,
+		MaxReviewIterations: 3,
+		ProjectRoot:         tmpDir,
 	}
 }
 

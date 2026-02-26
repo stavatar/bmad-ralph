@@ -18,7 +18,7 @@ const (
 
 // exitCode maps an error to the appropriate process exit code.
 // nil → 0, ExitCodeError → its Code, GateDecision(quit) → 2,
-// context.Canceled → 3, everything else → 4.
+// context.Canceled → 3, ErrMaxRetries/ErrMaxReviewCycles → 1, everything else → 4.
 func exitCode(err error) int {
 	if err == nil {
 		return exitSuccess
@@ -38,6 +38,10 @@ func exitCode(err error) int {
 
 	if errors.Is(err, context.Canceled) {
 		return exitInterrupted
+	}
+
+	if errors.Is(err, config.ErrMaxRetries) || errors.Is(err, config.ErrMaxReviewCycles) {
+		return exitPartial
 	}
 
 	return exitFatal

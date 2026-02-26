@@ -104,10 +104,11 @@ type Runner struct {
 
 // Execute runs the main task loop: startup recovery, then iterate over tasks.
 // Startup: recovers dirty working tree (RecoverDirtyState), non-dirty health errors abort.
-// Each iteration: read tasks → scan → assemble prompt → session.Execute →
-// check commit → retry on no-commit or non-zero exit up to Cfg.MaxIterations
-// per task → review on success. Loops up to Cfg.MaxIterations task-processing
-// cycles in the outer loop.
+// Each iteration: read tasks → scan → assemble prompt → review cycle loop
+// (execute retry → review → check Clean, stop at MaxReviewIterations (FR24)).
+// Execute retry: session.Execute → check commit → retry on no-commit or non-zero
+// exit up to Cfg.MaxIterations per review cycle.
+// Loops up to Cfg.MaxIterations task-processing cycles in the outer loop.
 // Returns nil when all tasks are complete. Returns error on any failure.
 func (r *Runner) Execute(ctx context.Context) error {
 	// recovered bool unused — no startup logging plumbing yet
@@ -156,79 +157,92 @@ func (r *Runner) Execute(ctx context.Context) error {
 			DangerouslySkipPermissions: true,
 		}
 
-		// Per-task retry loop (AC4: counter resets per task)
-		executeAttempts := 0
+		// Review cycle loop: per-task counter, resets when clean (AC3, AC4)
+		reviewCycles := 0
 		for {
-			headBefore, err := r.Git.HeadCommit(ctx)
-			if err != nil {
-				return fmt.Errorf("runner: head commit before: %w", err)
-			}
+			// Per-review-cycle retry loop: executeAttempts resets each cycle
+			executeAttempts := 0
+			for {
+				headBefore, err := r.Git.HeadCommit(ctx)
+				if err != nil {
+					return fmt.Errorf("runner: head commit before: %w", err)
+				}
 
-			start := time.Now()
-			raw, execErr := session.Execute(ctx, opts)
-			elapsed := time.Since(start)
+				start := time.Now()
+				raw, execErr := session.Execute(ctx, opts)
+				elapsed := time.Since(start)
 
-			needsRetry := false
-			var sessionID string
+				needsRetry := false
+				var sessionID string
 
-			if execErr != nil {
-				// Distinguish retryable (exit error) from fatal (binary not found, ctx cancel)
-				var exitErr *exec.ExitError
-				if errors.As(execErr, &exitErr) {
-					needsRetry = true // AC6: non-zero exit triggers retry
-					// Try to parse for sessionID despite error
-					if sr, parseErr := session.ParseResult(raw, elapsed); parseErr == nil {
-						sessionID = sr.SessionID
+				if execErr != nil {
+					// Distinguish retryable (exit error) from fatal (binary not found, ctx cancel)
+					var exitErr *exec.ExitError
+					if errors.As(execErr, &exitErr) {
+						needsRetry = true // AC6: non-zero exit triggers retry
+						// Try to parse for sessionID despite error
+						if sr, parseErr := session.ParseResult(raw, elapsed); parseErr == nil {
+							sessionID = sr.SessionID
+						}
+					} else {
+						return fmt.Errorf("runner: execute: %w", execErr)
 					}
 				} else {
-					return fmt.Errorf("runner: execute: %w", execErr)
-				}
-			} else {
-				sr, parseErr := session.ParseResult(raw, elapsed)
-				if parseErr != nil {
-					return fmt.Errorf("runner: parse result: %w", parseErr)
-				}
-				sessionID = sr.SessionID
+					sr, parseErr := session.ParseResult(raw, elapsed)
+					if parseErr != nil {
+						return fmt.Errorf("runner: parse result: %w", parseErr)
+					}
+					sessionID = sr.SessionID
 
-				headAfter, err := r.Git.HeadCommit(ctx)
-				if err != nil {
-					return fmt.Errorf("runner: head commit after: %w", err)
+					headAfter, err := r.Git.HeadCommit(ctx)
+					if err != nil {
+						return fmt.Errorf("runner: head commit after: %w", err)
+					}
+
+					if headBefore == headAfter {
+						needsRetry = true // AC1: no commit
+					}
 				}
 
-				if headBefore == headAfter {
-					needsRetry = true // AC1: no commit
+				if needsRetry {
+					executeAttempts++ // AC2: increment counter
+					if executeAttempts >= r.Cfg.MaxIterations {
+						return fmt.Errorf("runner: execute attempts exhausted (%d/%d) for %q (check logs for details): %w",
+							executeAttempts, r.Cfg.MaxIterations, result.OpenTasks[0].Text, config.ErrMaxRetries)
+					}
+					// Resume-extraction: capture WIP state before retry
+					if reErr := r.ResumeExtractFn(ctx, rc, sessionID); reErr != nil {
+						return fmt.Errorf("runner: retry: resume extract: %w", reErr)
+					}
+					// Dirty state recovery before retry
+					if _, recErr := RecoverDirtyState(ctx, r.Git); recErr != nil {
+						return fmt.Errorf("runner: retry: recover: %w", recErr)
+					}
+					// Exponential backoff (NFR12): 1s, 2s, 4s...
+					if ctx.Err() != nil {
+						return fmt.Errorf("runner: retry: %w", ctx.Err())
+					}
+					backoff := time.Duration(1<<uint(executeAttempts-1)) * time.Second
+					r.SleepFn(backoff)
+					continue
 				}
+
+				// Success: commit detected — exit retry loop
+				break
 			}
 
-			if needsRetry {
-				executeAttempts++ // AC2: increment counter
-				if executeAttempts >= r.Cfg.MaxIterations {
-					return fmt.Errorf("runner: %w", config.ErrMaxRetries) // AC5
-				}
-				// Resume-extraction: capture WIP state before retry
-				if reErr := r.ResumeExtractFn(ctx, rc, sessionID); reErr != nil {
-					return fmt.Errorf("runner: retry: resume extract: %w", reErr)
-				}
-				// Dirty state recovery before retry
-				if _, recErr := RecoverDirtyState(ctx, r.Git); recErr != nil {
-					return fmt.Errorf("runner: retry: recover: %w", recErr)
-				}
-				// Exponential backoff (NFR12): 1s, 2s, 4s...
-				if ctx.Err() != nil {
-					return fmt.Errorf("runner: retry: %w", ctx.Err())
-				}
-				backoff := time.Duration(1<<uint(executeAttempts-1)) * time.Second
-				r.SleepFn(backoff)
-				continue
+			rr, err := r.ReviewFn(ctx, rc)
+			if err != nil {
+				return fmt.Errorf("runner: review: %w", err)
 			}
-
-			// Success: commit detected — AC3: counter resets implicitly
-			// (inner loop breaks, outer iteration ends, next starts with executeAttempts=0)
-			break
-		}
-
-		if _, err := r.ReviewFn(ctx, rc); err != nil {
-			return fmt.Errorf("runner: review: %w", err)
+			if rr.Clean {
+				break // AC4: clean review exits review cycle loop
+			}
+			reviewCycles++
+			if reviewCycles >= r.Cfg.MaxReviewIterations {
+				return fmt.Errorf("runner: review cycles exhausted (%d/%d) for %q (check logs for details): %w",
+					reviewCycles, r.Cfg.MaxReviewIterations, result.OpenTasks[0].Text, config.ErrMaxReviewCycles)
+			}
 		}
 	}
 

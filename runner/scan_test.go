@@ -61,12 +61,12 @@ func TestScanTasks_OpenTasks(t *testing.T) {
 
 func TestScanTasks_DoneTasks(t *testing.T) {
 	tests := []struct {
-		name         string
-		content      string
-		wantDone     int
-		wantOpen     int
-		wantDoneNil  bool
-		wantOpenNil  bool
+		name        string
+		content     string
+		wantDone    int
+		wantOpen    int
+		wantDoneNil bool
+		wantOpenNil bool
 	}{
 		{
 			"single done task",

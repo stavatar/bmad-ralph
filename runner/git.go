@@ -25,7 +25,6 @@ var (
 	ErrMergeInProgress = errors.New("git: merge or rebase in progress")
 )
 
-
 // ExecGitClient implements GitClient (HealthCheck, HeadCommit, RestoreClean)
 // by shelling out to the git binary. Dir is set to config.ProjectRoot by the caller.
 type ExecGitClient struct {

@@ -29,10 +29,12 @@ func TestExitCode_TableDriven(t *testing.T) {
 		{"double wrapped ExitCodeError", fmt.Errorf("ralph: %w", fmt.Errorf("runner: %w", &config.ExitCodeError{Code: 2, Message: "quit"})), exitUserQuit},
 		// context.DeadlineExceeded — architecture says no timeouts, maps to exitFatal defensively
 		{"context.DeadlineExceeded", context.DeadlineExceeded, exitFatal},
-		// Sentinel errors — map to exitFatal
-		{"ErrMaxRetries", config.ErrMaxRetries, exitFatal},
+		// Sentinel errors
+		{"ErrMaxRetries", config.ErrMaxRetries, exitPartial},
 		{"ErrNoTasks", config.ErrNoTasks, exitFatal},
-		{"wrapped ErrMaxRetries", fmt.Errorf("runner: %w", config.ErrMaxRetries), exitFatal},
+		{"wrapped ErrMaxRetries", fmt.Errorf("runner: %w", config.ErrMaxRetries), exitPartial},
+		{"ErrMaxReviewCycles", config.ErrMaxReviewCycles, exitPartial},
+		{"wrapped ErrMaxReviewCycles", fmt.Errorf("runner: %w", config.ErrMaxReviewCycles), exitPartial},
 	}
 
 	for _, tt := range tests {

@@ -18,10 +18,13 @@ func TestErrNoTasks_Is_WrappedUnwraps(t *testing.T) {
 		{"ErrNoTasks unwraps", fmt.Errorf("config: scan: %w", ErrNoTasks), ErrNoTasks, true},
 		{"ErrMaxRetries unwraps", fmt.Errorf("runner: loop: %w", ErrMaxRetries), ErrMaxRetries, true},
 		{"ErrNoTasks wrapping pattern", fmt.Errorf("config: load: %w", ErrNoTasks), ErrNoTasks, true},
+		{"ErrMaxReviewCycles unwraps", fmt.Errorf("runner: review: %w", ErrMaxReviewCycles), ErrMaxReviewCycles, true},
 		{"ErrNoTasks is not ErrMaxRetries", ErrNoTasks, ErrMaxRetries, false},
+		{"ErrMaxReviewCycles is not ErrMaxRetries", ErrMaxReviewCycles, ErrMaxRetries, false},
 		{"wrapped sentinel not other sentinel", fmt.Errorf("wrap: %w", ErrNoTasks), ErrMaxRetries, false},
 		{"ErrNoTasks double-wrapped", fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", ErrNoTasks)), ErrNoTasks, true},
 		{"ErrMaxRetries double-wrapped", fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", ErrMaxRetries)), ErrMaxRetries, true},
+		{"ErrMaxReviewCycles double-wrapped", fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", ErrMaxReviewCycles)), ErrMaxReviewCycles, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
