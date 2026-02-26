@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bmad-ralph/bmad-ralph/config"
+	"github.com/bmad-ralph/bmad-ralph/internal/testutil"
 	"github.com/bmad-ralph/bmad-ralph/runner"
 )
 
@@ -194,6 +195,27 @@ func (tk *trackingKnowledgeWriter) WriteProgress(_ context.Context, data runner.
 	tk.writeProgressCount++
 	tk.writeProgressData = append(tk.writeProgressData, data)
 	return tk.writeProgressErr
+}
+
+// setupRunnerIntegration creates a Runner with all fields initialized for integration tests.
+// All 7 Execute integration tests share identical boilerplate — helper is DRY-justified.
+// Defaults: cleanReviewFn, noopResumeExtractFn, noopSleepFn, NoOpKnowledgeWriter.
+// Callers override ReviewFn/ResumeExtractFn/SleepFn as needed after construction.
+func setupRunnerIntegration(t *testing.T, tmpDir, tasksContent string, scenario testutil.Scenario, git *testutil.MockGitClient) (*runner.Runner, string) {
+	t.Helper()
+	tasksPath := writeTasksFile(t, tmpDir, tasksContent)
+	_, stateDir := testutil.SetupMockClaude(t, scenario)
+	cfg := testConfig(tmpDir, 3) // default MaxIterations=3; callers adjust via r.Cfg.MaxIterations
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             git,
+		TasksFile:       tasksPath,
+		ReviewFn:        cleanReviewFn,
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+	return r, stateDir
 }
 
 // reviewAndMarkDoneFn returns a ReviewFunc that increments counter (if non-nil)

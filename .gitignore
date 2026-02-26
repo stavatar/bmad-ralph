@@ -36,3 +36,4 @@ Thumbs.db
 !.claude/critical-rules.md
 !.claude/rules/
 !.claude/commands/
+!.claude/hooks/

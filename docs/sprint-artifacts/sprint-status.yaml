@@ -16,9 +16,7 @@
 #   - ready-for-dev: Draft approved and story context created by *story-ready
 #   - in-progress: Developer actively working on implementation by *dev-story
 #   - review: Implementation complete, ready for review by *code-review
-#   - done: Story completed by *story-done
-#
-# Retrospective Status:
+#   - done: Story completed by *story-dol
 #   - optional: Can be completed but not required
 #   - completed: Retrospective has been done by *retrospective
 #
@@ -63,19 +61,19 @@ development_status:
   epic-2-retrospective: done
 
   # Epic 3: Core Execution Loop (11 stories)
-  epic-3: in-progress
+  epic-3: done
   3-1-execute-prompt-template: done
   3-2-sprint-tasks-scanner: done
   3-3-gitclient-interface-execgitclient: done
   3-4-mockgitclient-dirty-state-recovery: done
   3-5-runner-loop-skeleton-happy-path: done
-  3-6-runner-retry-logic: review
+  3-6-runner-retry-logic: done
   3-7-resume-extraction-integration: done
   3-8-runner-resume-on-re-run: done
   3-9-emergency-stop-execute-attempts-exhausted: done
   3-10-emergency-stop-review-cycles-trigger-point: done
-  3-11-runner-integration-test: backlog
-  epic-3-retrospective: optional
+  3-11-runner-integration-test: done
+  epic-3-retrospective: done
 
   # Epic 4: Code Review Pipeline (8 stories)
   epic-4: backlog

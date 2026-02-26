@@ -3,7 +3,7 @@
 ## Knowledge Extraction Protocol (MANDATORY after every code-review)
 
 After every code-review workflow completes, you MUST update these three locations:
-1. **`.claude/rules/go-testing-patterns.md`** — new testing/code quality patterns discovered
+1. **`.claude/rules/<topic>.md`** — new testing/code quality patterns (see index in `go-testing-patterns.md`)
 2. **`.claude/rules/wsl-ntfs.md`** — new WSL/NTFS-specific patterns (if any)
 3. **`memory/MEMORY.md`** — project status (completed story, next story, metrics update)
 
@@ -21,8 +21,8 @@ See `docs/project-context.md` for full architecture context.
 
 ## Critical: Line Endings
 
-- Write/Edit tools on NTFS create CRLF. Run `sed -i 's/\r$//' <file>` after every Write
-- `.gitattributes` enforces LF on git add, but disk files remain CRLF until converted
+- CRLF auto-fixed by PostToolUse hook (`.claude/hooks/fix-crlf.sh`) — no manual sed needed
+- `.gitattributes` enforces LF on git add, but disk files remain CRLF until hook fixes them
 - Verify: `file <filename>` — must say "ASCII text" not "with CRLF line terminators"
 
 ## Critical: .gitignore
@@ -67,7 +67,7 @@ See `docs/project-context.md` for full architecture context.
 - Every exported function needs dedicated `Test<Func>_<Scenario>` error test
 - Don't add scope/conditionals not mandated by AC — extra code = untested risk
 - Doc comment claims must match reality — verify "all"/"every" assertions
-- See `.claude/rules/go-testing-patterns.md` for 50+ detailed patterns
+- See `.claude/rules/go-testing-patterns.md` for index of 88 detailed patterns (6 topic files)
 
 ## Build & CI
 

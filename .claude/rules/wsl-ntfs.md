@@ -11,7 +11,7 @@ globs: ["**/*.go", "Makefile", "*.sh"]
 
 ## File System
 
-- Write/Edit tools on NTFS create CRLF: always `sed -i 's/\r$//'` after every Write
+- Write/Edit tools on NTFS create CRLF: auto-fixed by PostToolUse hook (`.claude/hooks/fix-crlf.sh`)
 - `.gitattributes` enforces LF on git add, disk files remain CRLF until converted
 - `os.MkdirAll` on nonexistent root paths succeeds on WSL — use file-as-directory trick for failure tests
 - `os.SameFile()` for path comparison — Windows 8.3 short names differ from long names
