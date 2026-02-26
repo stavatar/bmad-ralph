@@ -18,7 +18,7 @@
 ### Story 4.1: Review Prompt Template
 
 **User Story:**
-Как система, я хочу review-промпт который инструктирует Claude Code запустить 4 параллельных sub-агента через Task tool, верифицировать их findings, и записать результат, чтобы обеспечить качественное ревью кода.
+Как система, я хочу review-промпт который инструктирует Claude Code запустить 5 параллельных sub-агентов через Task tool, верифицировать их findings, и записать результат, чтобы обеспечить качественное ревью кода.
 
 **Acceptance Criteria:**
 
@@ -26,8 +26,8 @@
 Scenario: Review prompt assembled with all required sections
   Given config with project root and sprint-tasks path
   When review prompt is assembled via text/template + strings.Replace
-  Then prompt instructs Claude to launch 4 sub-agents via Task tool (FR15)
-  And prompt names sub-agents: quality, implementation, simplification, test-coverage
+  Then prompt instructs Claude to launch 5 sub-agents via Task tool (FR15)
+  And prompt names sub-agents: quality, implementation, simplification, design-principles, test-coverage
   And prompt instructs verification of sub-agent findings (FR16)
   And prompt instructs CONFIRMED/FALSE POSITIVE classification
   And prompt instructs severity assignment: CRITICAL/HIGH/MEDIUM/LOW
@@ -76,37 +76,42 @@ Scenario: Adversarial golden file — false positive resistance
 ### Story 4.2: Sub-Agent Prompts
 
 **User Story:**
-Как review-сессия, я хочу 4 специализированных sub-agent промпта с чёткими scope boundaries, чтобы каждый агент проверял свою зону ответственности без overlap.
+Как review-сессия, я хочу 5 специализированных sub-agent промптов с чёткими scope boundaries, чтобы каждый агент проверял свою зону ответственности без overlap.
 
 **Acceptance Criteria:**
 
 ```gherkin
-Scenario: Four sub-agent prompts exist with explicit scopes
+Scenario: Five sub-agent prompts exist with explicit scopes
   Given runner/prompts/agents/ directory
-  Then contains quality.md, implementation.md, simplification.md, test-coverage.md
+  Then contains quality.md, implementation.md, simplification.md, design-principles.md, test-coverage.md
   And each prompt defines explicit SCOPE section (what this agent checks)
   And each prompt defines explicit OUT-OF-SCOPE section (what other agents check)
-  And no overlap between 4 agents' scope boundaries
+  And no overlap between 5 agents' scope boundaries
 
 Scenario: Quality agent scope
   Given quality.md prompt
   Then scope includes: bugs, security issues, performance problems, error handling
-  And out-of-scope: AC compliance (implementation), code simplicity (simplification), test coverage (test-coverage)
+  And out-of-scope: AC compliance (implementation), code simplicity (simplification), DRY/KISS/SRP (design-principles), test coverage (test-coverage)
 
 Scenario: Implementation agent scope
   Given implementation.md prompt
   Then scope includes: acceptance criteria compliance, feature completeness, requirement satisfaction
-  And out-of-scope: code quality (quality), simplification opportunities (simplification), test coverage (test-coverage)
+  And out-of-scope: code quality (quality), simplification (simplification), DRY/KISS/SRP (design-principles), test coverage (test-coverage)
 
 Scenario: Simplification agent scope
   Given simplification.md prompt
-  Then scope includes: code readability, unnecessary complexity, over-engineering, dead code
-  And out-of-scope: bugs (quality), AC compliance (implementation), test coverage (test-coverage)
+  Then scope includes: code readability, verbose constructs, dead code, simpler alternatives
+  And out-of-scope: bugs (quality), AC compliance (implementation), DRY/KISS/SRP (design-principles), test coverage (test-coverage)
+
+Scenario: Design-principles agent scope
+  Given design-principles.md prompt
+  Then scope includes: DRY (code/logic duplication across functions/files), KISS (architectural over-engineering, unnecessary abstractions), SRP (functions/types with multiple responsibilities)
+  And out-of-scope: bugs (quality), AC compliance (implementation), expression-level simplicity (simplification), test coverage (test-coverage)
 
 Scenario: Test-coverage agent scope
   Given test-coverage.md prompt
   Then scope includes: test coverage for each AC (FR37 ATDD), no skip/xfail (FR38), test quality
-  And out-of-scope: code bugs (quality), AC compliance (implementation), code simplicity (simplification)
+  And out-of-scope: code bugs (quality), AC compliance (implementation), code simplicity (simplification), DRY/KISS/SRP (design-principles)
 
 Scenario: Golden file snapshot per agent
   Given each sub-agent prompt
@@ -121,9 +126,9 @@ Scenario: Adversarial test — agent detects planted issue in its scope
 ```
 
 **Technical Notes:**
-- Architecture: `runner/prompts/agents/{quality,implementation,simplification,test-coverage}.md`
+- Architecture: `runner/prompts/agents/{quality,implementation,simplification,design-principles,test-coverage}.md`
 - Sub-agents are Claude Task tool agents INSIDE the review session — not separate Ralph processes
-- Explicit scope boundaries = Devil's Advocate finding from epics elicitation (4 sub-agents overlap concern)
+- Explicit scope boundaries = Devil's Advocate finding from epics elicitation (5 sub-agents overlap concern)
 - FR37 (ATDD) enforced by test-coverage agent specifically
 - FR38 (zero skip) enforced by test-coverage agent specifically
 - Each prompt is `go:embed` in runner package
@@ -176,7 +181,7 @@ Scenario: Review outcome determined from file state
 
 **Technical Notes:**
 - From Ralph's perspective: `session.Execute(ctx, reviewOpts)` — one call
-- Claude inside session orchestrates 4 sub-agents via Task tool (not Ralph's concern)
+- Claude inside session orchestrates 5 sub-agents via Task tool (not Ralph's concern)
 - Review outcome determined by checking: (1) sprint-tasks.md for `[x]`, (2) review-findings.md existence/content
 - **File-state-to-ReviewResult logic** lives in this story as `determineReviewOutcome(projectRoot, taskLine) (ReviewResult, error)` function in runner
 - **Current task identification:** `determineCurrentTask(sprintTasksPath) (taskLine, error)` parses sprint-tasks.md, finds first `- [ ]` (same logic as scanner Story 3.2 but returns the task line string for `[x]` check after review)
@@ -196,7 +201,7 @@ Scenario: Review outcome determined from file state
 
 ```gherkin
 Scenario: Each finding verified independently
-  Given 4 sub-agents produced findings
+  Given 5 sub-agents produced findings
   When review session verifies each finding
   Then each classified as CONFIRMED or FALSE POSITIVE (FR16)
   And verification happens BEFORE writing to review-findings.md
@@ -503,14 +508,14 @@ Scenario: Manual prompt validation checklist documented
 | Story | Title | FRs | Files | AC Count |
 |:-----:|-------|:---:|:-----:|:--------:|
 | 4.1 | Review Prompt Template | FR13,FR15,FR16,FR17 | 2 + testdata | 5 |
-| 4.2 | Sub-Agent Prompts | FR15,FR37,FR38 | 4 + testdata | 7 |
+| 4.2 | Sub-Agent Prompts | FR15,FR37,FR38 | 5 + testdata | 8 |
 | 4.3 | Review Session Logic | FR13,FR14 | 1 | 5 |
 | 4.4 | Findings Verification Logic | FR16 | review.md section | 4 |
 | 4.5 | Clean Review Handling | FR17 | review.md section | 5 |
 | 4.6 | Findings Write | FR17 | review.md section | 4 |
 | 4.7 | Execute→Review Loop + Fix Cycle | FR18,FR18a,FR24 | 1 | 8 |
 | 4.8 | Review Integration Test | — | 1 + scenarios + checklist | 8 |
-| | **Total** | **FR13-FR18a,FR37,FR38** | | **~46** |
+| | **Total** | **FR13-FR18a,FR37,FR38** | | **~47** |
 
 **FR Coverage:** FR13 (4.1, 4.3), FR14 (4.3), FR15 (4.1, 4.2), FR16 (4.1, 4.4), FR17 (4.1, 4.5, 4.6), FR18 (4.7), FR18a (4.7), FR37 (4.2), FR38 (4.2)
 

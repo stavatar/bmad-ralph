@@ -16,7 +16,7 @@
 #   - ready-for-dev: Draft approved and story context created by *story-ready
 #   - in-progress: Developer actively working on implementation by *dev-story
 #   - review: Implementation complete, ready for review by *code-review
-#   - done: Story completed by *story-dol
+#   - done: Story completed by *story-dolпер
 #   - optional: Can be completed but not required
 #   - completed: Retrospective has been done by *retrospective
 #
