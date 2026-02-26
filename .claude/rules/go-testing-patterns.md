@@ -4,7 +4,7 @@ globs: ["*_test.go", "**/*_test.go"]
 
 # Go Testing Patterns — bmad-ralph
 
-Detailed testing patterns from code reviews (Epics 1-2, 40 findings across 20 stories).
+Detailed testing patterns from code reviews (Epics 1-3, 47 findings across 21 stories).
 For core rules, see CLAUDE.md `## Testing Core Rules`.
 
 ## Test Naming
@@ -30,6 +30,7 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - Count assertions: `strings.Count >= N`, not just `strings.Contains` for multiple instances `[bridge/]`
 - Substring assertions must be section-specific: `"acceptance criter"` is ambiguous, use unique substring
 - Assertion uniqueness: verify substring doesn't exist in base content before claiming unique to enrichment
+- Symmetric negative checks: if TestA checks `"__X__" absent`, TestB (opposite scenario) must too `[runner/prompt_test.go]`
 - ExtraCheck must cover ALL scenario-specific markers, not just one of many `[bridge/bridge_test.go]`
 - Full output comparison when mock returns deterministic content — substrings miss corruption
 - Separator assertions: `"\n\n---\n\n"` not generic `"---"` `[bridge/bridge_test.go]`
@@ -63,8 +64,10 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 
 ## Code Quality
 
-- Doc comment claims must match reality: "all" = verify exhaustively (recurring: 1.8, 1.10, 2.5)
+- Doc comment claims must match reality: "all" = verify exhaustively (recurring: 1.8, 1.10, 2.5, 3.1)
 - Stale API surface comments: update "ONLY entry point" when adding new exports
+- Comment counts must match AC: "7 sections" when AC lists 8 = misleading `[runner/prompt_test.go]`
+- After removing a placeholder from a code path, update doc comments referencing it `[config/prompt.go]`
 - `strings.ReplaceAll` over `strings.Replace(s, old, new, -1)` since Go 1.12
 - Group related constants into `const (...)` block, not separate `const` lines
 - Remove unused test struct fields immediately (copy-paste remnants)
@@ -75,6 +78,8 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - `template.Option("missingkey=error")` format: single string with `=`, not two args (panic)
 - Template trim markers `{{- if -}}` must be APPLIED, not just documented `[bridge/prompts/]`
 - Negative examples (WRONG format) need dedicated test assertions `[bridge/prompt_test.go]`
+- Mutually exclusive conditionals: use `{{if}}/{{else}}/{{end}}`, NOT `{{if}}/{{end}} {{if not}}/{{end}}` `[runner/prompts/execute.md]`
+- Full template rewrite = test ALL conditional paths (incl. pre-existing ones like GatesEnabled) `[runner/prompt_test.go]`
 
 ## Review Process
 

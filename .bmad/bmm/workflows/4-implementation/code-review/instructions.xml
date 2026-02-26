@@ -173,4 +173,34 @@
     </output>
   </step>
 
+  <step n="6" goal="Extract knowledge from review findings">
+    <critical>MANDATORY — do NOT skip this step. Knowledge extraction ensures review patterns accumulate across stories.</critical>
+
+    <action>Analyze all findings from this review for reusable patterns</action>
+
+    <action>Update `.claude/rules/go-testing-patterns.md`:
+      - Add new testing/code quality patterns discovered in this review
+      - Include file:line citations where applicable
+      - Update finding count in header if changed
+      - Do NOT duplicate existing patterns — check before adding
+    </action>
+
+    <action>Update `.claude/rules/wsl-ntfs.md`:
+      - Add new WSL/NTFS-specific patterns if any were discovered
+      - Skip if no WSL/NTFS findings in this review
+    </action>
+
+    <action>Update `memory/MEMORY.md`:
+      - Update project status (completed story, next story)
+      - Update review metrics (findings count, severity breakdown)
+      - Keep under 200 lines
+    </action>
+
+    <output>**📚 Knowledge Extracted**
+      - Testing patterns: {{new_patterns_count}} new entries
+      - WSL/NTFS patterns: {{wsl_patterns_count}} new entries
+      - Memory updated: project status, metrics
+    </output>
+  </step>
+
 </workflow>
