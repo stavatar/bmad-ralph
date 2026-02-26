@@ -65,7 +65,7 @@ development_status:
   # Epic 3: Core Execution Loop (11 stories)
   epic-3: in-progress
   3-1-execute-prompt-template: done
-  3-2-sprint-tasks-scanner: backlog
+  3-2-sprint-tasks-scanner: done
   3-3-gitclient-interface-execgitclient: backlog
   3-4-mockgitclient-dirty-state-recovery: backlog
   3-5-runner-loop-skeleton-happy-path: backlog

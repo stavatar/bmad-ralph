@@ -4,7 +4,7 @@ globs: ["*_test.go", "**/*_test.go"]
 
 # Go Testing Patterns — bmad-ralph
 
-Detailed testing patterns from code reviews (Epics 1-3, 47 findings across 21 stories).
+Detailed testing patterns from code reviews (Epics 1-3, 53 findings across 22 stories).
 For core rules, see CLAUDE.md `## Testing Core Rules`.
 
 ## Test Naming
@@ -31,6 +31,7 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - Substring assertions must be section-specific: `"acceptance criter"` is ambiguous, use unique substring
 - Assertion uniqueness: verify substring doesn't exist in base content before claiming unique to enrichment
 - Symmetric negative checks: if TestA checks `"__X__" absent`, TestB (opposite scenario) must too `[runner/prompt_test.go]`
+- Symmetric slice nil checks: open-only tests must verify `DoneTasks == nil`, done-only must verify `OpenTasks == nil` `[runner/scan_test.go]`
 - ExtraCheck must cover ALL scenario-specific markers, not just one of many `[bridge/bridge_test.go]`
 - Full output comparison when mock returns deterministic content — substrings miss corruption
 - Separator assertions: `"\n\n---\n\n"` not generic `"---"` `[bridge/bridge_test.go]`
@@ -40,7 +41,7 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 
 ## Test Structure
 
-- No standalone duplicates of table cases — merge into existing table (recurring: Stories 1.3, 1.4, 2.3)
+- No standalone duplicates of table cases — merge into existing table (recurring: Stories 1.3, 1.4, 2.3, 3.2)
 - All-fields comprehensive test when testing multi-field override patterns `[config/config_test.go]`
 - Test ALL code path combinations: don't leave diagonal gaps in branch matrices `[config/]`
 - Parallel regex test symmetry: paired patterns need symmetric test cases `[config/constants_test.go]`
@@ -64,7 +65,9 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 
 ## Code Quality
 
-- Doc comment claims must match reality: "all" = verify exhaustively (recurring: 1.8, 1.10, 2.5, 3.1)
+- Doc comment claims must match reality: "all" = verify exhaustively (recurring: 1.8, 1.10, 2.5, 3.1, 3.2)
+- Stale doc comments after refactoring: when function behavior changes, update doc comment immediately `[runner/runner.go]`
+- Edge case tests must verify ALL struct fields, not just counts — e.g., `Text` field on matched entries `[runner/scan_test.go]`
 - Stale API surface comments: update "ONLY entry point" when adding new exports
 - Comment counts must match AC: "7 sections" when AC lists 8 = misleading `[runner/prompt_test.go]`
 - After removing a placeholder from a code path, update doc comments referencing it `[config/prompt.go]`

@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/bmad-ralph/bmad-ralph/config"
@@ -33,8 +32,8 @@ type RunConfig struct {
 	TasksFile string // path to sprint-tasks.md
 }
 
-// RunOnce executes a single task from the sprint-tasks file.
-// It reads the tasks file, finds the first open task, assembles the prompt,
+// RunOnce executes a single iteration of the task loop.
+// It reads the tasks file, scans for task state via ScanTasks, assembles the prompt,
 // invokes Claude via session.Execute, parses the result, and checks for commits.
 func RunOnce(ctx context.Context, rc RunConfig) error {
 	content, err := os.ReadFile(rc.TasksFile)
@@ -42,16 +41,13 @@ func RunOnce(ctx context.Context, rc RunConfig) error {
 		return fmt.Errorf("runner: read tasks: %w", err)
 	}
 
-	lines := strings.Split(string(content), "\n")
-	var taskLine string
-	for _, line := range lines {
-		if config.TaskOpenRegex.MatchString(line) {
-			taskLine = line
-			break
-		}
+	result, scanErr := ScanTasks(string(content))
+	if scanErr != nil {
+		return scanErr
 	}
-	if taskLine == "" {
-		return fmt.Errorf("runner: scan tasks: %w", config.ErrNoTasks)
+	if !result.HasOpenTasks() {
+		// All tasks completed — caller (Run loop) handles exit
+		return nil
 	}
 
 	if err := rc.Git.HealthCheck(ctx); err != nil {

@@ -151,13 +151,13 @@ func TestRunOnce_WalkingSkeleton_GitHealthCheckFails(t *testing.T) {
 	}
 }
 
-func TestRunOnce_WalkingSkeleton_NoOpenTasks(t *testing.T) {
+func TestRunOnce_WalkingSkeleton_NoTaskMarkers(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// All tasks completed
-	allDone := "# Sprint Tasks\n\n## Epic 1: Foundation\n\n- [x] Already done\n"
+	// No task markers at all — triggers ErrNoTasks
+	noMarkers := "# Sprint Tasks\n\nNo tasks here\n"
 	tasksPath := filepath.Join(tmpDir, "sprint-tasks.md")
-	if err := os.WriteFile(tasksPath, []byte(allDone), 0644); err != nil {
+	if err := os.WriteFile(tasksPath, []byte(noMarkers), 0644); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
 
@@ -179,6 +179,34 @@ func TestRunOnce_WalkingSkeleton_NoOpenTasks(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "runner:") {
 		t.Errorf("error prefix: want 'runner:', got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "no tasks found") {
+		t.Errorf("error message: want 'no tasks found', got %q", err.Error())
+	}
+}
+
+func TestRunOnce_WalkingSkeleton_AllTasksDone(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Only done tasks — all tasks completed, expect nil (success)
+	allDone := "# Sprint Tasks\n\n- [x] Already done\n"
+	tasksPath := filepath.Join(tmpDir, "sprint-tasks.md")
+	if err := os.WriteFile(tasksPath, []byte(allDone), 0644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	cfg := &config.Config{
+		ClaudeCommand: "unused",
+		MaxTurns:      5,
+		ProjectRoot:   tmpDir,
+	}
+
+	git := &mockGitClient{hasNewCommit: true}
+	rc := RunConfig{Cfg: cfg, Git: git, TasksFile: tasksPath}
+
+	err := RunOnce(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("RunOnce: expected nil (all done), got error: %v", err)
 	}
 }
 
