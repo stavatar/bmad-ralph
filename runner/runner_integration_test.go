@@ -1,6 +1,6 @@
 //go:build integration
 
-package runner
+package runner_test
 
 import (
 	"context"
@@ -12,22 +12,21 @@ import (
 
 	"github.com/bmad-ralph/bmad-ralph/config"
 	"github.com/bmad-ralph/bmad-ralph/internal/testutil"
+	"github.com/bmad-ralph/bmad-ralph/runner"
 )
 
-// mockGitClient is a test-local stub implementing GitClient.
-// Real MockGitClient deferred to Story 3.3 when GitClient interface is fully defined.
-type mockGitClient struct {
-	healthCheckErr  error
-	hasNewCommit    bool
-	hasNewCommitErr error
-}
-
-func (m *mockGitClient) HealthCheck(ctx context.Context) error {
-	return m.healthCheckErr
-}
-
-func (m *mockGitClient) HasNewCommit(ctx context.Context) (bool, error) {
-	return m.hasNewCommit, m.hasNewCommitErr
+// copyFixtureToDir copies a testdata fixture into tmpDir and returns the destination path.
+func copyFixtureToDir(t *testing.T, tmpDir, fixture string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", fixture))
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", fixture, err)
+	}
+	dst := filepath.Join(tmpDir, fixture)
+	if err := os.WriteFile(dst, data, 0644); err != nil {
+		t.Fatalf("write fixture %s: %v", fixture, err)
+	}
+	return dst
 }
 
 func TestMain(m *testing.M) {
@@ -40,15 +39,7 @@ func TestMain(m *testing.M) {
 func TestRunOnce_WalkingSkeleton_HappyPath(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Copy fixture to temp dir
-	fixtureData, err := os.ReadFile("testdata/sprint-tasks-basic.md")
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
-	tasksPath := filepath.Join(tmpDir, "sprint-tasks.md")
-	if err := os.WriteFile(tasksPath, fixtureData, 0644); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
+	tasksPath := copyFixtureToDir(t, tmpDir, "sprint-tasks-basic.md")
 
 	// Setup mock Claude scenario: execute (exit 0) + review (exit 0)
 	scenario := testutil.Scenario{
@@ -66,13 +57,13 @@ func TestRunOnce_WalkingSkeleton_HappyPath(t *testing.T) {
 		ProjectRoot:   tmpDir,
 	}
 
-	git := &mockGitClient{hasNewCommit: true}
-	rc := RunConfig{Cfg: cfg, Git: git, TasksFile: tasksPath}
+	git := &testutil.MockGitClient{HeadCommits: []string{"abc123"}}
+	rc := runner.RunConfig{Cfg: cfg, Git: git, TasksFile: tasksPath}
 
 	ctx := context.Background()
 
 	// Execute
-	if err := RunOnce(ctx, rc); err != nil {
+	if err := runner.RunOnce(ctx, rc); err != nil {
 		t.Fatalf("RunOnce: unexpected error: %v", err)
 	}
 
@@ -96,7 +87,7 @@ func TestRunOnce_WalkingSkeleton_HappyPath(t *testing.T) {
 	}
 
 	// Review
-	if err := RunReview(ctx, rc); err != nil {
+	if err := runner.RunReview(ctx, rc); err != nil {
 		t.Fatalf("RunReview: unexpected error: %v", err)
 	}
 
@@ -120,14 +111,7 @@ func TestRunOnce_WalkingSkeleton_HappyPath(t *testing.T) {
 func TestRunOnce_WalkingSkeleton_GitHealthCheckFails(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	fixtureData, err := os.ReadFile("testdata/sprint-tasks-basic.md")
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
-	tasksPath := filepath.Join(tmpDir, "sprint-tasks.md")
-	if err := os.WriteFile(tasksPath, fixtureData, 0644); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
+	tasksPath := copyFixtureToDir(t, tmpDir, "sprint-tasks-basic.md")
 
 	// No mock Claude needed — should fail before session.Execute
 	cfg := &config.Config{
@@ -136,10 +120,10 @@ func TestRunOnce_WalkingSkeleton_GitHealthCheckFails(t *testing.T) {
 		ProjectRoot:   tmpDir,
 	}
 
-	git := &mockGitClient{healthCheckErr: errors.New("git not found")}
-	rc := RunConfig{Cfg: cfg, Git: git, TasksFile: tasksPath}
+	git := &testutil.MockGitClient{HealthCheckErrors: []error{errors.New("git not found")}}
+	rc := runner.RunConfig{Cfg: cfg, Git: git, TasksFile: tasksPath}
 
-	err = RunOnce(context.Background(), rc)
+	err := runner.RunOnce(context.Background(), rc)
 	if err == nil {
 		t.Fatal("RunOnce: expected error, got nil")
 	}
@@ -167,10 +151,10 @@ func TestRunOnce_WalkingSkeleton_NoTaskMarkers(t *testing.T) {
 		ProjectRoot:   tmpDir,
 	}
 
-	git := &mockGitClient{hasNewCommit: true}
-	rc := RunConfig{Cfg: cfg, Git: git, TasksFile: tasksPath}
+	git := &testutil.MockGitClient{HeadCommits: []string{"abc123"}}
+	rc := runner.RunConfig{Cfg: cfg, Git: git, TasksFile: tasksPath}
 
-	err := RunOnce(context.Background(), rc)
+	err := runner.RunOnce(context.Background(), rc)
 	if err == nil {
 		t.Fatal("RunOnce: expected error, got nil")
 	}
@@ -201,10 +185,10 @@ func TestRunOnce_WalkingSkeleton_AllTasksDone(t *testing.T) {
 		ProjectRoot:   tmpDir,
 	}
 
-	git := &mockGitClient{hasNewCommit: true}
-	rc := RunConfig{Cfg: cfg, Git: git, TasksFile: tasksPath}
+	git := &testutil.MockGitClient{HeadCommits: []string{"abc123"}}
+	rc := runner.RunConfig{Cfg: cfg, Git: git, TasksFile: tasksPath}
 
-	err := RunOnce(context.Background(), rc)
+	err := runner.RunOnce(context.Background(), rc)
 	if err != nil {
 		t.Fatalf("RunOnce: expected nil (all done), got error: %v", err)
 	}
@@ -213,14 +197,7 @@ func TestRunOnce_WalkingSkeleton_AllTasksDone(t *testing.T) {
 func TestRunOnce_WalkingSkeleton_SessionFails(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	fixtureData, err := os.ReadFile("testdata/sprint-tasks-basic.md")
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
-	tasksPath := filepath.Join(tmpDir, "sprint-tasks.md")
-	if err := os.WriteFile(tasksPath, fixtureData, 0644); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
+	tasksPath := copyFixtureToDir(t, tmpDir, "sprint-tasks-basic.md")
 
 	// Mock Claude exits with code 1
 	scenario := testutil.Scenario{
@@ -237,10 +214,10 @@ func TestRunOnce_WalkingSkeleton_SessionFails(t *testing.T) {
 		ProjectRoot:   tmpDir,
 	}
 
-	git := &mockGitClient{hasNewCommit: true}
-	rc := RunConfig{Cfg: cfg, Git: git, TasksFile: tasksPath}
+	git := &testutil.MockGitClient{HeadCommits: []string{"abc123"}}
+	rc := runner.RunConfig{Cfg: cfg, Git: git, TasksFile: tasksPath}
 
-	err = RunOnce(context.Background(), rc)
+	err := runner.RunOnce(context.Background(), rc)
 	if err == nil {
 		t.Fatal("RunOnce: expected error, got nil")
 	}
@@ -258,10 +235,10 @@ func TestRunOnce_WalkingSkeleton_TasksFileNotFound(t *testing.T) {
 		ProjectRoot:   tmpDir,
 	}
 
-	git := &mockGitClient{hasNewCommit: true}
-	rc := RunConfig{Cfg: cfg, Git: git, TasksFile: filepath.Join(tmpDir, "nonexistent.md")}
+	git := &testutil.MockGitClient{HeadCommits: []string{"abc123"}}
+	rc := runner.RunConfig{Cfg: cfg, Git: git, TasksFile: filepath.Join(tmpDir, "nonexistent.md")}
 
-	err := RunOnce(context.Background(), rc)
+	err := runner.RunOnce(context.Background(), rc)
 	if err == nil {
 		t.Fatal("RunOnce: expected error, got nil")
 	}
@@ -273,19 +250,12 @@ func TestRunOnce_WalkingSkeleton_TasksFileNotFound(t *testing.T) {
 	}
 }
 
-func TestRunOnce_WalkingSkeleton_HasNewCommitFails(t *testing.T) {
+func TestRunOnce_WalkingSkeleton_HeadCommitFails(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	fixtureData, err := os.ReadFile("testdata/sprint-tasks-basic.md")
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
-	tasksPath := filepath.Join(tmpDir, "sprint-tasks.md")
-	if err := os.WriteFile(tasksPath, fixtureData, 0644); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
+	tasksPath := copyFixtureToDir(t, tmpDir, "sprint-tasks-basic.md")
 
-	// Mock Claude succeeds so RunOnce reaches HasNewCommit
+	// Mock Claude succeeds so RunOnce reaches HeadCommit
 	scenario := testutil.Scenario{
 		Name: "walking-skeleton-commit-fail",
 		Steps: []testutil.ScenarioStep{
@@ -300,15 +270,15 @@ func TestRunOnce_WalkingSkeleton_HasNewCommitFails(t *testing.T) {
 		ProjectRoot:   tmpDir,
 	}
 
-	git := &mockGitClient{hasNewCommitErr: errors.New("git diff failed")}
-	rc := RunConfig{Cfg: cfg, Git: git, TasksFile: tasksPath}
+	git := &testutil.MockGitClient{HeadCommitErrors: []error{errors.New("git diff failed")}}
+	rc := runner.RunConfig{Cfg: cfg, Git: git, TasksFile: tasksPath}
 
-	err = RunOnce(context.Background(), rc)
+	err := runner.RunOnce(context.Background(), rc)
 	if err == nil {
 		t.Fatal("RunOnce: expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "runner: check commit:") {
-		t.Errorf("error prefix: want 'runner: check commit:', got %q", err.Error())
+	if !strings.Contains(err.Error(), "runner: head commit:") {
+		t.Errorf("error prefix: want 'runner: head commit:', got %q", err.Error())
 	}
 	if !strings.Contains(err.Error(), "git diff failed") {
 		t.Errorf("error cause: want 'git diff failed', got %q", err.Error())
@@ -333,10 +303,10 @@ func TestRunReview_WalkingSkeleton_SessionFails(t *testing.T) {
 		ProjectRoot:   tmpDir,
 	}
 
-	git := &mockGitClient{hasNewCommit: true}
-	rc := RunConfig{Cfg: cfg, Git: git, TasksFile: filepath.Join(tmpDir, "unused.md")}
+	git := &testutil.MockGitClient{HeadCommits: []string{"abc123"}}
+	rc := runner.RunConfig{Cfg: cfg, Git: git, TasksFile: filepath.Join(tmpDir, "unused.md")}
 
-	err := RunReview(context.Background(), rc)
+	err := runner.RunReview(context.Background(), rc)
 	if err == nil {
 		t.Fatal("RunReview: expected error, got nil")
 	}

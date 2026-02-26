@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -17,14 +18,6 @@ var executeTemplate string
 //go:embed prompts/review.md
 var reviewTemplate string
 
-// GitClient abstracts git operations for the runner.
-// Consumer-side interface per naming convention (interfaces in consumer package).
-// Story 3.3 extends to full interface + ExecGitClient implementation.
-type GitClient interface {
-	HealthCheck(ctx context.Context) error
-	HasNewCommit(ctx context.Context) (bool, error)
-}
-
 // RunConfig passes dependencies to runner functions.
 type RunConfig struct {
 	Cfg       *config.Config
@@ -34,7 +27,7 @@ type RunConfig struct {
 
 // RunOnce executes a single iteration of the task loop.
 // It reads the tasks file, scans for task state via ScanTasks, assembles the prompt,
-// invokes Claude via session.Execute, parses the result, and checks for commits.
+// invokes Claude via session.Execute, parses the result, and retrieves HEAD commit SHA.
 func RunOnce(ctx context.Context, rc RunConfig) error {
 	content, err := os.ReadFile(rc.TasksFile)
 	if err != nil {
@@ -86,11 +79,28 @@ func RunOnce(ctx context.Context, rc RunConfig) error {
 		return fmt.Errorf("runner: parse result: %w", err)
 	}
 
-	if _, err := rc.Git.HasNewCommit(ctx); err != nil {
-		return fmt.Errorf("runner: check commit: %w", err)
+	if _, err := rc.Git.HeadCommit(ctx); err != nil {
+		return fmt.Errorf("runner: head commit: %w", err)
 	}
 
 	return nil
+}
+
+// RecoverDirtyState checks git health and attempts recovery if dirty tree detected.
+// Returns true if recovery was performed, false if repo was clean.
+// Returns error only if health check fails for non-dirty reasons or recovery fails.
+func RecoverDirtyState(ctx context.Context, git GitClient) (bool, error) {
+	err := git.HealthCheck(ctx)
+	if err == nil {
+		return false, nil
+	}
+	if !errors.Is(err, ErrDirtyTree) {
+		return false, fmt.Errorf("runner: dirty state recovery: %w", err)
+	}
+	if restoreErr := git.RestoreClean(ctx); restoreErr != nil {
+		return false, fmt.Errorf("runner: dirty state recovery: %w", restoreErr)
+	}
+	return true, nil
 }
 
 // Run is the main entry point for the execute-review loop.

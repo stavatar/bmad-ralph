@@ -66,8 +66,8 @@ development_status:
   epic-3: in-progress
   3-1-execute-prompt-template: done
   3-2-sprint-tasks-scanner: done
-  3-3-gitclient-interface-execgitclient: backlog
-  3-4-mockgitclient-dirty-state-recovery: backlog
+  3-3-gitclient-interface-execgitclient: done
+  3-4-mockgitclient-dirty-state-recovery: done
   3-5-runner-loop-skeleton-happy-path: backlog
   3-6-runner-retry-logic: backlog
   3-7-resume-extraction-integration: backlog

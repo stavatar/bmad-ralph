@@ -4,7 +4,7 @@ globs: ["*_test.go", "**/*_test.go"]
 
 # Go Testing Patterns — bmad-ralph
 
-Detailed testing patterns from code reviews (Epics 1-3, 53 findings across 22 stories).
+Detailed testing patterns from code reviews (Epics 1-3, 66 findings across 24 stories).
 For core rules, see CLAUDE.md `## Testing Core Rules`.
 
 ## Test Naming
@@ -24,6 +24,7 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - Every exported function needs dedicated error test — not just tested inside HappyPath `[session/]`
 - Discarded `_` RawResult kills stderr assertions: ALWAYS capture when testing errors `[session/]`
 - When string matching on errors is unavoidable (yaml.v3), add justification comment `[config/config.go]`
+- Inner error verification: when wrapping errors, test BOTH prefix (`"runner: dirty state recovery:"`) AND inner cause (`"restore failed"`) `[runner/runner_test.go]`
 
 ## Assertions
 
@@ -38,6 +39,7 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - Cross-validate related counts: `sourceCount == taskOpenCount` not just `> 0`
 - Guard between-steps mutations: `if modified == original { t.Fatal }` prevents silent no-ops
 - Verify flag values AND presence: `--max-turns` needs value check ("5"), not just exists
+- Call count assertions: table-driven tests should include `wantXxxCount` fields for mock call tracking `[runner/runner_test.go]`
 
 ## Test Structure
 
@@ -56,6 +58,10 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - Fixture copy boilerplate → extract helper on 2nd occurrence: `copyFixtureToScenario(t, name)`
 - `Scenario.Name` field: always set on `testutil.Scenario` structs for debugging
 - No dead golden files: every testdata fixture must be loaded by at least one test `[session/]`
+- Extract `runGit(t, dir, args...)` helper for real-git tests — avoids 3+ copies of closure `[runner/git_test.go]`
+- Never hardcode default branch name ("master"): use `git rev-parse --abbrev-ref HEAD` after init `[runner/git_test.go]`
+- Test ALL indicator file paths: if code checks MERGE_HEAD + rebase-merge + rebase-apply, test at least 2 `[runner/git_test.go]`
+- Beyond-length behavior symmetry: if HeadCommit tests beyond-length, HealthCheck must too — test all mock sequence edge cases `[testutil/mock_git_test.go]`
 
 ## CLI Testing
 
@@ -66,7 +72,7 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 ## Code Quality
 
 - Doc comment claims must match reality: "all" = verify exhaustively (recurring: 1.8, 1.10, 2.5, 3.1, 3.2)
-- Stale doc comments after refactoring: when function behavior changes, update doc comment immediately `[runner/runner.go]`
+- Stale doc comments after refactoring: when function behavior changes, update doc comment immediately `[runner/runner.go]` (recurring: 3.2, 3.3)
 - Edge case tests must verify ALL struct fields, not just counts — e.g., `Text` field on matched entries `[runner/scan_test.go]`
 - Stale API surface comments: update "ONLY entry point" when adding new exports
 - Comment counts must match AC: "7 sections" when AC lists 8 = misleading `[runner/prompt_test.go]`
@@ -74,6 +80,7 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - `strings.ReplaceAll` over `strings.Replace(s, old, new, -1)` since Go 1.12
 - Group related constants into `const (...)` block, not separate `const` lines
 - Remove unused test struct fields immediately (copy-paste remnants)
+- Error wrapping consistency: ALL error returns in a function must wrap with same prefix pattern `[runner/runner.go]` (recurring: 3.4)
 
 ## Template Testing
 
