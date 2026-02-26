@@ -69,9 +69,9 @@ development_status:
   3-3-gitclient-interface-execgitclient: done
   3-4-mockgitclient-dirty-state-recovery: done
   3-5-runner-loop-skeleton-happy-path: done
-  3-6-runner-retry-logic: backlog
-  3-7-resume-extraction-integration: backlog
-  3-8-runner-resume-on-re-run: backlog
+  3-6-runner-retry-logic: review
+  3-7-resume-extraction-integration: done
+  3-8-runner-resume-on-re-run: done
   3-9-emergency-stop-execute-attempts-exhausted: backlog
   3-10-emergency-stop-review-cycles-trigger-point: backlog
   3-11-runner-integration-test: backlog

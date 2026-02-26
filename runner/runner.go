@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -19,6 +20,11 @@ var executeTemplate string
 //go:embed prompts/review.md
 var reviewTemplate string
 
+// ErrNoCommit indicates that a Claude session completed but HEAD did not change.
+// Currently unused in production — Story 3.6 replaced direct return with boolean retry logic.
+// Retained as exported sentinel for potential errors.Is detection in future stories.
+var ErrNoCommit = errors.New("no commit detected")
+
 // ReviewResult holds the outcome of a review step.
 type ReviewResult struct {
 	Clean bool // true when review found no actionable findings
@@ -28,10 +34,53 @@ type ReviewResult struct {
 // Default: defaultReviewStub. Epic 4 replaces with real review logic.
 type ReviewFunc func(ctx context.Context, rc RunConfig) (ReviewResult, error)
 
+// ResumeExtractFunc is the signature for resume-extraction called before retry.
+// The sessionID parameter comes from SessionResult.SessionID (empty string if not available).
+// Default: closure over ResumeExtraction in Run(). Tests inject custom implementations.
+type ResumeExtractFunc func(ctx context.Context, rc RunConfig, sessionID string) error
+
 // defaultReviewStub returns a clean review result.
 // TODO(epic-4): replace with real review logic
 func defaultReviewStub(_ context.Context, _ RunConfig) (ReviewResult, error) {
 	return ReviewResult{Clean: true}, nil
+}
+
+// ResumeExtraction invokes claude --resume to capture WIP progress from an
+// interrupted execute session. Returns nil when sessionID is empty (nothing to resume).
+func ResumeExtraction(ctx context.Context, cfg *config.Config, kw KnowledgeWriter, sessionID string) error {
+	if sessionID == "" {
+		return nil
+	}
+
+	opts := session.Options{
+		Command:                    cfg.ClaudeCommand,
+		Dir:                        cfg.ProjectRoot,
+		Resume:                     sessionID,
+		MaxTurns:                   cfg.MaxTurns,
+		Model:                      cfg.ModelExecute,
+		OutputJSON:                 true,
+		DangerouslySkipPermissions: true,
+	}
+
+	start := time.Now()
+	raw, execErr := session.Execute(ctx, opts)
+	elapsed := time.Since(start)
+
+	if execErr != nil {
+		return fmt.Errorf("runner: resume extraction: execute: %w", execErr)
+	}
+
+	sr, parseErr := session.ParseResult(raw, elapsed)
+	if parseErr != nil {
+		return fmt.Errorf("runner: resume extraction: parse: %w", parseErr)
+	}
+
+	// TaskDescription left empty — no plumbing from caller yet (Epic 6 may add)
+	if err := kw.WriteProgress(ctx, ProgressData{SessionID: sr.SessionID}); err != nil {
+		return fmt.Errorf("runner: resume extraction: write progress: %w", err)
+	}
+
+	return nil
 }
 
 // RunConfig passes dependencies to runner functions.
@@ -44,19 +93,26 @@ type RunConfig struct {
 // Runner orchestrates the execute-review loop with injectable dependencies.
 // Public API: Run() creates a Runner internally. Tests construct Runner directly.
 type Runner struct {
-	Cfg       *config.Config
-	Git       GitClient
-	TasksFile string     // path to sprint-tasks.md
-	ReviewFn  ReviewFunc // called after each successful execute with commit
+	Cfg             *config.Config
+	Git             GitClient
+	TasksFile       string              // path to sprint-tasks.md
+	ReviewFn        ReviewFunc          // called after each successful execute with commit
+	ResumeExtractFn ResumeExtractFunc   // called before retry to extract session context
+	SleepFn         func(time.Duration) // injectable sleep for testable backoff
+	Knowledge       KnowledgeWriter     // records execution progress; no-op in Epic 3
 }
 
-// Execute runs the main task loop: health check, then iterate over tasks.
+// Execute runs the main task loop: startup recovery, then iterate over tasks.
+// Startup: recovers dirty working tree (RecoverDirtyState), non-dirty health errors abort.
 // Each iteration: read tasks → scan → assemble prompt → session.Execute →
-// check commit → review. Loops up to Cfg.MaxIterations times.
+// check commit → retry on no-commit or non-zero exit up to Cfg.MaxIterations
+// per task → review on success. Loops up to Cfg.MaxIterations task-processing
+// cycles in the outer loop.
 // Returns nil when all tasks are complete. Returns error on any failure.
 func (r *Runner) Execute(ctx context.Context) error {
-	if err := r.Git.HealthCheck(ctx); err != nil {
-		return fmt.Errorf("runner: health check: %w", err)
+	// recovered bool unused — no startup logging plumbing yet
+	if _, err := RecoverDirtyState(ctx, r.Git); err != nil {
+		return fmt.Errorf("runner: startup: %w", err)
 	}
 
 	rc := RunConfig{
@@ -100,30 +156,75 @@ func (r *Runner) Execute(ctx context.Context) error {
 			DangerouslySkipPermissions: true,
 		}
 
-		headBefore, err := r.Git.HeadCommit(ctx)
-		if err != nil {
-			return fmt.Errorf("runner: head commit before: %w", err)
-		}
+		// Per-task retry loop (AC4: counter resets per task)
+		executeAttempts := 0
+		for {
+			headBefore, err := r.Git.HeadCommit(ctx)
+			if err != nil {
+				return fmt.Errorf("runner: head commit before: %w", err)
+			}
 
-		start := time.Now()
-		raw, execErr := session.Execute(ctx, opts)
-		elapsed := time.Since(start)
+			start := time.Now()
+			raw, execErr := session.Execute(ctx, opts)
+			elapsed := time.Since(start)
 
-		if execErr != nil {
-			return fmt.Errorf("runner: execute: %w", execErr)
-		}
+			needsRetry := false
+			var sessionID string
 
-		if _, err := session.ParseResult(raw, elapsed); err != nil {
-			return fmt.Errorf("runner: parse result: %w", err)
-		}
+			if execErr != nil {
+				// Distinguish retryable (exit error) from fatal (binary not found, ctx cancel)
+				var exitErr *exec.ExitError
+				if errors.As(execErr, &exitErr) {
+					needsRetry = true // AC6: non-zero exit triggers retry
+					// Try to parse for sessionID despite error
+					if sr, parseErr := session.ParseResult(raw, elapsed); parseErr == nil {
+						sessionID = sr.SessionID
+					}
+				} else {
+					return fmt.Errorf("runner: execute: %w", execErr)
+				}
+			} else {
+				sr, parseErr := session.ParseResult(raw, elapsed)
+				if parseErr != nil {
+					return fmt.Errorf("runner: parse result: %w", parseErr)
+				}
+				sessionID = sr.SessionID
 
-		headAfter, err := r.Git.HeadCommit(ctx)
-		if err != nil {
-			return fmt.Errorf("runner: head commit after: %w", err)
-		}
+				headAfter, err := r.Git.HeadCommit(ctx)
+				if err != nil {
+					return fmt.Errorf("runner: head commit after: %w", err)
+				}
 
-		if headBefore == headAfter {
-			return fmt.Errorf("runner: %w", ErrNoCommit)
+				if headBefore == headAfter {
+					needsRetry = true // AC1: no commit
+				}
+			}
+
+			if needsRetry {
+				executeAttempts++ // AC2: increment counter
+				if executeAttempts >= r.Cfg.MaxIterations {
+					return fmt.Errorf("runner: %w", config.ErrMaxRetries) // AC5
+				}
+				// Resume-extraction: capture WIP state before retry
+				if reErr := r.ResumeExtractFn(ctx, rc, sessionID); reErr != nil {
+					return fmt.Errorf("runner: retry: resume extract: %w", reErr)
+				}
+				// Dirty state recovery before retry
+				if _, recErr := RecoverDirtyState(ctx, r.Git); recErr != nil {
+					return fmt.Errorf("runner: retry: recover: %w", recErr)
+				}
+				// Exponential backoff (NFR12): 1s, 2s, 4s...
+				if ctx.Err() != nil {
+					return fmt.Errorf("runner: retry: %w", ctx.Err())
+				}
+				backoff := time.Duration(1<<uint(executeAttempts-1)) * time.Second
+				r.SleepFn(backoff)
+				continue
+			}
+
+			// Success: commit detected — AC3: counter resets implicitly
+			// (inner loop breaks, outer iteration ends, next starts with executeAttempts=0)
+			break
 		}
 
 		if _, err := r.ReviewFn(ctx, rc); err != nil {
@@ -221,6 +322,11 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		Git:       &ExecGitClient{Dir: cfg.ProjectRoot},
 		TasksFile: filepath.Join(cfg.ProjectRoot, "sprint-tasks.md"),
 		ReviewFn:  defaultReviewStub,
+		SleepFn:   time.Sleep,
+		Knowledge: &NoOpKnowledgeWriter{},
+	}
+	r.ResumeExtractFn = func(_ context.Context, _ RunConfig, sid string) error {
+		return ResumeExtraction(ctx, cfg, r.Knowledge, sid)
 	}
 	return r.Execute(ctx)
 }

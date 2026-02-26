@@ -25,9 +25,6 @@ var (
 	ErrMergeInProgress = errors.New("git: merge or rebase in progress")
 )
 
-// ErrNoCommit indicates that a Claude session completed but HEAD did not change.
-// Story 3.6 uses errors.Is(err, ErrNoCommit) to trigger retry logic.
-var ErrNoCommit = errors.New("no commit detected")
 
 // ExecGitClient implements GitClient (HealthCheck, HeadCommit, RestoreClean)
 // by shelling out to the git binary. Dir is set to config.ProjectRoot by the caller.

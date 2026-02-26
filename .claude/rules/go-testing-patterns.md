@@ -4,7 +4,7 @@ globs: ["*_test.go", "**/*_test.go"]
 
 # Go Testing Patterns — bmad-ralph
 
-Detailed testing patterns from code reviews (Epics 1-3, 74 findings across 25 stories).
+Detailed testing patterns from code reviews (Epics 1-3, 93 findings across 28 stories).
 For core rules, see CLAUDE.md `## Testing Core Rules`.
 
 ## Test Naming
@@ -25,6 +25,7 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - Discarded `_` RawResult kills stderr assertions: ALWAYS capture when testing errors `[session/]`
 - When string matching on errors is unavoidable (yaml.v3), add justification comment `[config/config.go]`
 - Inner error verification: when wrapping errors, test BOTH prefix (`"runner: dirty state recovery:"`) AND inner cause (`"restore failed"`) `[runner/runner_test.go]`
+- Multi-layer error wrapping: when function A wraps function B's error, test ALL layers — outer prefix, intermediate prefix, and innermost cause `[runner/runner_test.go:RecoverDirtyStateFails]`
 
 ## Assertions
 
@@ -41,7 +42,10 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - Verify flag values AND presence: `--max-turns` needs value check ("5"), not just exists
 - Call count assertions: table-driven tests should include `wantXxxCount` fields for mock call tracking `[runner/runner_test.go]`
 - Inner error in ALL table cases: every case with non-sentinel error must have `wantErrContainsInner` — not just sentinel cases `[runner/runner_test.go]`
+- Intermediate error in ALL table cases: when table struct has `wantErrContainsIntermediate`, set it in EVERY case where the intermediate layer exists — partial coverage across cases is inconsistent `[runner/runner_test.go:StartupErrors]`
 - Disambiguate same-function error prefixes: when a function is called twice in a flow (e.g., HeadCommit before/after), use distinct error prefixes `[runner/runner.go]`
+- Verify mock data contents, not just counts: when tracking mock captures `data []T`, assert field values (e.g., `data[0].SessionID == "expected"`), not just `len(data) == 1` `[runner/runner_test.go]`
+- Inner error assertion must NOT match outer prefix: if wantErrContainsInner matches the wrapping prefix, it proves nothing about the inner cause — use a unique substring from the actual inner error `[runner/runner_test.go]`
 
 ## Test Structure
 
@@ -59,8 +63,11 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - Self-reexec dispatch: env var checks BEFORE `RunMockClaude()` for non-mock modes `[bridge/]`
 - Fixture copy boilerplate → extract helper on 2nd occurrence: `copyFixtureToScenario(t, name)`
 - DRY test closures: when a closure pattern appears 3+ times, extract to package-level var (stateless) or `func(t) Type` helper (t-dependent) `[runner/test_helpers_test.go]`
+- DRY test config: extract `testConfig(tmpDir, maxIter)` helper when `config.Config{}` boilerplate repeats 3+ times with same defaults `[runner/test_helpers_test.go]`
+- Initialize ALL injectable function fields on test Runner structs (even if nil won't be hit) — prevents latent nil-pointer panics on mock data changes `[runner/runner_test.go]`
 - `Scenario.Name` field: always set on `testutil.Scenario` structs for debugging
 - No dead golden files: every testdata fixture must be loaded by at least one test `[session/]`
+- No vacuous tests: if a test creates a temp resource but the code under test never references it, the assertion is unfalsifiable — link the test context to the code path `[runner/knowledge_test.go]`
 - Extract `runGit(t, dir, args...)` helper for real-git tests — avoids 3+ copies of closure `[runner/git_test.go]`
 - Never hardcode default branch name ("master"): use `git rev-parse --abbrev-ref HEAD` after init `[runner/git_test.go]`
 - Test ALL indicator file paths: if code checks MERGE_HEAD + rebase-merge + rebase-apply, test at least 2 `[runner/git_test.go]`
@@ -74,8 +81,8 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 
 ## Code Quality
 
-- Doc comment claims must match reality: "all" = verify exhaustively (recurring: 1.8, 1.10, 2.5, 3.1, 3.2)
-- Stale doc comments after refactoring: when function behavior changes, update doc comment immediately `[runner/runner.go]` (recurring: 3.2, 3.3)
+- Doc comment claims must match reality: "all" = verify exhaustively (recurring: 1.8, 1.10, 2.5, 3.1, 3.2, 3.7)
+- Stale doc comments after refactoring: when function behavior changes, update doc comment immediately — includes inline test comments referencing old behavior `[runner/runner.go, runner/runner_test.go]` (recurring: 3.2, 3.3, 3.8)
 - Edge case tests must verify ALL struct fields, not just counts — e.g., `Text` field on matched entries `[runner/scan_test.go]`
 - Stale API surface comments: update "ONLY entry point" when adding new exports
 - Comment counts must match AC: "7 sections" when AC lists 8 = misleading `[runner/prompt_test.go]`
@@ -85,6 +92,8 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - Remove unused test struct fields immediately (copy-paste remnants)
 - Error wrapping consistency: ALL error returns in a function must wrap with same prefix pattern `[runner/runner.go]` (recurring: 3.4)
 - Sentinel errors for future flow control: when an error will need `errors.Is` detection in a later story, define sentinel NOW `[runner/git.go]`
+- SRP for sentinels: place sentinel errors in the file that owns the concern — git errors in git.go, retry errors in runner.go, cross-package sentinels in config/errors.go `[runner/]`
+- No duplicate sentinels: check `config/errors.go` before adding new sentinels — reuse existing cross-package sentinels (e.g., `config.ErrMaxRetries`) instead of defining package-local copies `[runner/git.go→runner.go]`
 - Discarded `_` return value in production: document in test comment that related tests verify mock capability, not code path differentiation `[runner/runner_test.go]`
 
 ## Template Testing

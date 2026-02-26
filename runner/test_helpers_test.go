@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/bmad-ralph/bmad-ralph/config"
 	"github.com/bmad-ralph/bmad-ralph/runner"
 )
 
@@ -131,4 +133,77 @@ func argValueAfterFlag(args []string, flag string) string {
 		}
 	}
 	return ""
+}
+
+// testConfig creates a config.Config with standard test defaults.
+// ClaudeCommand is set to os.Args[0] (self-reexec mock pattern).
+func testConfig(tmpDir string, maxIter int) *config.Config {
+	return &config.Config{
+		ClaudeCommand: os.Args[0],
+		MaxTurns:      5,
+		MaxIterations: maxIter,
+		ProjectRoot:   tmpDir,
+	}
+}
+
+// --- Retry-related test helpers (Story 3.6) ---
+
+// trackingResumeExtract records ResumeExtractFn calls for assertion.
+type trackingResumeExtract struct {
+	count      int
+	sessionIDs []string
+	err        error // inject error for error-path tests
+}
+
+func (tr *trackingResumeExtract) fn(_ context.Context, _ runner.RunConfig, sid string) error {
+	tr.count++
+	tr.sessionIDs = append(tr.sessionIDs, sid)
+	return tr.err
+}
+
+// trackingSleep records SleepFn calls for backoff duration assertions.
+type trackingSleep struct {
+	count     int
+	durations []time.Duration
+}
+
+func (ts *trackingSleep) fn(d time.Duration) {
+	ts.count++
+	ts.durations = append(ts.durations, d)
+}
+
+// noopSleepFn is a no-op sleep for tests that don't care about timing.
+var noopSleepFn = func(time.Duration) {}
+
+// noopResumeExtractFn is a no-op resume extract for tests that don't care about it.
+var noopResumeExtractFn runner.ResumeExtractFunc = func(_ context.Context, _ runner.RunConfig, _ string) error {
+	return nil
+}
+
+// --- KnowledgeWriter test helpers (Story 3.7) ---
+
+// trackingKnowledgeWriter records WriteProgress calls for assertion.
+type trackingKnowledgeWriter struct {
+	writeProgressCount int
+	writeProgressData  []runner.ProgressData
+	writeProgressErr   error // inject error for error-path tests
+}
+
+func (tk *trackingKnowledgeWriter) WriteProgress(_ context.Context, data runner.ProgressData) error {
+	tk.writeProgressCount++
+	tk.writeProgressData = append(tk.writeProgressData, data)
+	return tk.writeProgressErr
+}
+
+// reviewAndMarkDoneFn returns a ReviewFunc that increments counter (if non-nil)
+// and writes allDoneTasks to tasksPath. Used in retry tests where review triggers
+// outer loop exit via task completion.
+func reviewAndMarkDoneFn(tasksPath string, counter *int) runner.ReviewFunc {
+	return func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		if counter != nil {
+			*counter++
+		}
+		os.WriteFile(tasksPath, []byte(allDoneTasks), 0644)
+		return runner.ReviewResult{Clean: true}, nil
+	}
 }
