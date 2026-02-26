@@ -24,15 +24,18 @@ import (
 // should use {{- if .Field -}} trim markers to avoid unwanted whitespace.
 type TemplateData struct {
 	// Stage 1: bool conditionals for template structure
-	SerenaEnabled bool
-	GatesEnabled  bool
+	SerenaEnabled    bool
+	GatesEnabled     bool
+	HasExistingTasks bool // bridge merge mode
 
 	// Stage 2: string fields for caller convenience / type grouping.
 	// Injected via replacements map, NOT via {{.FieldName}} in templates.
-	TaskContent      string
-	LearningsContent string
-	ClaudeMdContent  string
-	FindingsContent  string
+	TaskContent          string
+	LearningsContent     string
+	ClaudeMdContent      string
+	FindingsContent      string
+	StoryContent         string // injected via __STORY_CONTENT__ replacement, NOT template
+	ExistingTasksContent string // injected via __EXISTING_TASKS__ replacement, NOT template
 }
 
 // AssemblePrompt builds a prompt string using a two-stage assembly process.

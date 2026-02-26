@@ -76,23 +76,31 @@ func TestAssemblePrompt_Injection(t *testing.T) {
 }
 
 func TestAssemblePrompt_AllFields(t *testing.T) {
-	tmpl := `{{if .SerenaEnabled}}[SERENA] {{end}}{{if .GatesEnabled}}[GATES] {{end}}Task: __TASK__
+	tmpl := `{{if .SerenaEnabled}}[SERENA] {{end}}{{if .GatesEnabled}}[GATES] {{end -}}
+{{- if .HasExistingTasks}}[MERGE] {{end}}Task: __TASK__
 Learnings: __LEARNINGS__
 Claude: __CLAUDE_MD__
-Findings: __FINDINGS__`
+Findings: __FINDINGS__
+Story: __STORY__
+Existing: __EXISTING__`
 	data := TemplateData{
-		SerenaEnabled:    true,
-		GatesEnabled:     true,
-		TaskContent:      "task data",
-		LearningsContent: "learnings data",
-		ClaudeMdContent:  "claude md data",
-		FindingsContent:  "findings data",
+		SerenaEnabled:        true,
+		GatesEnabled:         true,
+		HasExistingTasks:     true,
+		TaskContent:          "task data",
+		LearningsContent:     "learnings data",
+		ClaudeMdContent:      "claude md data",
+		FindingsContent:      "findings data",
+		StoryContent:         "story data",
+		ExistingTasksContent: "existing tasks data",
 	}
 	replacements := map[string]string{
 		"__TASK__":      "implement feature X",
 		"__LEARNINGS__": "avoid pattern Y",
 		"__CLAUDE_MD__": "project rules here",
 		"__FINDINGS__":  "no issues found",
+		"__STORY__":     "story content here",
+		"__EXISTING__":  "existing tasks here",
 	}
 	got, err := AssemblePrompt(tmpl, data, replacements)
 	if err != nil {

@@ -30,5 +30,9 @@ vendor/
 .DS_Store
 Thumbs.db
 
-# Claude Code
-.claude/
+# Claude Code (user-specific files ignored, project config tracked)
+.claude/*
+!.claude/settings.json
+!.claude/critical-rules.md
+!.claude/rules/
+!.claude/commands/

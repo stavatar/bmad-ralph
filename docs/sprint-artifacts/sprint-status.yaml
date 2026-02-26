@@ -52,15 +52,15 @@ development_status:
   epic-1-retrospective: done
 
   # Epic 2: Story-to-Tasks Bridge (7 stories)
-  epic-2: in-progress
+  epic-2: done
   2-1-shared-sprint-tasks-format-contract: done
-  2-2-bridge-prompt-template: backlog
-  2-3-bridge-logic-core-conversion: backlog
-  2-4-service-tasks-gate-marking-source-traceability: backlog
-  2-5-bridge-golden-file-tests: backlog
-  2-6-smart-merge: backlog
-  2-7-bridge-integration-test: backlog
-  epic-2-retrospective: optional
+  2-2-bridge-prompt-template: done
+  2-3-bridge-logic-core-conversion: done
+  2-4-service-tasks-gate-marking-source-traceability: done
+  2-5-bridge-golden-file-tests: done
+  2-6-smart-merge: done
+  2-7-bridge-integration-test: done
+  epic-2-retrospective: done
 
   # Epic 3: Core Execution Loop (11 stories)
   epic-3: backlog
