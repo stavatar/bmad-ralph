@@ -15,27 +15,6 @@ import (
 	"github.com/bmad-ralph/bmad-ralph/runner"
 )
 
-// copyFixtureToDir copies a testdata fixture into tmpDir and returns the destination path.
-func copyFixtureToDir(t *testing.T, tmpDir, fixture string) string {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", fixture))
-	if err != nil {
-		t.Fatalf("read fixture %s: %v", fixture, err)
-	}
-	dst := filepath.Join(tmpDir, fixture)
-	if err := os.WriteFile(dst, data, 0644); err != nil {
-		t.Fatalf("write fixture %s: %v", fixture, err)
-	}
-	return dst
-}
-
-func TestMain(m *testing.M) {
-	if testutil.RunMockClaude() {
-		return
-	}
-	os.Exit(m.Run())
-}
-
 func TestRunOnce_WalkingSkeleton_HappyPath(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -315,40 +294,3 @@ func TestRunReview_WalkingSkeleton_SessionFails(t *testing.T) {
 	}
 }
 
-// --- Helper functions for args assertions ---
-
-func assertArgsContainFlag(t *testing.T, args []string, flag string) {
-	t.Helper()
-	for _, a := range args {
-		if a == flag {
-			return
-		}
-	}
-	t.Errorf("args: want flag %q, not found in %v", flag, args)
-}
-
-func assertArgsContainFlagValue(t *testing.T, args []string, flag, value string) {
-	t.Helper()
-	for i, a := range args {
-		if a == flag {
-			if i+1 >= len(args) {
-				t.Errorf("args: flag %q found at end of args, no value follows", flag)
-				return
-			}
-			if args[i+1] != value {
-				t.Errorf("args: flag %q value = %q, want %q", flag, args[i+1], value)
-			}
-			return
-		}
-	}
-	t.Errorf("args: want flag %q with value %q, flag not found in %v", flag, value, args)
-}
-
-func argValueAfterFlag(args []string, flag string) string {
-	for i, a := range args {
-		if a == flag && i+1 < len(args) {
-			return args[i+1]
-		}
-	}
-	return ""
-}

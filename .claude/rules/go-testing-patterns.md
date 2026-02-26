@@ -4,7 +4,7 @@ globs: ["*_test.go", "**/*_test.go"]
 
 # Go Testing Patterns — bmad-ralph
 
-Detailed testing patterns from code reviews (Epics 1-3, 66 findings across 24 stories).
+Detailed testing patterns from code reviews (Epics 1-3, 74 findings across 25 stories).
 For core rules, see CLAUDE.md `## Testing Core Rules`.
 
 ## Test Naming
@@ -40,6 +40,8 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - Guard between-steps mutations: `if modified == original { t.Fatal }` prevents silent no-ops
 - Verify flag values AND presence: `--max-turns` needs value check ("5"), not just exists
 - Call count assertions: table-driven tests should include `wantXxxCount` fields for mock call tracking `[runner/runner_test.go]`
+- Inner error in ALL table cases: every case with non-sentinel error must have `wantErrContainsInner` — not just sentinel cases `[runner/runner_test.go]`
+- Disambiguate same-function error prefixes: when a function is called twice in a flow (e.g., HeadCommit before/after), use distinct error prefixes `[runner/runner.go]`
 
 ## Test Structure
 
@@ -56,6 +58,7 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - Test helper `default` case required in TestMain switch — prevents silent typo pass
 - Self-reexec dispatch: env var checks BEFORE `RunMockClaude()` for non-mock modes `[bridge/]`
 - Fixture copy boilerplate → extract helper on 2nd occurrence: `copyFixtureToScenario(t, name)`
+- DRY test closures: when a closure pattern appears 3+ times, extract to package-level var (stateless) or `func(t) Type` helper (t-dependent) `[runner/test_helpers_test.go]`
 - `Scenario.Name` field: always set on `testutil.Scenario` structs for debugging
 - No dead golden files: every testdata fixture must be loaded by at least one test `[session/]`
 - Extract `runGit(t, dir, args...)` helper for real-git tests — avoids 3+ copies of closure `[runner/git_test.go]`
@@ -81,6 +84,8 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - Group related constants into `const (...)` block, not separate `const` lines
 - Remove unused test struct fields immediately (copy-paste remnants)
 - Error wrapping consistency: ALL error returns in a function must wrap with same prefix pattern `[runner/runner.go]` (recurring: 3.4)
+- Sentinel errors for future flow control: when an error will need `errors.Is` detection in a later story, define sentinel NOW `[runner/git.go]`
+- Discarded `_` return value in production: document in test comment that related tests verify mock capability, not code path differentiation `[runner/runner_test.go]`
 
 ## Template Testing
 

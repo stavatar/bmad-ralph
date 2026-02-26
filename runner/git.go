@@ -20,10 +20,14 @@ type GitClient interface {
 
 // Sentinel errors for git health check failures.
 var (
-	ErrDirtyTree      = errors.New("git: working tree is dirty")
-	ErrDetachedHead   = errors.New("git: HEAD is detached")
+	ErrDirtyTree       = errors.New("git: working tree is dirty")
+	ErrDetachedHead    = errors.New("git: HEAD is detached")
 	ErrMergeInProgress = errors.New("git: merge or rebase in progress")
 )
+
+// ErrNoCommit indicates that a Claude session completed but HEAD did not change.
+// Story 3.6 uses errors.Is(err, ErrNoCommit) to trigger retry logic.
+var ErrNoCommit = errors.New("no commit detected")
 
 // ExecGitClient implements GitClient (HealthCheck, HeadCommit, RestoreClean)
 // by shelling out to the git binary. Dir is set to config.ProjectRoot by the caller.

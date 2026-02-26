@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/bmad-ralph/bmad-ralph/config"
@@ -18,6 +19,21 @@ var executeTemplate string
 //go:embed prompts/review.md
 var reviewTemplate string
 
+// ReviewResult holds the outcome of a review step.
+type ReviewResult struct {
+	Clean bool // true when review found no actionable findings
+}
+
+// ReviewFunc is the signature for the review step called after each successful execute.
+// Default: defaultReviewStub. Epic 4 replaces with real review logic.
+type ReviewFunc func(ctx context.Context, rc RunConfig) (ReviewResult, error)
+
+// defaultReviewStub returns a clean review result.
+// TODO(epic-4): replace with real review logic
+func defaultReviewStub(_ context.Context, _ RunConfig) (ReviewResult, error) {
+	return ReviewResult{Clean: true}, nil
+}
+
 // RunConfig passes dependencies to runner functions.
 type RunConfig struct {
 	Cfg       *config.Config
@@ -25,9 +41,103 @@ type RunConfig struct {
 	TasksFile string // path to sprint-tasks.md
 }
 
-// RunOnce executes a single iteration of the task loop.
-// It reads the tasks file, scans for task state via ScanTasks, assembles the prompt,
+// Runner orchestrates the execute-review loop with injectable dependencies.
+// Public API: Run() creates a Runner internally. Tests construct Runner directly.
+type Runner struct {
+	Cfg       *config.Config
+	Git       GitClient
+	TasksFile string     // path to sprint-tasks.md
+	ReviewFn  ReviewFunc // called after each successful execute with commit
+}
+
+// Execute runs the main task loop: health check, then iterate over tasks.
+// Each iteration: read tasks → scan → assemble prompt → session.Execute →
+// check commit → review. Loops up to Cfg.MaxIterations times.
+// Returns nil when all tasks are complete. Returns error on any failure.
+func (r *Runner) Execute(ctx context.Context) error {
+	if err := r.Git.HealthCheck(ctx); err != nil {
+		return fmt.Errorf("runner: health check: %w", err)
+	}
+
+	rc := RunConfig{
+		Cfg:       r.Cfg,
+		Git:       r.Git,
+		TasksFile: r.TasksFile,
+	}
+
+	for i := 0; i < r.Cfg.MaxIterations; i++ {
+		content, err := os.ReadFile(r.TasksFile)
+		if err != nil {
+			return fmt.Errorf("runner: read tasks: %w", err)
+		}
+
+		result, scanErr := ScanTasks(string(content))
+		if scanErr != nil {
+			return scanErr // ScanTasks already wraps with "runner: scan tasks:" prefix
+		}
+		if !result.HasOpenTasks() {
+			return nil
+		}
+
+		prompt, err := config.AssemblePrompt(
+			executeTemplate,
+			config.TemplateData{GatesEnabled: r.Cfg.GatesEnabled},
+			map[string]string{
+				"__FORMAT_CONTRACT__": config.SprintTasksFormat(),
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("runner: assemble prompt: %w", err)
+		}
+
+		opts := session.Options{
+			Command:                    r.Cfg.ClaudeCommand,
+			Dir:                        r.Cfg.ProjectRoot,
+			Prompt:                     prompt,
+			MaxTurns:                   r.Cfg.MaxTurns,
+			Model:                      r.Cfg.ModelExecute,
+			OutputJSON:                 true,
+			DangerouslySkipPermissions: true,
+		}
+
+		headBefore, err := r.Git.HeadCommit(ctx)
+		if err != nil {
+			return fmt.Errorf("runner: head commit before: %w", err)
+		}
+
+		start := time.Now()
+		raw, execErr := session.Execute(ctx, opts)
+		elapsed := time.Since(start)
+
+		if execErr != nil {
+			return fmt.Errorf("runner: execute: %w", execErr)
+		}
+
+		if _, err := session.ParseResult(raw, elapsed); err != nil {
+			return fmt.Errorf("runner: parse result: %w", err)
+		}
+
+		headAfter, err := r.Git.HeadCommit(ctx)
+		if err != nil {
+			return fmt.Errorf("runner: head commit after: %w", err)
+		}
+
+		if headBefore == headAfter {
+			return fmt.Errorf("runner: %w", ErrNoCommit)
+		}
+
+		if _, err := r.ReviewFn(ctx, rc); err != nil {
+			return fmt.Errorf("runner: review: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// RunOnce executes a single standalone iteration of the task loop.
+// It reads the tasks file, scans for task state, assembles the prompt,
 // invokes Claude via session.Execute, parses the result, and retrieves HEAD commit SHA.
+// RunOnce is a standalone utility — Execute does NOT delegate to RunOnce.
 func RunOnce(ctx context.Context, rc RunConfig) error {
 	content, err := os.ReadFile(rc.TasksFile)
 	if err != nil {
@@ -104,13 +214,20 @@ func RecoverDirtyState(ctx context.Context, git GitClient) (bool, error) {
 }
 
 // Run is the main entry point for the execute-review loop.
-// Story 3.5 implements the full loop. This stub validates CLI wiring.
+// It creates a Runner with production defaults and delegates to Runner.Execute.
 func Run(ctx context.Context, cfg *config.Config) error {
-	return fmt.Errorf("runner: loop not implemented")
+	r := &Runner{
+		Cfg:       cfg,
+		Git:       &ExecGitClient{Dir: cfg.ProjectRoot},
+		TasksFile: filepath.Join(cfg.ProjectRoot, "sprint-tasks.md"),
+		ReviewFn:  defaultReviewStub,
+	}
+	return r.Execute(ctx)
 }
 
-// RunReview runs a standalone review step.
-// Walking skeleton review is a stub — Story 3.5+ adds session context.
+// RunReview runs a standalone review step using a real Claude session.
+// Walking skeleton function — Execute uses ReviewFunc instead (not RunReview).
+// Retained for potential standalone use; may be retired in Epic 4.
 func RunReview(ctx context.Context, rc RunConfig) error {
 	prompt, err := config.AssemblePrompt(
 		reviewTemplate,
