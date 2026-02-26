@@ -18,7 +18,7 @@ import (
 // They MUST NOT be referenced via {{.FieldName}} in templates when content
 // is user-controlled — user content may contain "{{" which would crash
 // text/template. Instead, callers inject string content via Stage 2
-// replacements map (e.g., {"__TASK_CONTENT__": actualContent}).
+// replacements map (e.g., {"__FORMAT_CONTRACT__": actualContent}).
 //
 // Note: disabled {{if}} blocks leave blank lines in output. Template authors
 // should use {{- if .Field -}} trim markers to avoid unwanted whitespace.
@@ -27,6 +27,7 @@ type TemplateData struct {
 	SerenaEnabled    bool
 	GatesEnabled     bool
 	HasExistingTasks bool // bridge merge mode
+	HasFindings      bool // execute findings mode
 
 	// Stage 2: string fields for caller convenience / type grouping.
 	// Injected via replacements map, NOT via {{.FieldName}} in templates.

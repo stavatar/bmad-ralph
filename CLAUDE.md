@@ -1,8 +1,13 @@
 # CLAUDE.md — bmad-ralph
 
-## Knowledge Extraction Protocol
+## Knowledge Extraction Protocol (MANDATORY after every code-review)
 
-After every code-review workflow: extract learnings into `.claude/rules/` files (by topic), update `memory/MEMORY.md` status. New learnings go to the appropriate rules file, NOT this file. This file stays under ~80 lines.
+After every code-review workflow completes, you MUST update these three locations:
+1. **`.claude/rules/go-testing-patterns.md`** — new testing/code quality patterns discovered
+2. **`.claude/rules/wsl-ntfs.md`** — new WSL/NTFS-specific patterns (if any)
+3. **`memory/MEMORY.md`** — project status (completed story, next story, metrics update)
+
+New learnings go to the appropriate rules file, NOT this CLAUDE.md. This file stays under ~80 lines.
 
 ## Project Overview
 

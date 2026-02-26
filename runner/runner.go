@@ -60,9 +60,9 @@ func RunOnce(ctx context.Context, rc RunConfig) error {
 
 	prompt, err := config.AssemblePrompt(
 		executeTemplate,
-		config.TemplateData{},
+		config.TemplateData{GatesEnabled: rc.Cfg.GatesEnabled},
 		map[string]string{
-			"__TASK_CONTENT__": taskLine,
+			"__FORMAT_CONTRACT__": config.SprintTasksFormat(),
 		},
 	)
 	if err != nil {

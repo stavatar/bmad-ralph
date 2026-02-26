@@ -12,3 +12,4 @@ CRITICAL DEVELOPMENT RULES (injected via SessionStart hook — not subject to fr
 10. Doc comment claims must match reality — verify "all"/"every" exhaustively
 11. Error wrapping: fmt.Errorf("pkg: op: %w", err) — ALL returns in a function, not just some
 12. After Write/Edit on NTFS: sed -i 's/\r$//' <file>
+13. After code-review: MUST update .claude/rules/*.md (new patterns) + memory/MEMORY.md (status)

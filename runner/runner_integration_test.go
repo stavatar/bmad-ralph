@@ -88,8 +88,11 @@ func TestRunOnce_WalkingSkeleton_HappyPath(t *testing.T) {
 	if promptValue == "" {
 		t.Fatalf("execute: -p flag has no value")
 	}
-	if !strings.Contains(promptValue, "Implement hello world") {
-		t.Errorf("execute prompt: want task content, got %q", promptValue)
+	if !strings.Contains(promptValue, "sprint-tasks.md") {
+		t.Errorf("execute prompt: want self-directing reference to sprint-tasks.md, got %q", promptValue)
+	}
+	if !strings.Contains(promptValue, "Sprint Tasks Format Specification") {
+		t.Errorf("execute prompt: want format contract title, got %q", promptValue)
 	}
 
 	// Review
