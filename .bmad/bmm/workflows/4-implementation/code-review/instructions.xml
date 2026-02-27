@@ -174,32 +174,64 @@
   </step>
 
   <step n="6" goal="Extract knowledge from review findings">
-    <critical>MANDATORY — do NOT skip this step. Knowledge extraction ensures review patterns accumulate across stories.</critical>
+    <critical>MANDATORY — do NOT skip this step. ALL 4 substeps must be completed.</critical>
+    <critical>Knowledge extraction ensures review patterns accumulate across stories.</critical>
+    <critical>The verification script at the end will check that files were actually modified.</critical>
 
-    <action>Analyze all findings from this review for reusable patterns</action>
+    <!-- 6a: Categorize findings into patterns -->
+    <action>For EACH finding from this review, determine:
+      1. Is this a NEW pattern not already in `.claude/rules/*.md`? (read the target file to check)
+      2. Which category? (assertion quality, doc comment, error wrapping, DRY, return values, etc.)
+      3. Which target file? (see index in `.claude/rules/go-testing-patterns.md` for topic mapping)
+    </action>
 
-    <action>Update `.claude/rules/go-testing-patterns.md`:
-      - Add new testing/code quality patterns discovered in this review
-      - Include file:line citations where applicable
-      - Update finding count in header if changed
+    <!-- 6b: Update rules files with new patterns -->
+    <action>For each NEW pattern:
+      - Add to the appropriate `.claude/rules/<topic>.md` file
+      - Include `[file/path]` citation and `(Story X.Y)` reference
       - Do NOT duplicate existing patterns — check before adding
+      - Update rule count in `.claude/rules/go-testing-patterns.md` index if total changed
+    </action>
+    <action>If WSL/NTFS-specific patterns found: update `.claude/rules/wsl-ntfs.md`</action>
+
+    <!-- 6c: Update violation tracker (MANDATORY even if no new patterns) -->
+    <action>Update `.claude/violation-tracker.md`:
+      - For each finding category in this review: increment the count in the frequency table
+      - Check escalation thresholds: if a category now exceeds threshold, flag for promotion
+      - If escalation needed: promote rule to the appropriate higher enforcement tier
     </action>
 
-    <action>Update `.claude/rules/wsl-ntfs.md`:
-      - Add new WSL/NTFS-specific patterns if any were discovered
-      - Skip if no WSL/NTFS findings in this review
-    </action>
-
+    <!-- 6d: Update memory -->
     <action>Update `memory/MEMORY.md`:
       - Update project status (completed story, next story)
       - Update review metrics (findings count, severity breakdown)
       - Keep under 200 lines
     </action>
 
-    <output>**📚 Knowledge Extracted**
-      - Testing patterns: {{new_patterns_count}} new entries
-      - WSL/NTFS patterns: {{wsl_patterns_count}} new entries
-      - Memory updated: project status, metrics
+    <!-- 6e: Run verification script -->
+    <action>Run: `bash .claude/hooks/verify-knowledge-extraction.sh`</action>
+    <check if="verification reports INCOMPLETE">
+      <critical>Do NOT finish the review until extraction is complete.</critical>
+      <action>If rules files NOT modified and all findings match existing patterns:
+        explicitly state "All N findings are instances of existing patterns: [list each pattern by name and file]"
+        — then violation-tracker.md MUST still be updated with counts</action>
+      <action>If violation-tracker.md NOT updated: update it NOW</action>
+      <action>Re-run: `bash .claude/hooks/verify-knowledge-extraction.sh` to confirm</action>
+    </check>
+
+    <output>**📚 Knowledge Extraction Complete**
+
+## New Patterns
+{{for each new pattern: "- `target_file`: pattern description"}}
+(or: "All N findings match existing patterns: [list]")
+
+## Violation Tracker Update
+| Category | This Review | Escalation |
+|----------|------------|------------|
+{{for each category: "| category | +count | action or — |"}}
+
+## Verification
+{{verification_script_output}}
     </output>
   </step>
 

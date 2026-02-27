@@ -4,6 +4,8 @@ globs: ["**/*.go", "Makefile", "*.sh"]
 
 # WSL/NTFS Patterns — bmad-ralph
 
+# Scope: WSL on Windows NTFS — Go binary paths, file system quirks, UserHomeDir, test platform issues
+
 ## Go Binary
 
 - Full path required: `"/mnt/c/Program Files/Go/bin/go.exe"` (Windows Go, NOT in WSL PATH)

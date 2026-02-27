@@ -4,6 +4,8 @@ globs: ["*.go", "**/*.go"]
 
 # Code Quality Patterns
 
+# Scope: production Go code quality — doc comments, error wrapping, DRY, sentinels, return values
+
 - Doc comment claims must match reality: "all" = verify exhaustively (recurring: 1.8, 1.10, 2.5, 3.1, 3.2, 3.7)
 - Stale doc comments after refactoring: when function behavior changes, update doc comment immediately `[runner/runner.go, cmd/ralph/exit.go]` (recurring: 3.2, 3.3, 3.8, 3.9, 3.10)
 - Edge case tests must verify ALL struct fields, not just counts `[runner/scan_test.go]`

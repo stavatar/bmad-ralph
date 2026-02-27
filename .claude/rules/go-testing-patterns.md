@@ -4,14 +4,17 @@ globs: ["*_test.go", "**/*_test.go"]
 
 # Go Testing Patterns — bmad-ralph (Index)
 
+# Scope: entry point for all testing pattern files — loaded with any test file
+
 Detailed testing patterns split into topic files for focused loading (~15 rules each).
 For core rules, see CLAUDE.md `## Testing Core Rules`.
 
 - **test-naming-structure.md** — Test naming conventions + test structure (10 rules)
-- **test-error-patterns.md** — Error testing patterns (10 rules)
-- **test-assertions.md** — Assertion patterns (19 rules)
+- **test-error-patterns.md** — Error testing patterns (11 rules)
+- **test-assertions-base.md** — Core assertion patterns: counts, substrings, symmetric checks, integration (19 rules)
+- **test-assertions-prompt.md** — Prompt/template test assertions: scope guards, constraints, discriminating (12 rules)
 - **test-mocks-infra.md** — Mock & test infrastructure + CLI testing (18 rules)
-- **code-quality-patterns.md** — Code quality patterns for all Go files (17 rules)
+- **code-quality-patterns.md** — Code quality patterns for all Go files (27 rules)
 - **test-templates-review.md** — Template testing + review process (14 rules)
 
-Total: 88 patterns from code reviews (Epics 1-3, 109 findings across 31 stories).
+Total: ~111 patterns from code reviews (Epics 1-4, 149 findings across 26 stories).

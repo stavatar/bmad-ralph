@@ -34,6 +34,7 @@ Thumbs.db
 .claude/*
 !.claude/settings.json
 !.claude/critical-rules.md
+!.claude/violation-tracker.md
 !.claude/rules/
 !.claude/commands/
 !.claude/hooks/

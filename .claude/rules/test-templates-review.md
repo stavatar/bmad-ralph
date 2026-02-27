@@ -4,6 +4,8 @@ globs: ["*_test.go", "**/*_test.go", "**/prompts/*.md"]
 
 # Template Testing & Review Process
 
+# Scope: Go template testing, LLM prompt authoring, code review process patterns
+
 ## Template Testing
 
 - `text/template` `missingkey=error`: NO-OP for struct data, only maps `[config/prompt.go]`

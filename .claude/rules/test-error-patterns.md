@@ -4,6 +4,8 @@ globs: ["*_test.go", "**/*_test.go"]
 
 # Error Testing Patterns
 
+# Scope: error testing — wrapping, unwrapping, error paths, platform-specific error assertions
+
 - `errors.As` tests must be table-driven with multiple field combinations `[config/errors_test.go]`
 - Always test zero values for custom error types — catches uninitialized field bugs
 - Test double-wrapped errors: `fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", err))` `[config/errors.go]`

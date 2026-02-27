@@ -4,6 +4,8 @@ globs: ["*_test.go", "**/*_test.go"]
 
 # Test Naming & Structure
 
+# Scope: test function naming, test structure, table-driven organization
+
 ## Naming
 
 - `Test<Type>_<Method>_<Scenario>` — "Type" must be real Go type or exported var name `[config/errors_test.go]`

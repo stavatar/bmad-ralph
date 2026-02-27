@@ -4,6 +4,8 @@ globs: ["*_test.go", "**/*_test.go"]
 
 # Mock & Test Infrastructure
 
+# Scope: mock infrastructure, test helpers, fixture management, golden files, CLI flag testing
+
 - Mock JSON fidelity: expose `is_error`/`subtype` control, not hardcoded values `[testutil/]`
 - Test helper `default` case required in TestMain switch — prevents silent typo pass
 - Self-reexec dispatch: env var checks BEFORE `RunMockClaude()` for non-mock modes `[bridge/]`
