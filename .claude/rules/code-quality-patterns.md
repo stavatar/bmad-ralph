@@ -33,3 +33,4 @@ globs: ["*.go", "**/*.go"]
 - Error-path tests need mock call count guards: verify `HeadCommitCount == 0` and `HealthCheckCount == 1` to detect code path drift `[runner/runner_test.go]` (Story 4.7)
 - Rename = update ALL doc comment references: `realReview` → `RealReview` must be updated in ReviewFunc doc and RunReview doc `[runner/runner.go]` (recurring: 3.2, 3.3, 3.8, 3.9, 3.10, 4.8)
 - Doc test scenario lists must match actual tests: when listing "covered by" scenarios, list actual test names, separate "not yet covered" clearly `[runner/runner.go:RealReview]` (Story 4.8)
+- Post-loop processing guard: when multiple break paths exit a loop with different semantics (clean completion vs emergency skip), guard post-loop code with flags to prevent running completion logic after non-completion exits `[runner/runner.go:Execute]` (Story 5.5)

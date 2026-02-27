@@ -106,6 +106,30 @@ func TestFeedbackPrefix_Value(t *testing.T) {
 	}
 }
 
+func TestActionApprove_Value(t *testing.T) {
+	if ActionApprove != "approve" {
+		t.Errorf("ActionApprove = %q, want %q", ActionApprove, "approve")
+	}
+}
+
+func TestActionRetry_Value(t *testing.T) {
+	if ActionRetry != "retry" {
+		t.Errorf("ActionRetry = %q, want %q", ActionRetry, "retry")
+	}
+}
+
+func TestActionSkip_Value(t *testing.T) {
+	if ActionSkip != "skip" {
+		t.Errorf("ActionSkip = %q, want %q", ActionSkip, "skip")
+	}
+}
+
+func TestActionQuit_Value(t *testing.T) {
+	if ActionQuit != "quit" {
+		t.Errorf("ActionQuit = %q, want %q", ActionQuit, "quit")
+	}
+}
+
 func TestSourceFieldRegex(t *testing.T) {
 	tests := []struct {
 		name  string

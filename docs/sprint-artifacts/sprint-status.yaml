@@ -85,16 +85,16 @@ development_status:
   4-6-findings-write: done
   4-7-execute-review-loop-integration: done
   4-8-review-integration-test: done
-  epic-4-retrospective: optional
+  epic-4-retrospective: done
 
   # Epic 5: Human Gates & Control (6 stories)
-  epic-5: backlog
-  5-1-basic-gate-prompt: backlog
-  5-2-gate-detection-in-runner: backlog
-  5-3-retry-with-feedback: backlog
-  5-4-checkpoint-gates: backlog
-  5-5-emergency-gate-upgrade: backlog
-  5-6-gates-integration-test: backlog
+  epic-5: in-progress
+  5-1-basic-gate-prompt: review
+  5-2-gate-detection-in-runner: review
+  5-3-retry-with-feedback: review
+  5-4-checkpoint-gates: review
+  5-5-emergency-gate-upgrade: review
+  5-6-gates-integration-test: review
   epic-5-retrospective: optional
 
   # Epic 6: Knowledge Management & Polish (9 stories)

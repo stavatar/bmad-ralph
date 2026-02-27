@@ -25,3 +25,7 @@ globs: ["*_test.go", "**/*_test.go"]
 - Inner error assertion must NOT match outer prefix: use a unique substring from the actual inner error `[runner/runner_test.go]`
 - Integration tests: verify ALL error message layers (sentinel via `errors.Is` AND message content via `strings.Contains`) `[runner/runner_integration_test.go]`
 - Integration tests: verify subprocess invocation args (prompt content, flags) via `ReadInvocationArgs` `[runner/runner_integration_test.go]`
+- New constants need value tests when existing pattern established: if file has `Test<Const>_Value` for existing constants, new constants must get matching tests `[config/constants_test.go]` (Story 5.1)
+- Integration tests: capture intermediate file state via mock callbacks to verify mutations — don't just check call counts when the AC is about file content `[runner/runner_test.go:GateRetry]` (Story 5.3)
+- Symmetric assertion depth across locations: when two tests cover same behavior at different code locations (e.g., execute vs review emergency skip), assertion depth must match — if one verifies file content/feedback injection, both must `[runner/runner_test.go:EmergencyGateReviewSkip]` (Story 5.5)
+- Table-driven return value tests: assert ALL struct fields in table (e.g., both Action AND Feedback for GateDecision), not just primary field — missing fields silently pass with zero values `[gates/gates_integration_test.go:AllActions]` (Story 5.6)

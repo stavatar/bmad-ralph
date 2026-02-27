@@ -21,3 +21,5 @@ globs: ["*_test.go", "**/*_test.go"]
 - Parallel regex test symmetry: paired patterns need symmetric test cases `[config/constants_test.go]`
 - Consistent negative check patterns: `present bool` struct field, not `if c.name == "..."` matching
 - Integration test coverage: Load() must cover all detectProjectRoot paths `[config/]`
+- Multi-condition AND nil-guard: when code has `if A && B && C != nil`, test each short-circuit: A=false, B=false, C=nil — each is a distinct code path `[runner/runner_test.go]` (Story 5.2)
+- Test action fall-through paths: when multiple enum values share same code path (e.g., approve/skip both fall through), test at least one non-default action to guard against regression `[runner/runner_test.go]` (Story 5.4)

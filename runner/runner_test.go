@@ -2378,3 +2378,1651 @@ func TestDetermineReviewOutcome_Scenarios(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// Story 5.2: Gate Detection in Runner (AC: #1-#8)
+// =============================================================================
+
+// TestRunner_Execute_GateContinueActions verifies gate prompt called on [GATE] task
+// with approve/skip/retry decisions — all continue to next task (AC3, AC5, AC7).
+// Table-driven: approve, skip, retry all produce same outcome (proceed).
+func TestRunner_Execute_GateContinueActions(t *testing.T) {
+	tests := []struct {
+		name   string
+		action string
+	}{
+		{name: "approve", action: config.ActionApprove},
+		{name: "skip", action: config.ActionSkip},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, gp := setupGateTest(t, gateOpenTask, true)
+			gp.decision = &config.GateDecision{Action: tc.action}
+
+			err := r.Execute(context.Background())
+			if err != nil {
+				t.Fatalf("Execute: want nil, got: %v", err)
+			}
+
+			// AC3: GatePromptFn called with task text
+			if gp.count != 1 {
+				t.Errorf("GatePromptFn count = %d, want 1", gp.count)
+			}
+			if !strings.Contains(gp.taskText, "Setup project") {
+				t.Errorf("GatePromptFn taskText = %q, want containing 'Setup project'", gp.taskText)
+			}
+			if !strings.Contains(gp.taskText, "[GATE]") {
+				t.Errorf("GatePromptFn taskText = %q, want containing '[GATE]'", gp.taskText)
+			}
+		})
+	}
+}
+
+// TestRunner_Execute_GateQuit verifies quit at gate returns wrapped GateDecision error (AC6).
+func TestRunner_Execute_GateQuit(t *testing.T) {
+	r, gp := setupGateTest(t, gateOpenTask, true)
+	gp.decision = &config.GateDecision{Action: config.ActionQuit}
+
+	err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+
+	// AC6: error wraps GateDecision
+	if !strings.Contains(err.Error(), "runner: gate:") {
+		t.Errorf("error prefix: want 'runner: gate:', got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "gate: quit") {
+		t.Errorf("inner error: want 'gate: quit' (GateDecision.Error()), got %q", err.Error())
+	}
+
+	// AC6: errors.As extracts GateDecision with Action == "quit"
+	var gd *config.GateDecision
+	if !errors.As(err, &gd) {
+		t.Fatal("errors.As(err, &GateDecision): want true, got false")
+	}
+	if gd.Action != config.ActionQuit {
+		t.Errorf("GateDecision.Action = %q, want %q", gd.Action, config.ActionQuit)
+	}
+
+	// GatePromptFn was called
+	if gp.count != 1 {
+		t.Errorf("GatePromptFn count = %d, want 1", gp.count)
+	}
+}
+
+// TestRunner_Execute_GatesDisabled verifies GatePromptFn NOT called when gates disabled (AC2).
+func TestRunner_Execute_GatesDisabled(t *testing.T) {
+	r, gp := setupGateTest(t, gateOpenTask, false)
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: want nil, got: %v", err)
+	}
+
+	// AC2: GatePromptFn NOT called
+	if gp.count != 0 {
+		t.Errorf("GatePromptFn count = %d, want 0 (gates disabled)", gp.count)
+	}
+}
+
+// TestRunner_Execute_NoGateTag verifies GatePromptFn NOT called for tasks without [GATE] (AC8).
+func TestRunner_Execute_NoGateTag(t *testing.T) {
+	r, gp := setupGateTest(t, nonGateOpenTask, true)
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: want nil, got: %v", err)
+	}
+
+	// AC8: GatePromptFn NOT called (no [GATE] tag)
+	if gp.count != 0 {
+		t.Errorf("GatePromptFn count = %d, want 0 (no [GATE] tag)", gp.count)
+	}
+}
+
+// TestRunner_Execute_GatePromptFnNil verifies no panic when GatesEnabled=true, task has [GATE],
+// but GatePromptFn is nil (defensive nil-guard in condition at runner.go:408).
+func TestRunner_Execute_GatePromptFnNil(t *testing.T) {
+	r, _ := setupGateTest(t, gateOpenTask, true)
+	r.GatePromptFn = nil // override: nil guard path
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: want nil (nil guard skips gate), got: %v", err)
+	}
+}
+
+// TestRunner_Execute_GatePromptError verifies gate prompt error propagation (AC3 error path).
+func TestRunner_Execute_GatePromptError(t *testing.T) {
+	r, gp := setupGateTest(t, gateOpenTask, true)
+	gp.decision = nil
+	gp.err = context.Canceled
+
+	err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+
+	// Error wrapping: "runner: gate:" prefix
+	if !strings.Contains(err.Error(), "runner: gate:") {
+		t.Errorf("error prefix: want 'runner: gate:', got %q", err.Error())
+	}
+
+	// errors.Is unwraps to context.Canceled
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("errors.Is(err, context.Canceled): want true, got false; err = %v", err)
+	}
+
+	// GatePromptFn was called
+	if gp.count != 1 {
+		t.Errorf("GatePromptFn count = %d, want 1", gp.count)
+	}
+}
+
+// --- Story 5.3: Retry with feedback tests ---
+
+// TestInjectFeedback_Scenarios verifies feedback injection into sprint-tasks.md (AC4, AC5).
+// Coverage gap: os.WriteFile error path (line 255 in runner.go) is not testable without DI —
+// ReadFile and WriteFile use the same path, so we cannot make Read succeed but Write fail.
+// The error wrapping pattern is verified by the ReadFile error case.
+func TestInjectFeedback_Scenarios(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name            string
+		content         string
+		taskDesc        string
+		feedback        string
+		wantErr         bool
+		wantErrContains string
+		wantContains    []string
+	}{
+		{
+			name:     "basic injection",
+			content:  "- [ ] Setup project [GATE]\n- [ ] Write tests\n",
+			taskDesc: "Setup project [GATE]",
+			feedback: "Need validation",
+			wantContains: []string{
+				"- [ ] Setup project [GATE]",
+				"  " + config.FeedbackPrefix + " Need validation",
+				"- [ ] Write tests",
+			},
+		},
+		{
+			name: "preserve existing feedback",
+			content: "- [ ] Setup project [GATE]\n" +
+				"  " + config.FeedbackPrefix + " First attempt feedback\n" +
+				"- [ ] Write tests\n",
+			taskDesc: "Setup project [GATE]",
+			feedback: "Second attempt feedback",
+			wantContains: []string{
+				config.FeedbackPrefix + " First attempt feedback",
+				config.FeedbackPrefix + " Second attempt feedback",
+			},
+		},
+		{
+			name:     "multiple tasks inject on correct one",
+			content:  "- [ ] Task alpha\n- [ ] Task beta [GATE]\n- [ ] Task gamma\n",
+			taskDesc: "Task beta [GATE]",
+			feedback: "fix beta",
+			wantContains: []string{
+				"- [ ] Task beta [GATE]",
+				config.FeedbackPrefix + " fix beta",
+				"- [ ] Task gamma",
+			},
+		},
+		{
+			name:            "task not found",
+			content:         "- [ ] Setup project [GATE]\n",
+			taskDesc:        "Nonexistent task",
+			feedback:        "feedback",
+			wantErr:         true,
+			wantErrContains: "runner: inject feedback: task not found: Nonexistent task",
+		},
+		{
+			name:            "read error non-existent file",
+			content:         "", // sentinel: uses non-existent path
+			taskDesc:        "any",
+			feedback:        "any",
+			wantErr:         true,
+			wantErrContains: "runner: inject feedback:",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tmpDir := t.TempDir()
+
+			var tasksPath string
+			if tc.name == "read error non-existent file" {
+				tasksPath = filepath.Join(tmpDir, "nonexistent", "sprint-tasks.md")
+			} else {
+				tasksPath = writeTasksFile(t, tmpDir, tc.content)
+			}
+
+			err := runner.InjectFeedback(tasksPath, tc.taskDesc, tc.feedback)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("want error, got nil")
+				}
+				if !strings.Contains(err.Error(), tc.wantErrContains) {
+					t.Errorf("error = %q, want containing %q", err.Error(), tc.wantErrContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			data, readErr := os.ReadFile(tasksPath)
+			if readErr != nil {
+				t.Fatalf("read result file: %v", readErr)
+			}
+			result := string(data)
+			for _, want := range tc.wantContains {
+				if !strings.Contains(result, want) {
+					t.Errorf("result missing %q\ngot:\n%s", want, result)
+				}
+			}
+		})
+	}
+}
+
+// TestRevertTask_Scenarios verifies task revert [x]→[ ] (AC6).
+// Coverage gap: os.WriteFile error path (line 280 in runner.go) is not testable without DI —
+// ReadFile and WriteFile use the same path, so we cannot make Read succeed but Write fail.
+// The error wrapping pattern is verified by the ReadFile error case.
+func TestRevertTask_Scenarios(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name            string
+		content         string
+		taskDesc        string
+		wantErr         bool
+		wantErrContains string
+		wantContains    []string
+	}{
+		{
+			name:     "basic revert",
+			content:  "- [x] Setup project [GATE]\n- [ ] Write tests\n",
+			taskDesc: "Setup project [GATE]",
+			wantContains: []string{
+				"- [ ] Setup project [GATE]",
+				"- [ ] Write tests",
+			},
+		},
+		{
+			name:     "preserves other done tasks",
+			content:  "- [x] Task alpha\n- [x] Task beta [GATE]\n- [ ] Task gamma\n",
+			taskDesc: "Task beta [GATE]",
+			wantContains: []string{
+				"- [x] Task alpha",       // unchanged
+				"- [ ] Task beta [GATE]", // reverted
+				"- [ ] Task gamma",       // unchanged
+			},
+		},
+		{
+			name:            "task not found as done",
+			content:         "- [ ] Setup project [GATE]\n",
+			taskDesc:        "Setup project [GATE]",
+			wantErr:         true,
+			wantErrContains: "runner: revert task: task not found: Setup project [GATE]",
+		},
+		{
+			name:            "task not found at all",
+			content:         "- [x] Setup project [GATE]\n",
+			taskDesc:        "Nonexistent task",
+			wantErr:         true,
+			wantErrContains: "runner: revert task: task not found: Nonexistent task",
+		},
+		{
+			name:            "read error non-existent file",
+			content:         "",
+			taskDesc:        "any",
+			wantErr:         true,
+			wantErrContains: "runner: revert task:",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tmpDir := t.TempDir()
+
+			var tasksPath string
+			if tc.name == "read error non-existent file" {
+				tasksPath = filepath.Join(tmpDir, "nonexistent", "sprint-tasks.md")
+			} else {
+				tasksPath = writeTasksFile(t, tmpDir, tc.content)
+			}
+
+			err := runner.RevertTask(tasksPath, tc.taskDesc)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("want error, got nil")
+				}
+				if !strings.Contains(err.Error(), tc.wantErrContains) {
+					t.Errorf("error = %q, want containing %q", err.Error(), tc.wantErrContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			data, readErr := os.ReadFile(tasksPath)
+			if readErr != nil {
+				t.Fatalf("read result file: %v", readErr)
+			}
+			result := string(data)
+			for _, want := range tc.wantContains {
+				if !strings.Contains(result, want) {
+					t.Errorf("result missing %q\ngot:\n%s", want, result)
+				}
+			}
+		})
+	}
+}
+
+// TestRunner_Execute_GateRetry verifies retry injects feedback, reverts task, re-processes (AC4, AC6, AC7).
+func TestRunner_Execute_GateRetry(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Start with open task — ReviewFn will mark [x] (simulating Claude execution)
+	tasksPath := writeTasksFile(t, tmpDir, gateOpenTask)
+
+	// MockClaude: 2 executions (1st before retry, 2nd after retry)
+	scenario := testutil.Scenario{
+		Name: "gate-retry",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "retry-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "retry-002"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+
+	// 2 iterations: before1/after1 (commit detected) + before2/after2
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}, [2]string{"ccc", "ddd"}),
+	}
+
+	cfg := testConfig(tmpDir, 3) // MaxIterations=3 to allow retry + re-process
+	cfg.GatesEnabled = true
+
+	// ReviewFn: each call marks task [x] (simulating Claude marking done) then returns clean.
+	// On 2nd call, captures file content (to verify feedback injection) then marks all done.
+	reviewCount := 0
+	var capturedAfterRetry string // file content captured at start of 2nd review
+	reviewFn := func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		reviewCount++
+		if reviewCount == 1 {
+			// 1st review: mark task [x] — gate retry will revert to [ ]
+			// Error ignored: test helper in controlled tmpDir
+			_ = os.WriteFile(tasksPath, []byte(gateOpenTaskDone), 0644)
+		} else {
+			// 2nd review: capture file state BEFORE overwriting (verify inject+revert)
+			data, _ := os.ReadFile(tasksPath)
+			capturedAfterRetry = string(data)
+			// Mark all done so outer loop exits
+			// Error ignored: test helper in controlled tmpDir
+			_ = os.WriteFile(tasksPath, []byte(allDoneTasks), 0644)
+		}
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	// Gate sequence: 1st call = retry with feedback, 2nd call = approve
+	gp := &sequenceGatePrompt{
+		decisions: []*config.GateDecision{
+			{Action: config.ActionRetry, Feedback: "Need validation"},
+			{Action: config.ActionApprove},
+		},
+	}
+
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             mock,
+		TasksFile:       tasksPath,
+		ReviewFn:        reviewFn,
+		GatePromptFn:    gp.fn,
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: want nil, got: %v", err)
+	}
+
+	// Verify gate was called twice (retry then approve)
+	if gp.calls != 2 {
+		t.Errorf("GatePromptFn calls = %d, want 2", gp.calls)
+	}
+
+	// Verify review was called twice
+	if reviewCount != 2 {
+		t.Errorf("ReviewFn count = %d, want 2", reviewCount)
+	}
+
+	// Verify task text passed to gate prompt
+	if len(gp.taskTexts) < 1 {
+		t.Fatal("expected at least 1 taskText recorded")
+	}
+	if !strings.Contains(gp.taskTexts[0], "Setup project") {
+		t.Errorf("1st gate taskText = %q, want containing 'Setup project'", gp.taskTexts[0])
+	}
+
+	// M1: Verify feedback was actually injected into file (AC4 end-to-end)
+	if !strings.Contains(capturedAfterRetry, config.FeedbackPrefix+" Need validation") {
+		t.Errorf("after retry, file missing feedback line\ngot:\n%s", capturedAfterRetry)
+	}
+	// Verify task was reverted to [ ] (AC6 end-to-end)
+	if !strings.Contains(capturedAfterRetry, "- [ ] Setup project [GATE]") {
+		t.Errorf("after retry, task not reverted to [ ]\ngot:\n%s", capturedAfterRetry)
+	}
+}
+
+// TestRunner_Execute_GateRetryEmptyFeedback verifies retry with empty feedback skips injection (AC4).
+func TestRunner_Execute_GateRetryEmptyFeedback(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, gateOpenTask)
+
+	scenario := testutil.Scenario{
+		Name: "gate-retry-empty",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "empty-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "empty-002"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}, [2]string{"ccc", "ddd"}),
+	}
+
+	cfg := testConfig(tmpDir, 3)
+	cfg.GatesEnabled = true
+
+	// ReviewFn: 1st marks [x] (gate retry reverts), 2nd captures file then marks all done
+	reviewCount := 0
+	var capturedAfterRetry string
+	reviewFn := func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		reviewCount++
+		if reviewCount == 1 {
+			// Error ignored: test helper in controlled tmpDir
+			_ = os.WriteFile(tasksPath, []byte(gateOpenTaskDone), 0644)
+		} else {
+			// Capture file state to verify no feedback was injected
+			data, _ := os.ReadFile(tasksPath)
+			capturedAfterRetry = string(data)
+			// Error ignored: test helper in controlled tmpDir
+			_ = os.WriteFile(tasksPath, []byte(allDoneTasks), 0644)
+		}
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	gp := &sequenceGatePrompt{
+		decisions: []*config.GateDecision{
+			{Action: config.ActionRetry, Feedback: ""}, // empty feedback
+			{Action: config.ActionApprove},
+		},
+	}
+
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             mock,
+		TasksFile:       tasksPath,
+		ReviewFn:        reviewFn,
+		GatePromptFn:    gp.fn,
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: want nil, got: %v", err)
+	}
+
+	if gp.calls != 2 {
+		t.Errorf("GatePromptFn calls = %d, want 2", gp.calls)
+	}
+	if reviewCount != 2 {
+		t.Errorf("ReviewFn count = %d, want 2", reviewCount)
+	}
+
+	// M4: Verify empty feedback was NOT injected (negative assertion)
+	if strings.Contains(capturedAfterRetry, config.FeedbackPrefix) {
+		t.Errorf("after empty-feedback retry, file should NOT contain %q\ngot:\n%s", config.FeedbackPrefix, capturedAfterRetry)
+	}
+	// Task should still be reverted to [ ] even without feedback
+	if !strings.Contains(capturedAfterRetry, "- [ ] Setup project [GATE]") {
+		t.Errorf("after retry, task not reverted to [ ]\ngot:\n%s", capturedAfterRetry)
+	}
+}
+
+// TestRunner_Execute_GateRetryInjectError verifies inject failure propagation (AC4 error path).
+func TestRunner_Execute_GateRetryInjectError(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, gateOpenTask)
+
+	scenario := testutil.Scenario{
+		Name: "gate-retry-inject-err",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "injerr-001"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	cfg := testConfig(tmpDir, 3)
+	cfg.GatesEnabled = true
+
+	gp := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionRetry, Feedback: "trigger inject"},
+	}
+
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             mock,
+		TasksFile:       tasksPath,
+		ReviewFn:        cleanReviewFn,
+		GatePromptFn:    gp.fn,
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	// ReviewFn marks task [x] then swaps TasksFile to bad path so InjectFeedback fails
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		// Error ignored: test helper in controlled tmpDir
+		_ = os.WriteFile(tasksPath, []byte(gateOpenTaskDone), 0644)
+		r.TasksFile = filepath.Join(tmpDir, "nonexistent", "sprint-tasks.md")
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: inject feedback:") {
+		t.Errorf("error = %q, want containing 'runner: inject feedback:'", err.Error())
+	}
+	if gp.count != 1 {
+		t.Errorf("GatePromptFn count = %d, want 1", gp.count)
+	}
+}
+
+// =============================================================================
+// Story 5.4: Checkpoint gates tests (AC: #1-#8)
+// =============================================================================
+
+// TestRunner_Execute_CheckpointFires verifies checkpoint gate fires every N tasks (AC1, AC2, AC4).
+func TestRunner_Execute_CheckpointFires(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, fourOpenTasks)
+
+	// 4 tasks = 4 execute steps
+	scenario := testutil.Scenario{
+		Name: "checkpoint-fires",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "cp-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "cp-002"},
+			{Type: "execute", ExitCode: 0, SessionID: "cp-003"},
+			{Type: "execute", ExitCode: 0, SessionID: "cp-004"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs(
+			[2]string{"a1", "a2"}, [2]string{"b1", "b2"},
+			[2]string{"c1", "c2"}, [2]string{"d1", "d2"},
+		),
+	}
+
+	cfg := testConfig(tmpDir, 5)
+	cfg.GatesEnabled = true
+	cfg.GatesCheckpoint = 2
+
+	reviewCount := 0
+	gp := &sequenceGatePrompt{
+		decisions: []*config.GateDecision{
+			{Action: config.ActionApprove},
+			{Action: config.ActionApprove},
+		},
+	}
+
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             mock,
+		TasksFile:       tasksPath,
+		ReviewFn:        progressiveReviewFn(tasksPath, &reviewCount),
+		GatePromptFn:    gp.fn,
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: want nil, got: %v", err)
+	}
+
+	// AC1: checkpoint fires after task 2 and task 4 (2 calls total)
+	if gp.calls != 2 {
+		t.Errorf("GatePromptFn calls = %d, want 2", gp.calls)
+	}
+
+	// AC2: counter cumulative — review called 4 times (one per task)
+	if reviewCount != 4 {
+		t.Errorf("ReviewFn count = %d, want 4", reviewCount)
+	}
+
+	// AC1: gate text contains checkpoint indicator
+	for i, text := range gp.taskTexts {
+		if !strings.Contains(text, "(checkpoint every 2)") {
+			t.Errorf("gate text[%d] = %q, want containing '(checkpoint every 2)'", i, text)
+		}
+	}
+
+	// AC4: checkpoint fires on non-GATE tasks — verify no [GATE] in text
+	for i, text := range gp.taskTexts {
+		if strings.Contains(text, "[GATE]") {
+			t.Errorf("gate text[%d] = %q, should NOT contain '[GATE]' (checkpoint-only)", i, text)
+		}
+	}
+
+	// Verify task identity: checkpoint at task 2 and task 4
+	if len(gp.taskTexts) >= 2 {
+		if !strings.Contains(gp.taskTexts[0], "Task two") {
+			t.Errorf("gate text[0] = %q, want containing 'Task two' (checkpoint at task 2)", gp.taskTexts[0])
+		}
+		if !strings.Contains(gp.taskTexts[1], "Task four") {
+			t.Errorf("gate text[1] = %q, want containing 'Task four' (checkpoint at task 4)", gp.taskTexts[1])
+		}
+	}
+}
+
+// TestRunner_Execute_CheckpointNotTriggered verifies checkpoint does not fire when
+// disabled (AC6: --every 0) or when gates flag is off (AC7: GatesEnabled=false).
+func TestRunner_Execute_CheckpointNotTriggered(t *testing.T) {
+	cases := []struct {
+		name            string
+		gatesEnabled    bool
+		gatesCheckpoint int
+	}{
+		{"every 0 disables checkpoint AC6", true, 0},
+		{"no gates flag disables checkpoint AC7", false, 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			tasksPath := writeTasksFile(t, tmpDir, threeOpenTasks)
+
+			scenario := testutil.Scenario{
+				Name: "checkpoint-not-triggered",
+				Steps: []testutil.ScenarioStep{
+					{Type: "execute", ExitCode: 0, SessionID: "nt-001"},
+					{Type: "execute", ExitCode: 0, SessionID: "nt-002"},
+					{Type: "execute", ExitCode: 0, SessionID: "nt-003"},
+				},
+			}
+			testutil.SetupMockClaude(t, scenario)
+
+			mock := &testutil.MockGitClient{
+				HeadCommits: headCommitPairs(
+					[2]string{"a1", "a2"}, [2]string{"b1", "b2"}, [2]string{"c1", "c2"},
+				),
+			}
+
+			cfg := testConfig(tmpDir, 5)
+			cfg.GatesEnabled = c.gatesEnabled
+			cfg.GatesCheckpoint = c.gatesCheckpoint
+
+			gp := &trackingGatePrompt{
+				decision: &config.GateDecision{Action: config.ActionApprove},
+			}
+
+			reviewCount := 0
+			r := &runner.Runner{
+				Cfg:             cfg,
+				Git:             mock,
+				TasksFile:       tasksPath,
+				ReviewFn:        progressiveReviewFn(tasksPath, &reviewCount),
+				GatePromptFn:    gp.fn,
+				ResumeExtractFn: noopResumeExtractFn,
+				SleepFn:         noopSleepFn,
+				Knowledge:       &runner.NoOpKnowledgeWriter{},
+			}
+
+			err := r.Execute(context.Background())
+			if err != nil {
+				t.Fatalf("Execute: want nil, got: %v", err)
+			}
+
+			if gp.count != 0 {
+				t.Errorf("GatePromptFn count = %d, want 0", gp.count)
+			}
+			if reviewCount != 3 {
+				t.Errorf("ReviewFn count = %d, want 3", reviewCount)
+			}
+		})
+	}
+}
+
+// TestRunner_Execute_CheckpointCombinedWithGate verifies combined GATE + checkpoint = single prompt (AC5).
+func TestRunner_Execute_CheckpointCombinedWithGate(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, fourOpenTasksWithGate)
+
+	// 4 tasks
+	scenario := testutil.Scenario{
+		Name: "checkpoint-combined",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "comb-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "comb-002"},
+			{Type: "execute", ExitCode: 0, SessionID: "comb-003"},
+			{Type: "execute", ExitCode: 0, SessionID: "comb-004"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs(
+			[2]string{"a1", "a2"}, [2]string{"b1", "b2"},
+			[2]string{"c1", "c2"}, [2]string{"d1", "d2"},
+		),
+	}
+
+	cfg := testConfig(tmpDir, 5)
+	cfg.GatesEnabled = true
+	cfg.GatesCheckpoint = 2
+
+	gp := &sequenceGatePrompt{
+		decisions: []*config.GateDecision{
+			{Action: config.ActionApprove}, // task 2: combined GATE + checkpoint
+			{Action: config.ActionApprove}, // task 4: checkpoint only
+		},
+	}
+
+	reviewCount := 0
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             mock,
+		TasksFile:       tasksPath,
+		ReviewFn:        progressiveReviewFn(tasksPath, &reviewCount),
+		GatePromptFn:    gp.fn,
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: want nil, got: %v", err)
+	}
+
+	// AC5: ONE prompt for task 2 (GATE + checkpoint combined), ONE for task 4 (checkpoint)
+	if gp.calls != 2 {
+		t.Errorf("GatePromptFn calls = %d, want 2", gp.calls)
+	}
+
+	// AC5: task 2 text has both [GATE] and checkpoint indicator
+	if len(gp.taskTexts) < 1 {
+		t.Fatal("expected at least 1 taskText recorded")
+	}
+	if !strings.Contains(gp.taskTexts[0], "[GATE]") {
+		t.Errorf("task 2 gate text = %q, want containing '[GATE]'", gp.taskTexts[0])
+	}
+	if !strings.Contains(gp.taskTexts[0], "(checkpoint every 2)") {
+		t.Errorf("task 2 gate text = %q, want containing '(checkpoint every 2)'", gp.taskTexts[0])
+	}
+
+	// Task 4: checkpoint only (no [GATE])
+	if len(gp.taskTexts) >= 2 {
+		if strings.Contains(gp.taskTexts[1], "[GATE]") {
+			t.Errorf("task 4 gate text = %q, should NOT contain '[GATE]'", gp.taskTexts[1])
+		}
+		if !strings.Contains(gp.taskTexts[1], "(checkpoint every 2)") {
+			t.Errorf("task 4 gate text = %q, want containing '(checkpoint every 2)'", gp.taskTexts[1])
+		}
+	}
+
+	if reviewCount != 4 {
+		t.Errorf("ReviewFn count = %d, want 4", reviewCount)
+	}
+}
+
+// TestRunner_Execute_CheckpointGateOnly verifies GATE fires without checkpoint when N not reached (AC1, AC4).
+func TestRunner_Execute_CheckpointGateOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Task 1 has [GATE], checkpoint=5 (won't fire for 1 task)
+	tasksPath := writeTasksFile(t, tmpDir, gateOpenTask)
+
+	scenario := testutil.Scenario{
+		Name: "checkpoint-gate-only",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "go-001"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	cfg := testConfig(tmpDir, 1)
+	cfg.GatesEnabled = true
+	cfg.GatesCheckpoint = 5 // high — checkpoint won't fire on task 1
+
+	gp := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionApprove},
+	}
+
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             mock,
+		TasksFile:       tasksPath,
+		ReviewFn:        cleanReviewFn,
+		GatePromptFn:    gp.fn,
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: want nil, got: %v", err)
+	}
+
+	// AC1: gate fires for [GATE] tag, NOT checkpoint
+	if gp.count != 1 {
+		t.Errorf("GatePromptFn count = %d, want 1 (GATE tag trigger)", gp.count)
+	}
+
+	// Verify gate text has [GATE] but NOT checkpoint indicator
+	if !strings.Contains(gp.taskText, "[GATE]") {
+		t.Errorf("gate text = %q, want containing '[GATE]'", gp.taskText)
+	}
+	if strings.Contains(gp.taskText, "(checkpoint every") {
+		t.Errorf("gate text = %q, should NOT contain checkpoint (N not reached)", gp.taskText)
+	}
+}
+
+// TestRunner_Execute_CheckpointSkipCounts verifies skipped tasks count toward checkpoint (AC3).
+// When user skips at a [GATE] task, completedTasks is NOT decremented (unlike retry),
+// so checkpoint still fires at the correct cumulative count.
+func TestRunner_Execute_CheckpointSkipCounts(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, threeTasksWithGate)
+
+	scenario := testutil.Scenario{
+		Name: "checkpoint-skip-counts",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "sk-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "sk-002"},
+			{Type: "execute", ExitCode: 0, SessionID: "sk-003"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs(
+			[2]string{"a1", "a2"}, [2]string{"b1", "b2"}, [2]string{"c1", "c2"},
+		),
+	}
+
+	cfg := testConfig(tmpDir, 5)
+	cfg.GatesEnabled = true
+	cfg.GatesCheckpoint = 2
+
+	// Gate sequence: 1st call (task 1, GATE, completedTasks=1) = skip,
+	// 2nd call (task 2, checkpoint, completedTasks=2) = approve
+	gp := &sequenceGatePrompt{
+		decisions: []*config.GateDecision{
+			{Action: config.ActionSkip},
+			{Action: config.ActionApprove},
+		},
+	}
+
+	reviewCount := 0
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             mock,
+		TasksFile:       tasksPath,
+		ReviewFn:        progressiveReviewFn(tasksPath, &reviewCount),
+		GatePromptFn:    gp.fn,
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: want nil, got: %v", err)
+	}
+
+	// AC3: skip does NOT decrement counter → checkpoint fires at task 2 (completedTasks=2)
+	if gp.calls != 2 {
+		t.Errorf("GatePromptFn calls = %d, want 2 (GATE skip + checkpoint)", gp.calls)
+	}
+
+	// 1st call: GATE only (completedTasks=1, not divisible by 2)
+	if len(gp.taskTexts) >= 1 {
+		if !strings.Contains(gp.taskTexts[0], "[GATE]") {
+			t.Errorf("call 1 text = %q, want containing '[GATE]'", gp.taskTexts[0])
+		}
+		if strings.Contains(gp.taskTexts[0], "(checkpoint every") {
+			t.Errorf("call 1 text = %q, should NOT have checkpoint (count=1)", gp.taskTexts[0])
+		}
+	}
+
+	// 2nd call: checkpoint (completedTasks=2 — skip did not decrement)
+	if len(gp.taskTexts) >= 2 {
+		if !strings.Contains(gp.taskTexts[1], "(checkpoint every 2)") {
+			t.Errorf("call 2 text = %q, want containing '(checkpoint every 2)'", gp.taskTexts[1])
+		}
+	}
+
+	if reviewCount != 3 {
+		t.Errorf("ReviewFn count = %d, want 3", reviewCount)
+	}
+}
+
+// TestRunner_Execute_CheckpointRetryAdjusts verifies counter adjusted on retry (AC8).
+func TestRunner_Execute_CheckpointRetryAdjusts(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, twoTasksWithGate)
+
+	// 3 executions: task1 first attempt, task1 retry, task2
+	scenario := testutil.Scenario{
+		Name: "checkpoint-retry-adjust",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "cra-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "cra-002"},
+			{Type: "execute", ExitCode: 0, SessionID: "cra-003"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs(
+			[2]string{"a1", "a2"}, [2]string{"b1", "b2"}, [2]string{"c1", "c2"},
+		),
+	}
+
+	cfg := testConfig(tmpDir, 5)
+	cfg.GatesEnabled = true
+	cfg.GatesCheckpoint = 2
+
+	// ReviewFn: progressively marks each open task as [x]
+	reviewCount := 0
+	reviewFn := progressiveReviewFn(tasksPath, &reviewCount)
+
+	// Gate sequence: 1st call (task 1, GATE trigger) = retry, 2nd call (task 1 re-done, GATE) = approve
+	// 3rd call should be checkpoint at completedTasks=2 for task 2
+	gp := &sequenceGatePrompt{
+		decisions: []*config.GateDecision{
+			{Action: config.ActionRetry, Feedback: ""},
+			{Action: config.ActionApprove},
+			{Action: config.ActionApprove},
+		},
+	}
+
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             mock,
+		TasksFile:       tasksPath,
+		ReviewFn:        reviewFn,
+		GatePromptFn:    gp.fn,
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: want nil, got: %v", err)
+	}
+
+	// AC8: gate called 3 times:
+	// 1. task 1 (GATE, completedTasks=1) → retry → completedTasks back to 0
+	// 2. task 1 re-done (GATE, completedTasks=1) → approve
+	// 3. task 2 (checkpoint, completedTasks=2) → approve
+	if gp.calls != 3 {
+		t.Errorf("GatePromptFn calls = %d, want 3", gp.calls)
+	}
+
+	// 1st call: GATE only (completedTasks=1, not divisible by 2)
+	if len(gp.taskTexts) >= 1 {
+		if !strings.Contains(gp.taskTexts[0], "[GATE]") {
+			t.Errorf("call 1 text = %q, want containing '[GATE]'", gp.taskTexts[0])
+		}
+		if strings.Contains(gp.taskTexts[0], "(checkpoint every") {
+			t.Errorf("call 1 text = %q, should NOT have checkpoint (count=1)", gp.taskTexts[0])
+		}
+	}
+
+	// 2nd call: GATE only again (completedTasks=1 after decrement+re-increment)
+	if len(gp.taskTexts) >= 2 {
+		if !strings.Contains(gp.taskTexts[1], "[GATE]") {
+			t.Errorf("call 2 text = %q, want containing '[GATE]'", gp.taskTexts[1])
+		}
+		if strings.Contains(gp.taskTexts[1], "(checkpoint every") {
+			t.Errorf("call 2 text = %q, should NOT have checkpoint (count=1)", gp.taskTexts[1])
+		}
+	}
+
+	// 3rd call: checkpoint (completedTasks=2, divisible by 2)
+	if len(gp.taskTexts) >= 3 {
+		if !strings.Contains(gp.taskTexts[2], "(checkpoint every 2)") {
+			t.Errorf("call 3 text = %q, want containing '(checkpoint every 2)'", gp.taskTexts[2])
+		}
+	}
+
+	// Review called 3 times (task1, task1-retry, task2)
+	if reviewCount != 3 {
+		t.Errorf("ReviewFn count = %d, want 3", reviewCount)
+	}
+}
+
+// TestRunner_Execute_GateRetryRevertError verifies revert failure propagation (AC6 error path).
+func TestRunner_Execute_GateRetryRevertError(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, gateOpenTask)
+
+	scenario := testutil.Scenario{
+		Name: "gate-retry-revert-err",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "reverterr-001"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	cfg := testConfig(tmpDir, 3)
+	cfg.GatesEnabled = true
+
+	// Empty feedback: skips InjectFeedback, goes straight to RevertTask
+	gp := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionRetry, Feedback: ""},
+	}
+
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             mock,
+		TasksFile:       tasksPath,
+		ReviewFn:        cleanReviewFn,
+		GatePromptFn:    gp.fn,
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	// ReviewFn marks task [x] then swaps TasksFile to bad path so RevertTask fails
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		// Error ignored: test helper in controlled tmpDir
+		_ = os.WriteFile(tasksPath, []byte(gateOpenTaskDone), 0644)
+		r.TasksFile = filepath.Join(tmpDir, "nonexistent", "sprint-tasks.md")
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: revert task:") {
+		t.Errorf("error = %q, want containing 'runner: revert task:'", err.Error())
+	}
+	if gp.count != 1 {
+		t.Errorf("GatePromptFn count = %d, want 1", gp.count)
+	}
+}
+
+// =============================================================================
+// Story 5.5: Emergency gate tests
+// =============================================================================
+
+// TestSkipTask_Scenarios verifies SkipTask marks [ ]→[x] (AC6).
+func TestSkipTask_Scenarios(t *testing.T) {
+	tests := []struct {
+		name            string
+		content         string
+		taskDesc        string
+		skipCreate      bool   // true = don't create file (test read error)
+		wantErr         bool
+		wantErrContains string
+		wantContent     string // expected file content after skip (empty = no check)
+	}{
+		{
+			name:        "basic skip marks open task done",
+			content:     "- [ ] Setup project\n- [ ] Write tests\n",
+			taskDesc:    "Setup project",
+			wantErr:     false,
+			wantContent: "- [x] Setup project\n- [ ] Write tests\n",
+		},
+		{
+			name:        "skip preserves other tasks unchanged",
+			content:     "- [x] Done task\n- [ ] Open task\n- [ ] Another open\n",
+			taskDesc:    "Open task",
+			wantErr:     false,
+			wantContent: "- [x] Done task\n- [x] Open task\n- [ ] Another open\n",
+		},
+		{
+			name:            "task not found returns error",
+			content:         "- [ ] Task one\n- [ ] Task two\n",
+			taskDesc:        "Nonexistent task",
+			wantErr:         true,
+			wantErrContains: "runner: skip task: task not found: Nonexistent task",
+		},
+		{
+			name:            "already done task not found as open",
+			content:         "- [x] Already done\n",
+			taskDesc:        "Already done",
+			wantErr:         true,
+			wantErrContains: "runner: skip task: task not found:",
+		},
+		{
+			name:            "read error on nonexistent file",
+			content:         "",
+			taskDesc:        "Any task",
+			skipCreate:      true,
+			wantErr:         true,
+			wantErrContains: "runner: skip task:",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			tasksPath := filepath.Join(tmpDir, "sprint-tasks.md")
+
+			if !tt.skipCreate {
+				if err := os.WriteFile(tasksPath, []byte(tt.content), 0644); err != nil {
+					t.Fatalf("write tasks: %v", err)
+				}
+			}
+
+			err := runner.SkipTask(tasksPath, tt.taskDesc)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("want error, got nil")
+				}
+				if tt.wantErrContains != "" && !strings.Contains(err.Error(), tt.wantErrContains) {
+					t.Errorf("error = %q, want containing %q", err.Error(), tt.wantErrContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			got, err := os.ReadFile(tasksPath)
+			if err != nil {
+				t.Fatalf("read result: %v", err)
+			}
+			if string(got) != tt.wantContent {
+				t.Errorf("content:\ngot:  %q\nwant: %q", string(got), tt.wantContent)
+			}
+		})
+	}
+}
+
+// TestRunner_Execute_EmergencyGateExecuteRetry verifies retry at execute exhaustion
+// resets counter, injects feedback, runner retries (AC1, AC5).
+func TestRunner_Execute_EmergencyGateExecuteRetry(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksContent := threeOpenTasks
+
+	// Need enough steps: MaxIterations=1 means executeAttempts=1 triggers emergency.
+	// Emergency retry resets to 0, then next attempt succeeds (commit detected).
+	// 2 attempts total: attempt 1 (no commit, emergency, retry), attempt 2 (commit).
+	// After retry, review clean → task 1 done. Then tasks 2,3 complete normally.
+	scenario := testutil.Scenario{
+		Name: "emergency-execute-retry",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "em-001"}, // attempt 1: no commit
+			{Type: "execute", ExitCode: 0, SessionID: "em-002"}, // attempt 2: commit (after retry)
+		},
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, tasksContent, scenario,
+		&testutil.MockGitClient{
+			HeadCommits: headCommitPairs(
+				[2]string{"aaa", "aaa"}, // attempt 1: same SHA → no commit → emergency
+				[2]string{"aaa", "bbb"}, // attempt 2: different SHA → commit
+			),
+		})
+	r.Cfg.MaxIterations = 1
+	r.Cfg.GatesEnabled = true
+
+	emergencyCount := 0
+	emergencyText := ""
+	r.EmergencyGatePromptFn = func(_ context.Context, text string) (*config.GateDecision, error) {
+		emergencyCount++
+		emergencyText = text
+		return &config.GateDecision{
+			Action:   config.ActionRetry,
+			Feedback: "fix the build",
+		}, nil
+	}
+
+	// ReviewFn captures intermediate file state to verify feedback injection,
+	// then marks all done for loop exit.
+	reviewCount := 0
+	var feedbackCaptured string
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		reviewCount++
+		// Capture file state on first review call (after emergency retry + feedback inject)
+		if reviewCount == 1 {
+			data, readErr := os.ReadFile(r.TasksFile)
+			if readErr == nil {
+				feedbackCaptured = string(data)
+			}
+		}
+		// Mark all done for loop exit
+		// Error ignored: test helper in controlled tmpDir
+		_ = os.WriteFile(r.TasksFile, []byte(allDoneTasks), 0644)
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if emergencyCount != 1 {
+		t.Errorf("EmergencyGatePromptFn count = %d, want 1", emergencyCount)
+	}
+	if !strings.Contains(emergencyText, "execute attempts exhausted") {
+		t.Errorf("emergency text = %q, want containing 'execute attempts exhausted'", emergencyText)
+	}
+	if !strings.Contains(emergencyText, "1/1") {
+		t.Errorf("emergency text = %q, want containing '1/1'", emergencyText)
+	}
+	if !strings.Contains(emergencyText, "Task one") {
+		t.Errorf("emergency text = %q, want containing 'Task one'", emergencyText)
+	}
+	// Verify feedback was injected with correct format (captured before review overwrite)
+	if !strings.Contains(feedbackCaptured, config.FeedbackPrefix) {
+		t.Errorf("tasks file missing FeedbackPrefix %q\ncaptured: %s", config.FeedbackPrefix, feedbackCaptured)
+	}
+	if !strings.Contains(feedbackCaptured, "fix the build") {
+		t.Errorf("tasks file missing injected feedback 'fix the build'\ncaptured: %s", feedbackCaptured)
+	}
+	if reviewCount < 1 {
+		t.Errorf("reviewCount = %d, want >= 1", reviewCount)
+	}
+}
+
+// TestRunner_Execute_EmergencyGateExecuteSkip verifies skip at execute exhaustion
+// marks task [x] and proceeds to next task (AC1, AC6).
+func TestRunner_Execute_EmergencyGateExecuteSkip(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 2 tasks: task 1 always fails (no commit), task 2 succeeds.
+	scenario := testutil.Scenario{
+		Name: "emergency-execute-skip",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "skip-001"}, // task 1: no commit
+			{Type: "execute", ExitCode: 0, SessionID: "skip-002"}, // task 2: commit
+		},
+	}
+
+	twoTasks := "# Sprint Tasks\n\n- [ ] Task one\n- [ ] Task two\n"
+	r, _ := setupRunnerIntegration(t, tmpDir, twoTasks, scenario,
+		&testutil.MockGitClient{
+			HeadCommits: headCommitPairs(
+				[2]string{"aaa", "aaa"}, // task 1: no commit → emergency
+				[2]string{"aaa", "bbb"}, // task 2: commit
+			),
+		})
+	r.Cfg.MaxIterations = 1
+	r.Cfg.GatesEnabled = true
+
+	emergencyCount := 0
+	r.EmergencyGatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		emergencyCount++
+		return &config.GateDecision{Action: config.ActionSkip}, nil
+	}
+
+	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if emergencyCount != 1 {
+		t.Errorf("EmergencyGatePromptFn count = %d, want 1", emergencyCount)
+	}
+	// Verify task 1 was marked [x] via SkipTask
+	content, err := os.ReadFile(r.TasksFile)
+	if err != nil {
+		t.Fatalf("read tasks: %v", err)
+	}
+	if !strings.Contains(string(content), "- [x] Task one") {
+		t.Errorf("task 1 not marked done via SkipTask\ngot: %s", string(content))
+	}
+}
+
+// TestRunner_Execute_EmergencyGateExecuteQuit verifies quit at execute exhaustion
+// returns wrapped GateDecision error (AC1, AC7).
+func TestRunner_Execute_EmergencyGateExecuteQuit(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	scenario := testutil.Scenario{
+		Name: "emergency-execute-quit",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "quit-001"},
+		},
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, threeOpenTasks, scenario,
+		&testutil.MockGitClient{
+			HeadCommits: headCommitPairs([2]string{"aaa", "aaa"}), // no commit
+		})
+	r.Cfg.MaxIterations = 1
+	r.Cfg.GatesEnabled = true
+
+	r.EmergencyGatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		return &config.GateDecision{Action: config.ActionQuit}, nil
+	}
+
+	err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: emergency gate:") {
+		t.Errorf("error = %q, want containing 'runner: emergency gate:'", err.Error())
+	}
+	// Verify GateDecision can be extracted
+	var gd *config.GateDecision
+	if !errors.As(err, &gd) {
+		t.Fatalf("errors.As(err, *GateDecision): want true, got false; err = %v", err)
+	}
+	if gd.Action != config.ActionQuit {
+		t.Errorf("GateDecision.Action = %q, want %q", gd.Action, config.ActionQuit)
+	}
+}
+
+// TestRunner_Execute_EmergencyGateReviewRetry verifies retry at review cycles exhaustion
+// resets counter, injects feedback, runner retries (AC2, AC5).
+func TestRunner_Execute_EmergencyGateReviewRetry(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// MaxReviewIterations=1: after 1 non-clean review, emergency fires.
+	// Retry resets reviewCycles to 0. Next iteration: execute succeeds, review clean.
+	scenario := testutil.Scenario{
+		Name: "emergency-review-retry",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "rev-001"}, // execute 1
+			{Type: "execute", ExitCode: 0, SessionID: "rev-002"}, // execute 2 (after review retry)
+		},
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, threeOpenTasks, scenario,
+		&testutil.MockGitClient{
+			HeadCommits: headCommitPairs(
+				[2]string{"aaa", "bbb"}, // execute 1: commit
+				[2]string{"bbb", "ccc"}, // execute 2: commit
+			),
+		})
+	r.Cfg.MaxReviewIterations = 1
+	r.Cfg.GatesEnabled = true
+
+	emergencyCount := 0
+	emergencyText := ""
+	r.EmergencyGatePromptFn = func(_ context.Context, text string) (*config.GateDecision, error) {
+		emergencyCount++
+		emergencyText = text
+		return &config.GateDecision{
+			Action:   config.ActionRetry,
+			Feedback: "check test coverage",
+		}, nil
+	}
+
+	reviewCount := 0
+	var feedbackCaptured string
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		reviewCount++
+		if reviewCount == 1 {
+			return runner.ReviewResult{Clean: false}, nil // non-clean → triggers emergency
+		}
+		// Capture file state on second review call (after emergency retry + feedback inject)
+		if reviewCount == 2 {
+			data, readErr := os.ReadFile(r.TasksFile)
+			if readErr == nil {
+				feedbackCaptured = string(data)
+			}
+		}
+		// After retry: mark all done and return clean
+		// Error ignored: test helper in controlled tmpDir
+		_ = os.WriteFile(r.TasksFile, []byte(allDoneTasks), 0644)
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if emergencyCount != 1 {
+		t.Errorf("EmergencyGatePromptFn count = %d, want 1", emergencyCount)
+	}
+	if !strings.Contains(emergencyText, "review cycles exhausted") {
+		t.Errorf("emergency text = %q, want containing 'review cycles exhausted'", emergencyText)
+	}
+	if !strings.Contains(emergencyText, "1/1") {
+		t.Errorf("emergency text = %q, want containing '1/1'", emergencyText)
+	}
+	if !strings.Contains(emergencyText, "Task one") {
+		t.Errorf("emergency text = %q, want containing 'Task one'", emergencyText)
+	}
+	// Verify feedback was injected (captured before review overwrite)
+	if !strings.Contains(feedbackCaptured, config.FeedbackPrefix) {
+		t.Errorf("tasks file missing FeedbackPrefix %q\ncaptured: %s", config.FeedbackPrefix, feedbackCaptured)
+	}
+	if !strings.Contains(feedbackCaptured, "check test coverage") {
+		t.Errorf("tasks file missing injected feedback 'check test coverage'\ncaptured: %s", feedbackCaptured)
+	}
+	if reviewCount < 2 {
+		t.Errorf("reviewCount = %d, want >= 2 (1 non-clean + 1 clean after retry)", reviewCount)
+	}
+}
+
+// TestRunner_Execute_EmergencyGateReviewSkip verifies skip at review cycles exhaustion
+// marks task [x] and proceeds to next task (AC2, AC6).
+func TestRunner_Execute_EmergencyGateReviewSkip(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	twoTasks := "# Sprint Tasks\n\n- [ ] Task one\n- [ ] Task two\n"
+
+	// Task 1: execute succeeds, review non-clean, emergency skip.
+	// Task 2: execute succeeds, review clean → all done.
+	scenario := testutil.Scenario{
+		Name: "emergency-review-skip",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "rskip-001"}, // task 1
+			{Type: "execute", ExitCode: 0, SessionID: "rskip-002"}, // task 2
+		},
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, twoTasks, scenario,
+		&testutil.MockGitClient{
+			HeadCommits: headCommitPairs(
+				[2]string{"aaa", "bbb"}, // task 1: commit
+				[2]string{"bbb", "ccc"}, // task 2: commit
+			),
+		})
+	r.Cfg.MaxReviewIterations = 1
+	r.Cfg.GatesEnabled = true
+
+	emergencyCount := 0
+	r.EmergencyGatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		emergencyCount++
+		return &config.GateDecision{Action: config.ActionSkip}, nil
+	}
+
+	reviewCount := 0
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		reviewCount++
+		if reviewCount == 1 {
+			return runner.ReviewResult{Clean: false}, nil // task 1: non-clean → emergency
+		}
+		// task 2: mark all done, clean
+		// Error ignored: test helper in controlled tmpDir
+		_ = os.WriteFile(r.TasksFile, []byte("# Sprint Tasks\n\n- [x] Task one\n- [x] Task two\n"), 0644)
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if emergencyCount != 1 {
+		t.Errorf("EmergencyGatePromptFn count = %d, want 1", emergencyCount)
+	}
+	// Verify task 1 was marked [x] via SkipTask
+	content, readErr := os.ReadFile(r.TasksFile)
+	if readErr != nil {
+		t.Fatalf("read tasks: %v", readErr)
+	}
+	if !strings.Contains(string(content), "- [x] Task one") {
+		t.Errorf("task 1 not marked done via SkipTask\ngot: %s", string(content))
+	}
+}
+
+// TestRunner_Execute_EmergencyGateReviewQuit verifies quit at review cycles exhaustion
+// returns wrapped GateDecision error (AC2, AC7).
+func TestRunner_Execute_EmergencyGateReviewQuit(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	scenario := testutil.Scenario{
+		Name: "emergency-review-quit",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "rquit-001"},
+		},
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, threeOpenTasks, scenario,
+		&testutil.MockGitClient{
+			HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}), // commit
+		})
+	r.Cfg.MaxReviewIterations = 1
+	r.Cfg.GatesEnabled = true
+
+	r.EmergencyGatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		return &config.GateDecision{Action: config.ActionQuit}, nil
+	}
+
+	reviewCount := 0
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		reviewCount++
+		return runner.ReviewResult{Clean: false}, nil // non-clean → triggers emergency
+	}
+
+	err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: emergency gate:") {
+		t.Errorf("error = %q, want containing 'runner: emergency gate:'", err.Error())
+	}
+	// Verify GateDecision can be extracted
+	var gd *config.GateDecision
+	if !errors.As(err, &gd) {
+		t.Fatalf("errors.As(err, *GateDecision): want true, got false; err = %v", err)
+	}
+	if gd.Action != config.ActionQuit {
+		t.Errorf("GateDecision.Action = %q, want %q", gd.Action, config.ActionQuit)
+	}
+	if reviewCount != 1 {
+		t.Errorf("reviewCount = %d, want 1", reviewCount)
+	}
+}
+
+// TestRunner_Execute_EmergencyGateError verifies EmergencyGatePromptFn error propagation (AC1, AC2).
+func TestRunner_Execute_EmergencyGateError(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	scenario := testutil.Scenario{
+		Name: "emergency-gate-error",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "gerr-001"},
+		},
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, threeOpenTasks, scenario,
+		&testutil.MockGitClient{
+			HeadCommits: headCommitPairs([2]string{"aaa", "aaa"}), // no commit → emergency
+		})
+	r.Cfg.MaxIterations = 1
+	r.Cfg.GatesEnabled = true
+
+	gateErr := fmt.Errorf("stdin closed")
+	r.EmergencyGatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		return nil, gateErr
+	}
+
+	err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: emergency gate:") {
+		t.Errorf("error = %q, want containing 'runner: emergency gate:'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "stdin closed") {
+		t.Errorf("error = %q, want containing inner cause 'stdin closed'", err.Error())
+	}
+}
+
+// TestRunner_Execute_EmergencyGateDisabled verifies original behavior when gates disabled (AC3).
+func TestRunner_Execute_EmergencyGateDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	scenario := testutil.Scenario{
+		Name: "emergency-disabled",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "dis-001"},
+		},
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, threeOpenTasks, scenario,
+		&testutil.MockGitClient{
+			HeadCommits: headCommitPairs([2]string{"aaa", "aaa"}), // no commit
+		})
+	r.Cfg.MaxIterations = 1
+	r.Cfg.GatesEnabled = false // gates disabled
+
+	emergencyCalled := false
+	r.EmergencyGatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		emergencyCalled = true
+		return &config.GateDecision{Action: config.ActionSkip}, nil
+	}
+
+	err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+	if !errors.Is(err, config.ErrMaxRetries) {
+		t.Errorf("errors.Is(err, ErrMaxRetries): want true, got false; err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "execute attempts exhausted") {
+		t.Errorf("error = %q, want containing 'execute attempts exhausted'", err.Error())
+	}
+	if emergencyCalled {
+		t.Error("EmergencyGatePromptFn should NOT be called when gates disabled")
+	}
+}

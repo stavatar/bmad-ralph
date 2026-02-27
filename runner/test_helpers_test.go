@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,51 @@ const allDoneTasks = `# Sprint Tasks
 const noMarkersTasks = `# Sprint Tasks
 
 No tasks here
+`
+
+// gateOpenTask has a single task with [GATE] tag for gate detection tests.
+const gateOpenTask = `# Sprint Tasks
+
+- [ ] Setup project [GATE]
+`
+
+// nonGateOpenTask has a single task without [GATE] tag.
+const nonGateOpenTask = `# Sprint Tasks
+
+- [ ] Write tests
+`
+
+// fourOpenTasks has 4 tasks without [GATE] for checkpoint-only tests.
+const fourOpenTasks = `# Sprint Tasks
+
+- [ ] Task one
+- [ ] Task two
+- [ ] Task three
+- [ ] Task four
+`
+
+// fourOpenTasksWithGate has task 2 with [GATE] for combined checkpoint + gate tests.
+const fourOpenTasksWithGate = `# Sprint Tasks
+
+- [ ] Task one
+- [ ] Task two [GATE]
+- [ ] Task three
+- [ ] Task four
+`
+
+// twoTasksWithGate has task 1 with [GATE] for retry + checkpoint counter tests.
+const twoTasksWithGate = `# Sprint Tasks
+
+- [ ] Task one [GATE]
+- [ ] Task two
+`
+
+// threeTasksWithGate has task 1 with [GATE] for skip + checkpoint counter tests.
+const threeTasksWithGate = `# Sprint Tasks
+
+- [ ] Task one [GATE]
+- [ ] Task two
+- [ ] Task three
 `
 
 // --- Shared ReviewFn helpers (DRY: used across 9+ tests) ---
@@ -148,6 +194,88 @@ func testConfig(tmpDir string, maxIter int) *config.Config {
 	}
 }
 
+// --- Gate-related test helpers (Story 5.2) ---
+
+// trackingGatePrompt records GatePromptFn calls for assertion.
+type trackingGatePrompt struct {
+	count     int
+	taskText  string               // last taskText received
+	taskTexts []string             // all taskTexts received (accumulated)
+	decision  *config.GateDecision // fixed decision to return
+	err       error                // fixed error to return
+}
+
+func (tg *trackingGatePrompt) fn(_ context.Context, taskText string) (*config.GateDecision, error) {
+	tg.count++
+	tg.taskText = taskText
+	tg.taskTexts = append(tg.taskTexts, taskText)
+	return tg.decision, tg.err
+}
+
+// setupGateTest creates a Runner with standard gate test defaults.
+// Returns the Runner and a trackingGatePrompt for call-count assertions.
+// Callers override GatePromptFn, cfg fields, etc. as needed after construction.
+func setupGateTest(t *testing.T, tasks string, gatesEnabled bool) (*runner.Runner, *trackingGatePrompt) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, tasks)
+
+	scenario := testutil.Scenario{
+		Name: "gate-test",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "gate-001"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	cfg := testConfig(tmpDir, 1)
+	cfg.GatesEnabled = gatesEnabled
+
+	gp := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionApprove},
+	}
+
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             mock,
+		TasksFile:       tasksPath,
+		ReviewFn:        cleanReviewFn,
+		GatePromptFn:    gp.fn,
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+	return r, gp
+}
+
+// gateOpenTaskDone has a single [GATE] task marked done (post-review state).
+const gateOpenTaskDone = `# Sprint Tasks
+
+- [x] Setup project [GATE]
+`
+
+// sequenceGatePrompt returns different decisions per call.
+// Used in gate retry tests where first call returns retry, second returns approve.
+type sequenceGatePrompt struct {
+	calls     int
+	decisions []*config.GateDecision
+	taskTexts []string
+}
+
+func (sg *sequenceGatePrompt) fn(_ context.Context, taskText string) (*config.GateDecision, error) {
+	idx := sg.calls
+	sg.calls++
+	sg.taskTexts = append(sg.taskTexts, taskText)
+	if idx < len(sg.decisions) {
+		return sg.decisions[idx], nil
+	}
+	return &config.GateDecision{Action: config.ActionApprove}, nil
+}
+
 // --- Retry-related test helpers (Story 3.6) ---
 
 // trackingResumeExtract records ResumeExtractFn calls for assertion.
@@ -238,6 +366,24 @@ func setupReviewIntegration(t *testing.T, tmpDir, tasksContent string, scenario 
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 	return r, stateDir
+}
+
+// progressiveReviewFn returns a ReviewFunc that marks the first open task [ ] as [x]
+// on each call, simulating progressive task completion. Used in multi-task checkpoint tests.
+func progressiveReviewFn(tasksPath string, counter *int) runner.ReviewFunc {
+	return func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		if counter != nil {
+			*counter++
+		}
+		data, err := os.ReadFile(tasksPath)
+		if err != nil {
+			return runner.ReviewResult{}, err
+		}
+		content := strings.Replace(string(data), "- [ ]", "- [x]", 1)
+		// Error ignored: test helper in controlled tmpDir; failure surfaces via downstream assertions
+		_ = os.WriteFile(tasksPath, []byte(content), 0644)
+		return runner.ReviewResult{Clean: true}, nil
+	}
 }
 
 // reviewAndMarkDoneFn returns a ReviewFunc that increments counter (if non-nil)

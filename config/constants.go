@@ -11,6 +11,15 @@ const (
 	FeedbackPrefix = "> USER FEEDBACK:"
 )
 
+// Gate action constants for human gate decisions.
+// Used by gates (prompt) package. Available for cmd/ralph exit code mapping.
+const (
+	ActionApprove = "approve"
+	ActionRetry   = "retry"
+	ActionSkip    = "skip"
+	ActionQuit    = "quit"
+)
+
 // Compiled regex patterns for sprint-tasks.md line scanning.
 // All patterns are compiled at package scope via MustCompile.
 // Runner scanner uses: strings.Split(content, "\n") + regex match per line.

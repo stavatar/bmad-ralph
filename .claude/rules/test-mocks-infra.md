@@ -14,13 +14,17 @@ globs: ["*_test.go", "**/*_test.go"]
 - DRY test config: extract `testConfig(tmpDir, maxIter)` helper when `config.Config{}` boilerplate repeats 3+ times `[runner/test_helpers_test.go]`
 - Initialize ALL injectable function fields on test Runner structs (even if nil won't be hit) `[runner/runner_test.go]`
 - `Scenario.Name` field: always set on `testutil.Scenario` structs for debugging
-- No dead golden files: every testdata fixture must be loaded by at least one test `[session/]`
+- No dead test fixtures: every testdata file AND inline test constant must be referenced by at least one test `[session/]` `[runner/test_helpers_test.go]` (Story 5.2)
 - No vacuous tests: if a test creates a temp resource but code under test never references it, assertion is unfalsifiable `[runner/knowledge_test.go]`
 - Extract `runGit(t, dir, args...)` helper for real-git tests — avoids 3+ copies of closure `[runner/git_test.go]`
 - Never hardcode default branch name ("master"): use `git rev-parse --abbrev-ref HEAD` after init `[runner/git_test.go]`
 - Test ALL indicator file paths: if code checks MERGE_HEAD + rebase-merge + rebase-apply, test at least 2 `[runner/git_test.go]`
 - Beyond-length behavior symmetry: if HeadCommit tests beyond-length, HealthCheck must too `[testutil/mock_git_test.go]`
 - Track ALL injectable fns exercised in scenario: use `trackingSleep` not `noopSleepFn` — verify call count AND computed values `[runner/runner_integration_test.go]`
+- Co-locate related mock types: if `trackingGatePrompt` is in test_helpers_test.go, `sequenceGatePrompt` must be too — don't scatter related mocks across files `[runner/test_helpers_test.go]` (Story 5.3)
+- Busy-wait polling loops in tests must include `time.Sleep(time.Millisecond)` — tight spin burns CPU and is fragile on loaded systems `[gates/gates_test.go]` (Story 5.3)
+- Related mock types must have consistent API surface: if `sequenceGatePrompt` accumulates `taskTexts []string`, `trackingGatePrompt` should too — inconsistent APIs lead to silent coverage gaps `[runner/test_helpers_test.go]` (Story 5.4)
+- Fixture location consistency: if package-level const fixtures exist for test data (e.g., `threeOpenTasks`), new fixtures must follow same pattern — don't declare inline in test functions `[runner/test_helpers_test.go]` (Story 5.4)
 
 ## CLI Testing
 
