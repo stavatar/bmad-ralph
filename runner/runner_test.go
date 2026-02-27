@@ -2120,3 +2120,261 @@ func TestResumeExtraction_ParseError(t *testing.T) {
 		t.Errorf("WriteProgress count = %d, want 0 (parse failed before write)", kw.writeProgressCount)
 	}
 }
+
+// =============================================================================
+// Findings injection tests (Story 4.7, AC2, AC6, AC7)
+// =============================================================================
+
+// TestRunner_Execute_FindingsInjection verifies the execute-review cycle flow
+// when review-findings.md contains findings: first execute runs, review returns
+// not-clean, second execute runs (with findings file present), second review
+// returns clean → loop exits. Validates AC2, AC6, AC7.
+func TestRunner_Execute_FindingsInjection(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, threeOpenTasks)
+
+	// Write review-findings.md with sample findings content
+	findingsPath := filepath.Join(tmpDir, "review-findings.md")
+	findingsContent := "## [HIGH] Test finding\n- **ЧТО не так** — test issue\n"
+	if err := os.WriteFile(findingsPath, []byte(findingsContent), 0644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+
+	// 2 execute iterations → need 2 scenario steps
+	scenario := testutil.Scenario{
+		Name: "findings-injection",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-findings-1"},
+			{Type: "execute", ExitCode: 0, SessionID: "exec-findings-2"},
+		},
+	}
+	_, stateDir := testutil.SetupMockClaude(t, scenario)
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs(
+			[2]string{"aaa", "bbb"}, // first execute: commit detected
+			[2]string{"bbb", "ccc"}, // second execute: commit detected
+		),
+	}
+
+	cfg := testConfig(tmpDir, 3)
+
+	reviewCount := 0
+	r := &runner.Runner{
+		Cfg:       cfg,
+		Git:       mock,
+		TasksFile: tasksPath,
+		ReviewFn: func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+			reviewCount++
+			if reviewCount == 1 {
+				// First review: not clean (findings cycle continues)
+				return runner.ReviewResult{Clean: false}, nil
+			}
+			// Second review: write all-done tasks + clean
+			if wErr := os.WriteFile(tasksPath, []byte(allDoneTasks), 0644); wErr != nil {
+				t.Errorf("write all-done tasks: %v", wErr)
+			}
+			return runner.ReviewResult{Clean: true}, nil
+		},
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	// AC2: ReviewFn called exactly 2 times (2 review cycles)
+	if reviewCount != 2 {
+		t.Errorf("reviewCount = %d, want 2", reviewCount)
+	}
+
+	// 2 execute iterations → 2 HeadCommit before + 2 HeadCommit after = 4
+	if mock.HeadCommitCount != 4 {
+		t.Errorf("HeadCommitCount = %d, want 4", mock.HeadCommitCount)
+	}
+
+	// Verify both mock Claude invocations consumed (2 execute sessions)
+	testutil.ReadInvocationArgs(t, stateDir, 0) // first execute
+	testutil.ReadInvocationArgs(t, stateDir, 1) // second execute
+}
+
+// TestRunner_Execute_FindingsReadError verifies that a non-ErrNotExist error
+// reading review-findings.md returns a wrapped error with "runner: read findings:" prefix.
+func TestRunner_Execute_FindingsReadError(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, threeOpenTasks)
+
+	// Make review-findings.md a directory → os.ReadFile fails with non-ErrNotExist
+	findingsPath := filepath.Join(tmpDir, "review-findings.md")
+	if err := os.MkdirAll(findingsPath, 0755); err != nil {
+		t.Fatalf("create findings dir: %v", err)
+	}
+
+	mock := &testutil.MockGitClient{}
+	cfg := testConfig(tmpDir, 3)
+
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             mock,
+		TasksFile:       tasksPath,
+		ReviewFn:        fatalReviewFn(t),
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: read findings:") {
+		t.Errorf("error: want containing %q, got %q", "runner: read findings:", err.Error())
+	}
+	// Inner error: verify wrapping includes OS path (platform-specific message varies:
+	// Linux="is a directory", Windows="Incorrect function.")
+	if !strings.Contains(err.Error(), "review-findings.md") {
+		t.Errorf("error: want inner cause containing file path, got %q", err.Error())
+	}
+	// Guard: error occurs before execute loop — no HeadCommit calls
+	if mock.HeadCommitCount != 0 {
+		t.Errorf("HeadCommitCount = %d, want 0 (error before execute)", mock.HeadCommitCount)
+	}
+	// Guard: startup RecoverDirtyState called HealthCheck once
+	if mock.HealthCheckCount != 1 {
+		t.Errorf("HealthCheckCount = %d, want 1 (startup only)", mock.HealthCheckCount)
+	}
+}
+
+// =============================================================================
+// DetermineReviewOutcome tests (Story 4.3, AC5)
+// =============================================================================
+
+// TestDetermineReviewOutcome_Scenarios verifies file-state-based review outcome logic.
+// Clean = taskMarkedDone AND (findingsAbsent OR findingsEmpty).
+func TestDetermineReviewOutcome_Scenarios(t *testing.T) {
+	emptyFindings := ""
+	whitespaceFindings := "  \n  \n"
+	realFindings := "## Finding 1\nSome issue found\n"
+
+	tests := []struct {
+		name            string
+		tasksContent    string
+		currentTaskText string
+		findingsContent *string // nil = no findings file
+		findingsIsDir   bool    // true = create directory instead of file (triggers non-NotExist error)
+		wantClean       bool
+		wantErr         bool
+		wantErrContains string
+	}{
+		{
+			name:            "clean review - task done no findings",
+			tasksContent:    "# Sprint Tasks\n\n- [x] Task one\n- [ ] Task two\n",
+			currentTaskText: "- [ ] Task one",
+			findingsContent: nil,
+			wantClean:       true,
+		},
+		{
+			name:            "clean review - empty findings file",
+			tasksContent:    "# Sprint Tasks\n\n- [x] Task one\n",
+			currentTaskText: "- [ ] Task one",
+			findingsContent: &emptyFindings,
+			wantClean:       true,
+		},
+		{
+			name:            "clean review - whitespace-only findings",
+			tasksContent:    "# Sprint Tasks\n\n- [x] Task one\n",
+			currentTaskText: "- [ ] Task one",
+			findingsContent: &whitespaceFindings,
+			wantClean:       true,
+		},
+		{
+			name:            "with findings - task not done",
+			tasksContent:    "# Sprint Tasks\n\n- [ ] Task one\n",
+			currentTaskText: "- [ ] Task one",
+			findingsContent: &realFindings,
+			wantClean:       false,
+		},
+		{
+			name:            "task done but findings non-empty",
+			tasksContent:    "# Sprint Tasks\n\n- [x] Task one\n",
+			currentTaskText: "- [ ] Task one",
+			findingsContent: &realFindings,
+			wantClean:       false,
+		},
+		{
+			name:            "no change no findings - session failed silently",
+			tasksContent:    "# Sprint Tasks\n\n- [ ] Task one\n",
+			currentTaskText: "- [ ] Task one",
+			findingsContent: nil,
+			wantClean:       false,
+		},
+		{
+			name:            "bare task text without checkbox prefix",
+			tasksContent:    "# Sprint Tasks\n\n- [x] Task one\n",
+			currentTaskText: "Task one",
+			findingsContent: nil,
+			wantClean:       true,
+		},
+		{
+			name:            "read error - tasks file missing",
+			tasksContent:    "", // will not create file
+			currentTaskText: "- [ ] Task one",
+			wantErr:         true,
+			wantErrContains: "runner: determine review outcome:",
+		},
+		{
+			name:            "read error - findings file is directory",
+			tasksContent:    "# Sprint Tasks\n\n- [x] Task one\n",
+			currentTaskText: "- [ ] Task one",
+			findingsIsDir:   true,
+			wantErr:         true,
+			wantErrContains: "runner: determine review outcome:",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+
+			var tasksFile string
+			if tt.tasksContent != "" {
+				tasksFile = writeTasksFile(t, tmpDir, tt.tasksContent)
+			} else {
+				// Non-existent file for error test
+				tasksFile = filepath.Join(tmpDir, "sprint-tasks.md")
+			}
+
+			if tt.findingsIsDir {
+				findingsPath := filepath.Join(tmpDir, "review-findings.md")
+				if err := os.MkdirAll(findingsPath, 0755); err != nil {
+					t.Fatalf("create findings dir: %v", err)
+				}
+			} else if tt.findingsContent != nil {
+				findingsPath := filepath.Join(tmpDir, "review-findings.md")
+				if err := os.WriteFile(findingsPath, []byte(*tt.findingsContent), 0644); err != nil {
+					t.Fatalf("write findings: %v", err)
+				}
+			}
+
+			rr, err := runner.DetermineReviewOutcome(tasksFile, tt.currentTaskText, tmpDir)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("want error, got nil")
+				}
+				if tt.wantErrContains != "" && !strings.Contains(err.Error(), tt.wantErrContains) {
+					t.Errorf("error: want containing %q, got %q", tt.wantErrContains, err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if rr.Clean != tt.wantClean {
+				t.Errorf("Clean = %v, want %v", rr.Clean, tt.wantClean)
+			}
+		})
+	}
+}

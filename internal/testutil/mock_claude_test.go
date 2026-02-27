@@ -354,6 +354,54 @@ func TestRunMockClaude_EmptyScenario(t *testing.T) {
 	}
 }
 
+func TestRunMockClaude_WriteFiles(t *testing.T) {
+	projectDir := t.TempDir()
+
+	scenario := testutil.Scenario{
+		Name: "write files",
+		Steps: []testutil.ScenarioStep{
+			{
+				Type:      "review",
+				ExitCode:  0,
+				SessionID: "write-001",
+				WriteFiles: map[string]string{
+					"sprint-tasks.md":    "- [x] Task one\n",
+					"review-findings.md": "## [HIGH] Bug found\n",
+				},
+				DeleteFiles: []string{"nonexistent.md"}, // idempotent delete
+			},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+	t.Setenv("MOCK_CLAUDE_PROJECT_ROOT", projectDir)
+
+	dir := t.TempDir()
+	_, err := session.Execute(context.Background(), session.Options{
+		Command: os.Args[0],
+		Dir:     dir,
+	})
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+
+	// Verify files were written
+	tasksData, err := os.ReadFile(filepath.Join(projectDir, "sprint-tasks.md"))
+	if err != nil {
+		t.Fatalf("read sprint-tasks.md: %v", err)
+	}
+	if string(tasksData) != "- [x] Task one\n" {
+		t.Errorf("sprint-tasks.md = %q, want %q", string(tasksData), "- [x] Task one\n")
+	}
+
+	findingsData, err := os.ReadFile(filepath.Join(projectDir, "review-findings.md"))
+	if err != nil {
+		t.Fatalf("read review-findings.md: %v", err)
+	}
+	if string(findingsData) != "## [HIGH] Bug found\n" {
+		t.Errorf("review-findings.md = %q, want %q", string(findingsData), "## [HIGH] Bug found\n")
+	}
+}
+
 func TestScenarioStep_ZeroValue(t *testing.T) {
 	var step testutil.ScenarioStep
 	if step.Type != "" {
@@ -373,6 +421,12 @@ func TestScenarioStep_ZeroValue(t *testing.T) {
 	}
 	if step.IsError {
 		t.Error("zero IsError = true, want false")
+	}
+	if step.WriteFiles != nil {
+		t.Errorf("zero WriteFiles = %v, want nil", step.WriteFiles)
+	}
+	if len(step.DeleteFiles) != 0 {
+		t.Errorf("zero DeleteFiles len = %d, want 0", len(step.DeleteFiles))
 	}
 }
 

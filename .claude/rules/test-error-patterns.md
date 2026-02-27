@@ -14,3 +14,4 @@ globs: ["*_test.go", "**/*_test.go"]
 - When string matching on errors is unavoidable (yaml.v3), add justification comment `[config/config.go]`
 - Inner error verification: test BOTH prefix (`"runner: dirty state recovery:"`) AND inner cause (`"restore failed"`) `[runner/runner_test.go]`
 - Multi-layer error wrapping: test ALL layers — outer prefix, intermediate prefix, and innermost cause `[runner/runner_test.go:RecoverDirtyStateFails]`
+- Platform-agnostic inner error assertions: file-as-directory produces "is a directory" on Linux but "Incorrect function." on Windows/WSL — use file path in assertion instead of OS message `[runner/runner_test.go:FindingsReadError]` (Story 4.7)

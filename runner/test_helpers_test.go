@@ -218,6 +218,28 @@ func setupRunnerIntegration(t *testing.T, tmpDir, tasksContent string, scenario 
 	return r, stateDir
 }
 
+// setupReviewIntegration creates a Runner with RealReview for full review pipeline
+// integration tests. Unlike setupRunnerIntegration, uses real review session via
+// MockClaude subprocess with file side effects.
+// Sets MOCK_CLAUDE_PROJECT_ROOT so MockClaude subprocess can write to tmpDir.
+func setupReviewIntegration(t *testing.T, tmpDir, tasksContent string, scenario testutil.Scenario, git *testutil.MockGitClient) (*runner.Runner, string) {
+	t.Helper()
+	tasksPath := writeTasksFile(t, tmpDir, tasksContent)
+	_, stateDir := testutil.SetupMockClaude(t, scenario)
+	t.Setenv("MOCK_CLAUDE_PROJECT_ROOT", tmpDir)
+	cfg := testConfig(tmpDir, 3)
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             git,
+		TasksFile:       tasksPath,
+		ReviewFn:        runner.RealReview,
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+	return r, stateDir
+}
+
 // reviewAndMarkDoneFn returns a ReviewFunc that increments counter (if non-nil)
 // and writes allDoneTasks to tasksPath. Used in retry tests where review triggers
 // outer loop exit via task completion.
@@ -226,7 +248,8 @@ func reviewAndMarkDoneFn(tasksPath string, counter *int) runner.ReviewFunc {
 		if counter != nil {
 			*counter++
 		}
-		os.WriteFile(tasksPath, []byte(allDoneTasks), 0644)
+		// Error ignored: test helper in controlled tmpDir; failure surfaces via downstream assertions
+		_ = os.WriteFile(tasksPath, []byte(allDoneTasks), 0644)
 		return runner.ReviewResult{Clean: true}, nil
 	}
 }

@@ -76,15 +76,15 @@ development_status:
   epic-3-retrospective: done
 
   # Epic 4: Code Review Pipeline (8 stories)
-  epic-4: backlog
-  4-1-review-prompt-template: backlog
-  4-2-sub-agent-prompts: backlog
-  4-3-review-session-logic: backlog
-  4-4-findings-verification-logic: backlog
-  4-5-clean-review-handling: backlog
-  4-6-findings-write: backlog
-  4-7-execute-review-loop-integration: backlog
-  4-8-review-integration-test: backlog
+  epic-4: done
+  4-1-review-prompt-template: done
+  4-2-sub-agent-prompts: done
+  4-3-review-session-logic: done
+  4-4-findings-verification-logic: done
+  4-5-clean-review-handling: done
+  4-6-findings-write: done
+  4-7-execute-review-loop-integration: done
+  4-8-review-integration-test: done
   epic-4-retrospective: optional
 
   # Epic 5: Human Gates & Control (6 stories)

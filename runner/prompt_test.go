@@ -265,3 +265,359 @@ func TestPrompt_Execute_Injection(t *testing.T) {
 		t.Errorf("expected {{.Exploit}} to be preserved literally in output")
 	}
 }
+
+// --- Review Prompt Tests (Story 4.4) ---
+
+func TestPrompt_Review(t *testing.T) {
+	taskContent := "Implement user authentication for login endpoint"
+	data := config.TemplateData{}
+	replacements := map[string]string{
+		"__TASK_CONTENT__": taskContent,
+	}
+
+	got, err := config.AssemblePrompt(reviewTemplate, data, replacements)
+	if err != nil {
+		t.Fatalf("AssemblePrompt error: %v", err)
+	}
+
+	// Structural assertions covering AC1-AC4
+	checks := []struct {
+		name    string
+		substr  string
+		present bool
+	}{
+		// AC1: Verification keywords + ordering/completeness constraints
+		{"verification keyword CONFIRMED", "CONFIRMED", true},
+		{"verification keyword FALSE POSITIVE", "FALSE POSITIVE", true},
+		{"verification instruction", "verify EACH finding", true},
+		{"collect before verify", "before proceeding to verification", true},
+		{"no skip verification", "Do not skip verification", true},
+		// AC2: Severity keywords + constraints
+		{"severity CRITICAL", "CRITICAL", true},
+		{"severity HIGH", "HIGH", true},
+		{"severity MEDIUM", "MEDIUM", true},
+		{"severity LOW", "LOW", true},
+		{"severity exactly one", "exactly one severity", true},
+		{"severity mandatory", "Severity is mandatory", true},
+		// AC3: False positive exclusion rule
+		{"false positive exclusion", "FALSE POSITIVE findings MUST NOT appear", true},
+		// AC4: Finding structure 4-field format + mandatory constraint
+		{"finding field description", "**Description**", true},
+		{"finding field location", "**Location**", true},
+		{"finding field reasoning", "**Reasoning**", true},
+		{"finding field recommendation", "**Recommendation**", true},
+		{"finding fields mandatory", "All 4 fields are mandatory", true},
+		// Sub-agent names via file paths (AC1 orchestration)
+		{"sub-agent quality path", "runner/prompts/agents/quality.md", true},
+		{"sub-agent implementation path", "runner/prompts/agents/implementation.md", true},
+		{"sub-agent simplification path", "runner/prompts/agents/simplification.md", true},
+		{"sub-agent design-principles path", "runner/prompts/agents/design-principles.md", true},
+		{"sub-agent test-coverage path", "runner/prompts/agents/test-coverage.md", true},
+		// Placeholder replaced
+		{"no task placeholder", "__TASK_CONTENT__", false},
+		// Task content injected
+		{"task content injected", taskContent, true},
+		// Invariant guardrails
+		{"invariant no modify source", "MUST NOT modify source code", true},
+		{"invariant no write learnings", "MUST NOT write LEARNINGS", true},
+		{"invariant mutation asymmetry", "Mutation Asymmetry", true},
+		// Clean review handling (Story 4.5)
+		{"clean review mark [x]", "mark [x]", true},
+		{"clean review keyword", "CLEAN REVIEW", true},
+		{"clean clear findings", "Clear review-findings", true},
+		{"clean task checkbox open", "- [ ]", true},
+		{"clean task checkbox done", "- [x]", true},
+		{"clean sprint-tasks.md ref", "sprint-tasks.md", true},
+		{"clean atomic operation", "atomically", true},
+		{"clean no git commands", "MUST NOT run any git", true},
+		{"clean only two files constraint", "ONLY modify sprint-tasks.md and review-findings.md", true},
+		// Findings write (Story 4.6)
+		{"findings overwrite instruction", "overwrite review-findings", true},
+		{"findings never appended", "never appended", true},
+		{"findings severity format template", "[SEVERITY]", true},
+		{"findings format keyword ЧТО", "ЧТО", true},
+		{"findings format keyword ГДЕ", "ГДЕ", true},
+		{"findings format keyword ПОЧЕМУ", "ПОЧЕМУ", true},
+		{"findings format keyword КАК", "КАК", true},
+		{"findings self-contained", "self-contained", true},
+		{"findings only current task", "ONLY current task findings", true},
+		{"findings no mark task done", "Do NOT mark [x]", true},
+	}
+	for _, c := range checks {
+		t.Run(c.name, func(t *testing.T) {
+			found := strings.Contains(got, c.substr)
+			if c.present && !found {
+				t.Errorf("expected prompt to contain %q, but it does not", c.substr)
+			}
+			if !c.present && found {
+				t.Errorf("expected prompt NOT to contain %q, but it does", c.substr)
+			}
+		})
+	}
+
+	goldenTest(t, "TestPrompt_Review", got)
+}
+
+// --- Sub-Agent Prompt Tests (Story 4.2) ---
+
+// scopeRef pairs a domain keyword with its owning agent name for OUT-OF-SCOPE validation.
+type scopeRef struct {
+	keyword string
+	agent   string
+}
+
+// assertContains verifies text contains substr, reporting msg on failure.
+func assertContains(t *testing.T, text, substr, msg string) {
+	t.Helper()
+	if !strings.Contains(text, substr) {
+		t.Errorf("%s: expected to contain %q", msg, substr)
+	}
+}
+
+// splitAgentSections extracts SCOPE and OUT-OF-SCOPE text from an agent prompt.
+func splitAgentSections(t *testing.T, prompt string) (scope, outOfScope string) {
+	t.Helper()
+	scopeIdx := strings.Index(prompt, "## SCOPE")
+	if scopeIdx == -1 {
+		t.Fatal("prompt missing '## SCOPE' section")
+	}
+	outIdx := strings.Index(prompt, "## OUT-OF-SCOPE")
+	if outIdx == -1 {
+		t.Fatal("prompt missing '## OUT-OF-SCOPE' section")
+	}
+	scope = prompt[scopeIdx:outIdx]
+	instrIdx := strings.Index(prompt, "## Instructions")
+	if instrIdx == -1 {
+		outOfScope = prompt[outIdx:]
+	} else {
+		outOfScope = prompt[outIdx:instrIdx]
+	}
+	return scope, outOfScope
+}
+
+// verifyAgentScope validates SCOPE keywords and OUT-OF-SCOPE cross-references for an agent prompt.
+func verifyAgentScope(t *testing.T, prompt string, scopeKeywords []string, outOfScopeRefs []scopeRef) {
+	t.Helper()
+	scope, outOfScope := splitAgentSections(t, prompt)
+	for _, kw := range scopeKeywords {
+		assertContains(t, scope, kw, "SCOPE")
+	}
+	for _, ref := range outOfScopeRefs {
+		assertContains(t, outOfScope, ref.keyword, "OUT-OF-SCOPE keyword")
+		assertContains(t, outOfScope, ref.agent, "OUT-OF-SCOPE agent ref")
+	}
+}
+
+// Task 3: Scope boundary validation (AC 2-6) — table-driven across all 5 agents.
+func TestPrompt_Agent_Scope(t *testing.T) {
+	cases := []struct {
+		name           string
+		prompt         string
+		scopeKeywords  []string
+		outOfScopeRefs []scopeRef
+	}{
+		{
+			name:          "quality",
+			prompt:        agentQualityPrompt,
+			scopeKeywords: []string{"Bugs", "Security issues", "Performance problems", "Error handling"},
+			outOfScopeRefs: []scopeRef{
+				{"Acceptance criteria compliance", "implementation"},
+				{"Code simplification", "simplification"},
+				{"DRY/KISS/SRP", "design-principles"},
+				{"Test coverage", "test-coverage"},
+			},
+		},
+		{
+			name:          "implementation",
+			prompt:        agentImplementationPrompt,
+			scopeKeywords: []string{"Acceptance criteria compliance", "Feature completeness", "Requirement satisfaction"},
+			outOfScopeRefs: []scopeRef{
+				{"Code quality", "quality"},
+				{"Code simplification", "simplification"},
+				{"DRY/KISS/SRP", "design-principles"},
+				{"Test coverage", "test-coverage"},
+			},
+		},
+		{
+			name:          "simplification",
+			prompt:        agentSimplificationPrompt,
+			scopeKeywords: []string{"Code readability", "Verbose constructs", "Dead code", "Simpler alternatives"},
+			outOfScopeRefs: []scopeRef{
+				{"Bugs", "quality"},
+				{"Acceptance criteria compliance", "implementation"},
+				{"DRY/KISS/SRP", "design-principles"},
+				{"Test coverage", "test-coverage"},
+			},
+		},
+		{
+			name:          "design-principles",
+			prompt:        agentDesignPrinciplesPrompt,
+			scopeKeywords: []string{"DRY", "KISS", "SRP"},
+			outOfScopeRefs: []scopeRef{
+				{"Bugs", "quality"},
+				{"Acceptance criteria compliance", "implementation"},
+				{"Expression-level simplicity", "simplification"},
+				{"Test coverage", "test-coverage"},
+			},
+		},
+		{
+			name:          "test-coverage",
+			prompt:        agentTestCoveragePrompt,
+			scopeKeywords: []string{"ATDD", "Zero-skip", "Test quality"},
+			outOfScopeRefs: []scopeRef{
+				{"Code bugs", "quality"},
+				{"Acceptance criteria compliance", "implementation"},
+				{"Code simplification", "simplification"},
+				{"DRY/KISS/SRP", "design-principles"},
+			},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			verifyAgentScope(t, c.prompt, c.scopeKeywords, c.outOfScopeRefs)
+		})
+	}
+}
+
+// Task 4: Golden file tests (AC 7) — table-driven across all 5 agents.
+func TestPrompt_Agent_Golden(t *testing.T) {
+	cases := []struct {
+		name   string
+		prompt string
+	}{
+		{"Quality", agentQualityPrompt},
+		{"Implementation", agentImplementationPrompt},
+		{"Simplification", agentSimplificationPrompt},
+		{"DesignPrinciples", agentDesignPrinciplesPrompt},
+		{"TestCoverage", agentTestCoveragePrompt},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			goldenTest(t, "TestPrompt_Agent_"+c.name, c.prompt)
+		})
+	}
+}
+
+// Task 5: Adversarial structure tests (AC 8)
+
+// TestPrompt_Agent_ScopeExclusivity verifies each domain keyword appears in exactly
+// one agent's SCOPE section — no overlap between the 5 agents.
+func TestPrompt_Agent_ScopeExclusivity(t *testing.T) {
+	agents := []struct {
+		name   string
+		prompt string
+	}{
+		{"quality", agentQualityPrompt},
+		{"implementation", agentImplementationPrompt},
+		{"simplification", agentSimplificationPrompt},
+		{"design-principles", agentDesignPrinciplesPrompt},
+		{"test-coverage", agentTestCoveragePrompt},
+	}
+
+	scopes := make(map[string]string)
+	for _, a := range agents {
+		scope, _ := splitAgentSections(t, a.prompt)
+		scopes[a.name] = scope
+	}
+
+	domains := []struct {
+		keyword string
+		owner   string
+	}{
+		{"Bugs", "quality"},
+		{"Security issues", "quality"},
+		{"Performance problems", "quality"},
+		{"Error handling", "quality"},
+		{"Acceptance criteria compliance", "implementation"},
+		{"Feature completeness", "implementation"},
+		{"Requirement satisfaction", "implementation"},
+		{"Code readability", "simplification"},
+		{"Verbose constructs", "simplification"},
+		{"Dead code", "simplification"},
+		{"Simpler alternatives", "simplification"},
+		{"DRY", "design-principles"},
+		{"KISS", "design-principles"},
+		{"SRP", "design-principles"},
+		{"ATDD", "test-coverage"},
+		{"Zero-skip", "test-coverage"},
+		{"Test quality", "test-coverage"},
+	}
+
+	for _, d := range domains {
+		t.Run(d.keyword, func(t *testing.T) {
+			var found []string
+			for name, scope := range scopes {
+				if strings.Contains(scope, d.keyword) {
+					found = append(found, name)
+				}
+			}
+			if len(found) == 0 {
+				t.Errorf("domain keyword %q not found in any agent's SCOPE", d.keyword)
+			} else if len(found) > 1 {
+				t.Errorf("domain keyword %q found in multiple agents' SCOPE: %v (expected only %q)", d.keyword, found, d.owner)
+			} else if found[0] != d.owner {
+				t.Errorf("domain keyword %q found in %q SCOPE, expected %q", d.keyword, found[0], d.owner)
+			}
+		})
+	}
+}
+
+// TestPrompt_Agent_OutOfScopeCompleteness verifies each agent's OUT-OF-SCOPE section
+// mentions all 4 other agents by name.
+func TestPrompt_Agent_OutOfScopeCompleteness(t *testing.T) {
+	agents := []struct {
+		name   string
+		prompt string
+	}{
+		{"quality", agentQualityPrompt},
+		{"implementation", agentImplementationPrompt},
+		{"simplification", agentSimplificationPrompt},
+		{"design-principles", agentDesignPrinciplesPrompt},
+		{"test-coverage", agentTestCoveragePrompt},
+	}
+
+	for _, a := range agents {
+		t.Run(a.name, func(t *testing.T) {
+			_, outOfScope := splitAgentSections(t, a.prompt)
+			for _, other := range agents {
+				if other.name == a.name {
+					continue
+				}
+				assertContains(t, outOfScope, other.name,
+					a.name+" OUT-OF-SCOPE must reference "+other.name)
+			}
+		})
+	}
+}
+
+// TestPrompt_Agent_DetectionStructure verifies each prompt has an Instructions section
+// with domain-specific guidance keywords enabling issue detection.
+func TestPrompt_Agent_DetectionStructure(t *testing.T) {
+	cases := []struct {
+		name                string
+		prompt              string
+		instructionKeywords []string
+	}{
+		{"quality", agentQualityPrompt, []string{"security", "performance"}},
+		{"implementation", agentImplementationPrompt, []string{"acceptance criteria", "satisfies"}},
+		{"simplification", agentSimplificationPrompt, []string{"verbose", "simpler"}},
+		{"design-principles", agentDesignPrinciplesPrompt, []string{"DRY", "KISS", "SRP"}},
+		{"test-coverage", agentTestCoveragePrompt, []string{"test coverage", "skip", "t.Errorf"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			instrIdx := strings.Index(c.prompt, "## Instructions")
+			if instrIdx == -1 {
+				t.Fatalf("%s prompt missing '## Instructions' section", c.name)
+			}
+			instructions := c.prompt[instrIdx:]
+			for _, kw := range c.instructionKeywords {
+				assertContains(t, instructions, kw,
+					c.name+" Instructions section detection keyword")
+			}
+		})
+	}
+}

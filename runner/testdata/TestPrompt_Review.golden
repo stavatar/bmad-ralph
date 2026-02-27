@@ -3,7 +3,7 @@ You are a code reviewer for an autonomous development pipeline.
 Review the code changes for the following task.
 
 Task:
-__TASK_CONTENT__
+Implement user authentication for login endpoint
 
 ---
 

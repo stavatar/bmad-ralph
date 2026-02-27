@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/bmad-ralph/bmad-ralph/config"
@@ -20,6 +21,21 @@ var executeTemplate string
 //go:embed prompts/review.md
 var reviewTemplate string
 
+//go:embed prompts/agents/quality.md
+var agentQualityPrompt string
+
+//go:embed prompts/agents/implementation.md
+var agentImplementationPrompt string
+
+//go:embed prompts/agents/simplification.md
+var agentSimplificationPrompt string
+
+//go:embed prompts/agents/design-principles.md
+var agentDesignPrinciplesPrompt string
+
+//go:embed prompts/agents/test-coverage.md
+var agentTestCoveragePrompt string
+
 // ErrNoCommit indicates that a Claude session completed but HEAD did not change.
 // Currently unused in production — Story 3.6 replaced direct return with boolean retry logic.
 // Retained as exported sentinel for potential errors.Is detection in future stories.
@@ -31,7 +47,7 @@ type ReviewResult struct {
 }
 
 // ReviewFunc is the signature for the review step called after each successful execute.
-// Default: defaultReviewStub. Epic 4 replaces with real review logic.
+// Production: RealReview (wired by Run). Tests inject custom implementations.
 type ReviewFunc func(ctx context.Context, rc RunConfig) (ReviewResult, error)
 
 // ResumeExtractFunc is the signature for resume-extraction called before retry.
@@ -39,10 +55,123 @@ type ReviewFunc func(ctx context.Context, rc RunConfig) (ReviewResult, error)
 // Default: closure over ResumeExtraction in Run(). Tests inject custom implementations.
 type ResumeExtractFunc func(ctx context.Context, rc RunConfig, sessionID string) error
 
-// defaultReviewStub returns a clean review result.
-// TODO(epic-4): replace with real review logic
-func defaultReviewStub(_ context.Context, _ RunConfig) (ReviewResult, error) {
-	return ReviewResult{Clean: true}, nil
+// RealReview runs a review session and determines the outcome from file state.
+// It reads the current task, assembles the review prompt, launches a fresh Claude
+// session with ModelReview, then checks sprint-tasks.md and review-findings.md
+// to compute ReviewResult.
+// Exported for integration testing (Story 4.8). Production wiring via Run().
+//
+// Covered by Story 4.8 integration tests (MockClaude + file side effects):
+//   - CleanReview: mock session → task [x] + no findings → Clean: true
+//   - FindingsFixClean: findings → fix execute → clean review
+//   - MaxReviewCycles: emergency stop after max iterations
+//   - MultiTaskMixed: 3 tasks with mixed clean/findings outcomes
+//   - BridgeGoldenFile: bridge output as runner input end-to-end
+//
+// Not yet covered (future stories or manual testing):
+//   - SessionError_ExitError: *exec.ExitError → proceed to file-state check
+//   - SessionError_Fatal: non-ExitError → return wrapped error
+//   - FreshSession: verify opts has no Resume field
+//   - UsesModelReview: opts.Model == cfg.ModelReview (NOT ModelExecute)
+func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
+	content, err := os.ReadFile(rc.TasksFile)
+	if err != nil {
+		return ReviewResult{}, fmt.Errorf("runner: review: read tasks: %w", err)
+	}
+
+	result, scanErr := ScanTasks(string(content))
+	if scanErr != nil {
+		return ReviewResult{}, scanErr // ScanTasks already wraps with "runner: scan tasks:" prefix
+	}
+	if !result.HasOpenTasks() {
+		return ReviewResult{Clean: true}, nil
+	}
+
+	currentTaskText := result.OpenTasks[0].Text
+
+	prompt, err := config.AssemblePrompt(
+		reviewTemplate,
+		config.TemplateData{},
+		map[string]string{
+			"__TASK_CONTENT__": currentTaskText,
+		},
+	)
+	if err != nil {
+		return ReviewResult{}, fmt.Errorf("runner: review: assemble prompt: %w", err)
+	}
+
+	opts := session.Options{
+		Command:                    rc.Cfg.ClaudeCommand,
+		Dir:                        rc.Cfg.ProjectRoot,
+		Prompt:                     prompt,
+		MaxTurns:                   rc.Cfg.MaxTurns,
+		Model:                      rc.Cfg.ModelReview,
+		OutputJSON:                 true,
+		DangerouslySkipPermissions: true,
+	}
+
+	start := time.Now()
+	raw, execErr := session.Execute(ctx, opts)
+	elapsed := time.Since(start)
+
+	if execErr != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(execErr, &exitErr) {
+			return ReviewResult{}, fmt.Errorf("runner: review: execute: %w", execErr)
+		}
+		// ExitError: proceed to file-state check — review may have partially written
+	} else {
+		// Parse for session_id extraction (logging deferred to future stories).
+		// Error intentionally ignored: review outcome is determined by file state,
+		// not by session output parsing. Integration tests (Story 4.8) will cover.
+		_, _ = session.ParseResult(raw, elapsed)
+	}
+
+	return DetermineReviewOutcome(rc.TasksFile, currentTaskText, rc.Cfg.ProjectRoot)
+}
+
+// DetermineReviewOutcome computes ReviewResult from file state after a review session.
+// It checks two conditions:
+//  1. Current task marked [x] in sprint-tasks.md (re-read after review)
+//  2. review-findings.md absent or empty (whitespace-only counts as empty)
+//
+// Clean = taskMarkedDone AND (findingsAbsent OR findingsEmpty).
+// If task not marked done but no findings: NOT clean (review session may have failed).
+func DetermineReviewOutcome(tasksFile, currentTaskText, projectRoot string) (ReviewResult, error) {
+	content, err := os.ReadFile(tasksFile)
+	if err != nil {
+		return ReviewResult{}, fmt.Errorf("runner: determine review outcome: %w", err)
+	}
+
+	desc := taskDescription(currentTaskText)
+	taskMarkedDone := false
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, desc) && config.TaskDoneRegex.MatchString(line) {
+			taskMarkedDone = true
+			break
+		}
+	}
+
+	findingsPath := filepath.Join(projectRoot, "review-findings.md")
+	findingsData, findingsErr := os.ReadFile(findingsPath)
+	if findingsErr != nil && !errors.Is(findingsErr, os.ErrNotExist) {
+		return ReviewResult{}, fmt.Errorf("runner: determine review outcome: %w", findingsErr)
+	}
+	findingsNonEmpty := findingsErr == nil && len(strings.TrimSpace(string(findingsData))) > 0
+
+	clean := taskMarkedDone && !findingsNonEmpty
+	return ReviewResult{Clean: clean}, nil
+}
+
+// taskDescription extracts the description from a task line, stripping the
+// checkbox prefix ("- [ ] " or "- [x] ") and leading whitespace.
+func taskDescription(taskLine string) string {
+	trimmed := strings.TrimSpace(taskLine)
+	if idx := strings.Index(trimmed, "] "); idx >= 0 {
+		return strings.TrimSpace(trimmed[idx+2:])
+	}
+	return trimmed
 }
 
 // ResumeExtraction invokes claude --resume to capture WIP progress from an
@@ -104,8 +233,11 @@ type Runner struct {
 
 // Execute runs the main task loop: startup recovery, then iterate over tasks.
 // Startup: recovers dirty working tree (RecoverDirtyState), non-dirty health errors abort.
-// Each iteration: read tasks → scan → assemble prompt → review cycle loop
-// (execute retry → review → check Clean, stop at MaxReviewIterations (FR24)).
+// Each iteration: read tasks → scan → review cycle loop
+// (read findings → assemble prompt → execute retry → review → check Clean,
+// stop at MaxReviewIterations (FR24)).
+// Prompt is assembled inside the review cycle loop so each execute iteration
+// gets fresh findings content from review-findings.md.
 // Execute retry: session.Execute → check commit → retry on no-commit or non-zero
 // exit up to Cfg.MaxIterations per review cycle.
 // Loops up to Cfg.MaxIterations task-processing cycles in the outer loop.
@@ -136,30 +268,44 @@ func (r *Runner) Execute(ctx context.Context) error {
 			return nil
 		}
 
-		prompt, err := config.AssemblePrompt(
-			executeTemplate,
-			config.TemplateData{GatesEnabled: r.Cfg.GatesEnabled},
-			map[string]string{
-				"__FORMAT_CONTRACT__": config.SprintTasksFormat(),
-			},
-		)
-		if err != nil {
-			return fmt.Errorf("runner: assemble prompt: %w", err)
-		}
-
-		opts := session.Options{
-			Command:                    r.Cfg.ClaudeCommand,
-			Dir:                        r.Cfg.ProjectRoot,
-			Prompt:                     prompt,
-			MaxTurns:                   r.Cfg.MaxTurns,
-			Model:                      r.Cfg.ModelExecute,
-			OutputJSON:                 true,
-			DangerouslySkipPermissions: true,
-		}
-
 		// Review cycle loop: per-task counter, resets when clean (AC3, AC4)
 		reviewCycles := 0
 		for {
+			// Read findings file: absent = empty (normal first-execute case)
+			findingsContent := ""
+			findingsPath := filepath.Join(r.Cfg.ProjectRoot, "review-findings.md")
+			findingsData, findingsErr := os.ReadFile(findingsPath)
+			if findingsErr != nil && !errors.Is(findingsErr, os.ErrNotExist) {
+				return fmt.Errorf("runner: read findings: %w", findingsErr)
+			}
+			if findingsErr == nil {
+				findingsContent = string(findingsData)
+			}
+
+			prompt, err := config.AssemblePrompt(
+				executeTemplate,
+				config.TemplateData{
+					GatesEnabled: r.Cfg.GatesEnabled,
+					HasFindings:  len(strings.TrimSpace(findingsContent)) > 0,
+				},
+				map[string]string{
+					"__FORMAT_CONTRACT__":  config.SprintTasksFormat(),
+					"__FINDINGS_CONTENT__": findingsContent,
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("runner: assemble prompt: %w", err)
+			}
+
+			opts := session.Options{
+				Command:                    r.Cfg.ClaudeCommand,
+				Dir:                        r.Cfg.ProjectRoot,
+				Prompt:                     prompt,
+				MaxTurns:                   r.Cfg.MaxTurns,
+				Model:                      r.Cfg.ModelExecute,
+				OutputJSON:                 true,
+				DangerouslySkipPermissions: true,
+			}
 			// Per-review-cycle retry loop: executeAttempts resets each cycle
 			executeAttempts := 0
 			for {
@@ -335,7 +481,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		Cfg:       cfg,
 		Git:       &ExecGitClient{Dir: cfg.ProjectRoot},
 		TasksFile: filepath.Join(cfg.ProjectRoot, "sprint-tasks.md"),
-		ReviewFn:  defaultReviewStub,
+		ReviewFn:  RealReview,
 		SleepFn:   time.Sleep,
 		Knowledge: &NoOpKnowledgeWriter{},
 	}
@@ -345,9 +491,9 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	return r.Execute(ctx)
 }
 
-// RunReview runs a standalone review step using a real Claude session.
-// Walking skeleton function — Execute uses ReviewFunc instead (not RunReview).
-// Retained for potential standalone use; may be retired in Epic 4.
+// Deprecated: RunReview is a walking skeleton from Story 1.12.
+// Production review logic uses RealReview via Run(). RunReview is retained
+// to avoid breaking integration tests; may be removed in a future story.
 func RunReview(ctx context.Context, rc RunConfig) error {
 	prompt, err := config.AssemblePrompt(
 		reviewTemplate,

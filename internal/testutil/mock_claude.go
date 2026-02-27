@@ -13,12 +13,14 @@ import (
 // ScenarioStep defines a single mock Claude CLI response in a test scenario.
 // Each step corresponds to one session.Execute invocation.
 type ScenarioStep struct {
-	Type          string `json:"type"`           // "execute" or "review" (metadata, not part of JSON output)
-	ExitCode      int    `json:"exit_code"`      // Process exit code
-	SessionID     string `json:"session_id"`     // Mock session ID for JSON response
-	OutputFile    string `json:"output_file"`    // File with custom output text (optional, relative to scenario dir)
-	CreatesCommit bool   `json:"creates_commit"` // Signal for future MockGitClient (stored, not acted on)
-	IsError       bool   `json:"is_error"`       // When true, JSON output uses subtype:"error" and is_error:true (matches real CLI)
+	Type          string            `json:"type"`                      // "execute" or "review" (metadata, not part of JSON output)
+	ExitCode      int               `json:"exit_code"`                 // Process exit code
+	SessionID     string            `json:"session_id"`                // Mock session ID for JSON response
+	OutputFile    string            `json:"output_file,omitempty"`     // File with custom output text (optional, relative to scenario dir)
+	CreatesCommit bool              `json:"creates_commit,omitempty"`  // Signal for future MockGitClient (stored, not acted on)
+	IsError       bool              `json:"is_error,omitempty"`        // When true, JSON output uses subtype:"error" and is_error:true (matches real CLI)
+	WriteFiles    map[string]string `json:"write_files,omitempty"`     // relPath → content: files to write in MOCK_CLAUDE_PROJECT_ROOT
+	DeleteFiles   []string          `json:"delete_files,omitempty"`    // relPaths to remove from MOCK_CLAUDE_PROJECT_ROOT
 }
 
 // Scenario defines an ordered sequence of mock Claude CLI responses for a test.
@@ -165,6 +167,23 @@ func RunMockClaude() bool {
 
 	// Write to stdout — os.Stdout is unbuffered *os.File, writes flush immediately
 	os.Stdout.Write(output)
+
+	// Apply file side effects (review integration tests: mock writes [x] or findings)
+	projectRoot := os.Getenv("MOCK_CLAUDE_PROJECT_ROOT")
+	if projectRoot != "" {
+		for relPath, content := range step.WriteFiles {
+			if err := os.WriteFile(filepath.Join(projectRoot, relPath), []byte(content), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "mock_claude: write file %q: %v\n", relPath, err)
+				os.Exit(1)
+			}
+		}
+		for _, relPath := range step.DeleteFiles {
+			if err := os.Remove(filepath.Join(projectRoot, relPath)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				fmt.Fprintf(os.Stderr, "mock_claude: delete file %q: %v\n", relPath, err)
+				os.Exit(1)
+			}
+		}
+	}
 
 	// Increment counter
 	if err := os.WriteFile(counterPath, []byte(strconv.Itoa(stepNum+1)), 0644); err != nil {
