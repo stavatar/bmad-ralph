@@ -2,7 +2,7 @@
 
 # Scope: updated after each epic retrospective — tracks violation frequency and enforcement escalation
 
-## Violation Frequency (Epics 2-5, 32 stories, 192 findings)
+## Violation Frequency (Epics 2-5, 32 stories, 190 findings)
 
 | Category | E2 (7s) | E3 (11s) | E4 (8s) | E5 (6s) | Aggregate | Enforcement Tier |
 |----------|---------|----------|---------|---------|-----------|-----------------|
@@ -41,7 +41,7 @@
 - Epic 2: 5.7 avg findings/story (3H/19M/18L)
 - Epic 3: 6.27 avg (0H/36M/33L) — R1-R4 applied after retro, eliminated HIGH
 - Epic 4: 5.0 avg (0H/22M/18L) — R1-R4 hooks delivered measurable improvement
-- Epic 5: 6.2 avg FINAL (0H/28M/15L across 6 stories) — gates package + runner integration
+- Epic 5: 6.2 avg FINAL (0H/28M/13L across 6 stories) — gates package + runner integration, 9 new pattern categories (all new territory, 0 repeats from E4)
 
 ## Update Process
 

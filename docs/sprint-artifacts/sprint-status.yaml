@@ -88,24 +88,23 @@ development_status:
   epic-4-retrospective: done
 
   # Epic 5: Human Gates & Control (6 stories)
-  epic-5: in-progress
-  5-1-basic-gate-prompt: review
-  5-2-gate-detection-in-runner: review
-  5-3-retry-with-feedback: review
-  5-4-checkpoint-gates: review
-  5-5-emergency-gate-upgrade: review
-  5-6-gates-integration-test: review
-  epic-5-retrospective: optional
+  epic-5: done
+  5-1-basic-gate-prompt: done
+  5-2-gate-detection-in-runner: done
+  5-3-retry-with-feedback: done
+  5-4-checkpoint-gates: done
+  5-5-emergency-gate-upgrade: done
+  5-6-gates-integration-test: done
+  epic-5-retrospective: done
 
-  # Epic 6: Knowledge Management & Polish (9 stories)
+  # Epic 6: Knowledge Management & Polish (8 stories, 59 AC, v3 fully automatic + R1-R7)
   epic-6: backlog
-  6-1-knowledgewriter-implementation-learnings-md: backlog
-  6-2-distillation-prompt-template: backlog
-  6-3-distillation-trigger: backlog
-  6-4-claude-md-section-management: backlog
-  6-5-knowledge-loading-in-session-context: backlog
-  6-6-resume-extraction-knowledge: backlog
-  6-7-review-knowledge: backlog
-  6-8-serena-integration: backlog
-  6-9-always-extract-flag-final-integration-test: backlog
+  6-1-fileknowledgewriter-learnings-md: backlog
+  6-2-knowledge-injection-into-prompts: backlog
+  6-3-resume-extraction-knowledge: backlog
+  6-4-review-knowledge: backlog
+  6-5-budget-enforcement-auto-distillation: backlog
+  6-6-distillation-cli-ralph-distill-manual-override: backlog
+  6-7-serena-integration: backlog
+  6-8-final-integration-test: backlog
   epic-6-retrospective: optional
