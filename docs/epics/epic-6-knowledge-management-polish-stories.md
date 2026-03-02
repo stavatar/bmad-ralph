@@ -1,40 +1,52 @@
-# Epic 6: Knowledge Management & Polish — Stories (v5 — 6-agent review refinements)
+# Epic 6: Knowledge Management & Polish — Stories (v6 — architecture redesign from 10-analyst review)
 
 **Scope:** FR26, FR27, FR28, FR28a, FR29, FR39
 **Stories:** 11
 **Release milestone:** v0.3
 
-**Redesign context (2026-02-27/28 → v3, 2026-03-02 → v4, 2026-03-02 → v5):**
+**Redesign context (2026-02-27/28 → v3, 2026-03-02 → v4, v5, 2026-03-02 → v6):**
 Эпик переработан дважды на основе исследований двух команд по 4 агента (2 аналитика + 2 архитектора
 с /deep-research каждая), верифицирован командой из 6 агентов (3 пары × /deep-research: retrieval quality,
 extraction quality, alternative methods — 91-92% confidence, 0 redesigns), и доработан по результатам
 2 challenge-сессий с пользователем. V4 интегрирует результаты 10-agent review (5 пар аналитик+архитектор:
 extraction pipeline, injection universality, stories 6.5/6.6, stories 6.7/6.8, consolidated) — 28 решений
 пользователя (4 CRITICAL, 8 HIGH, 12 MEDIUM, 4 LOW). V5 интегрирует результаты 6-agent review (3 пары
-аналитик+архитектор) — 11 корректировок: line-count guard (C1), distill_gate config (C2), overflow stderr
-warning (M6), inject all from LEARNINGS.md (H5), Story 6.5 split на 3 (6.5a/b/c), DistillState в .ralph/
-с Version, knowledge.go split на 4 файла, trend tracking вместо A/B (6.9). Ключевые изменения v3→v4:
+аналитик+архитектор). **V6 — фундаментальный архитектурный редизайн** по результатам 10-analyst review
+(v2-analyst-1 через v2-analyst-10) с корректированным фреймингом: Ralph работает на НОВЫХ проектах
+без инфраструктуры. Ключевое открытие: `--append-system-prompt` CLI флаг (analyst-10). Ключевые изменения v5→v6:
+
+1. **Storage: `.ralph/rules/` вместо `.claude/rules/`** — Ralph контролирует свои файлы, не пишет в `.claude/`.
+   Zero CVE surface (CVE-2025-59536, CVE-2026-21852, CVE-2026-25725). Bug #16299 не влияет.
+2. **Delivery via `--append-system-prompt`** — критические правила через system prompt (~90-94% compliance).
+   Контекстные правила через user prompt placeholder. 2 канала вместо 3.
+3. **Hooks → Growth** — канал 3 (hooks via `--settings`) помечен как future. MVP = 2 канала.
+4. **Human gate only** — `distill_gate: auto` (circuit breaker) убран. Только human gate:
+   skip, retry 1, retry 5. Проще и безопаснее.
+5. **3 validation criteria вместо 7** — output <= budget, citation >= 80%, [needs-formatting] handled.
+6. **Lazy file creation** — категория-файл создаётся только при 5+ правилах (не 3).
+7. **Stage tags** — `[stage:execute]`, `[stage:review]`, `[stage:both]` с первого дня, фильтрация при 80+ правилах.
+
+Ключевые изменения v3→v4 (сохранены):
 
 1. **Write path (C1):** Claude пишет напрямую в LEARNINGS.md через file tools. Go делает snapshot
    LEARNINGS.md перед сессией, diff после сессии, тегирует невалидные entries `[needs-formatting]`.
    НЕТ промежуточного pending файла. Go-side WriteLessons НЕ пишет контент — Go только post-validates.
-2. **Distillation failures (C2):** Config-driven: `distill_gate: human|auto` (default: human).
-   Human mode: Human GATE на КАЖДОМ failure дистилляции с описанием ошибки + текущий размер файла.
-   Опции: retry once, retry 5-10 times, skip. Auto mode: circuit breaker auto-skip после 3
-   consecutive failures, продолжаем без дистилляции. `ralph distill` сохранён как manual override.
+2. **Distillation failures (C2):** Human gate ONLY (v6 — no auto/circuit breaker mode).
+   Human GATE на КАЖДОМ failure дистилляции с описанием ошибки + текущий размер файла.
+   Опции: skip, retry once, retry 5 times. `ralph distill` сохранён как manual override.
 3. **Serena = MCP (C3):** Serena — MCP server, НЕ CLI. Детекция через `.claude/settings.json` или
    `.mcp.json`. НЕТ `exec.LookPath("serena")`. Ralph не вызывает Serena напрямую. Prompt hint:
    "If Serena MCP tools available, use them for code navigation." Минимальный интерфейс:
    `CodeIndexerDetector{Available(projectRoot) bool, PromptHint() string}`.
-4. **Persistence: Multi-file by category** — LEARNINGS.md (hot, raw) + `.claude/rules/ralph-{category}.md`
-   (distilled, multi-file). Index: `.claude/rules/ralph-index.md` (auto-generated TOC).
-   Ralph **НЕ модифицирует** CLAUDE.md проекта (zero corruption risk, FR26 satisfied vacuously).
-   `.claude/rules/` = proven infrastructure (9 файлов, 122 паттерна за 5 эпиков).
+4. **Persistence: Multi-file in `.ralph/rules/`** — LEARNINGS.md (hot, raw) + `.ralph/rules/ralph-{category}.md`
+   (distilled, multi-file). Index: `.ralph/rules/ralph-index.md` (auto-generated TOC).
+   Ralph **НЕ модифицирует** CLAUDE.md проекта и **НЕ пишет в `.claude/`** (zero CVE surface, FR26).
+   Delivery: `--append-system-prompt` для critical rules + user prompt placeholder для contextual rules.
 5. **Distillation: HUMAN-GATED** — 3-слойная composable архитектура:
    - Layer 1: Go-level semantic dedup при каждой записи (0 tokens)
    - Layer 2: Auto `claude -p` distillation при soft threshold 150 строк (~8K tokens)
-   - Layer 3: Safety nets — human gate on failure (retry/skip), cooldown (monotonic counter, ≥5 tasks),
-     post-validation quality gate (7+ criteria)
+   - Layer 3: Safety nets — human gate ONLY on failure (skip/retry 1/retry 5), cooldown (≥5 tasks),
+     post-validation quality gate (3 criteria: budget, citations, needs-formatting)
    - `ralph distill` CLI сохранён как manual override (дополняет, не заменяет auto)
    - Без принудительной обрезки: 300+ строк = 3-4% контекста (200K окно), linear decay не cliff
 6. **Category system (H2):** Fixed canonical 7 + misc. Claude can propose NEW_CATEGORY at distillation.
@@ -44,6 +56,15 @@ warning (M6), inject all from LEARNINGS.md (H5), Story 6.5 split на 3 (6.5a/b/
 8. **Trend tracking (6.9):** Knowledge effectiveness trend tracking — findings_per_task,
    first_clean_review_rate tracked over time в DistillState. Нет A/B mode switching.
 9. **--always-extract: Deferred** — флаг scaffold существует в config, wiring в Growth.
+10. **Delivery: `--append-system-prompt`** (NEW v6) — Ralph передаёт critical rules через CLI флаг
+    `--append-system-prompt .ralph/rules/ralph-critical.md`. Compliance ~90-94% (SFEIR).
+    Контекстные правила через user prompt placeholder `__RALPH_KNOWLEDGE__`. 0 файлов в `.claude/`.
+11. **Hooks via `--settings`: Growth** (NEW v6) — детерминированные авто-починки (e.g. CRLF) помечены
+    как future. MVP обходится 2 каналами (system prompt + user prompt).
+12. **Stage tags** (NEW v6) — `[stage:execute]`, `[stage:review]`, `[stage:both]` на каждом правиле
+    с первого дня. Фильтрация активируется при 80+ правилах. До порога — inject all.
+13. **Lazy file creation** (NEW v6) — категория-файл `.ralph/rules/ralph-{category}.md` создаётся
+    только при 5+ правилах (было 3). Меньше файлов на старте.
 
 **Источники решений (3 раунда исследований + верификация + 10-agent review):**
 - R1: `docs/research/knowledge-extraction-in-claude-code-agents.md` (20 источников)
@@ -52,6 +73,8 @@ warning (M6), inject all from LEARNINGS.md (H5), Story 6.5 split на 3 (6.5a/b/
 - Verification: 6-agent team (91-92% confidence), RAG/GraphRAG NOT needed for file-based CLI
 - V4 review: 10-agent team (5 pairs), 28 user decisions (C1-C4, H1-H8, M1-M12, L1-L6)
 - V5 review: 6-agent team (3 pairs), 11 corrections (C1, C2, M6, H5, 6.5 split, DistillState, knowledge.go split, 6.9 simplify)
+- V6 review: 10-analyst team (v2-analyst-1 through v2-analyst-10), corrected framing for NEW projects.
+  Key discovery: `--append-system-prompt` CLI flag (analyst-10). 9 user decisions on architecture.
 - Anthropic: Effective Context Engineering — "smallest set of high-signal tokens"
 - Chroma: Context Rot (18 моделей) — degradation grows with context
 - SFEIR: CLAUDE.md Optimization — ~15 rules = 94% compliance
@@ -194,7 +217,7 @@ Scenario: No mutex needed (L2)
 ### Story 6.2: Knowledge Injection into Prompts
 
 **User Story:**
-Как execute и review сессии, я хочу чтобы LEARNINGS.md и дистиллированные знания из `.claude/rules/ralph-*.md` загружались в prompt assembly, чтобы каждая сессия имела доступ к накопленным знаниям.
+Как execute и review сессии, я хочу чтобы LEARNINGS.md и дистиллированные знания из `.ralph/rules/ralph-*.md` загружались в prompt assembly, чтобы каждая сессия имела доступ к накопленным знаниям.
 
 **Acceptance Criteria:**
 
@@ -218,20 +241,32 @@ Scenario: JIT citation validation filters stale entries (M9)
   And valid entries with existing files preserved
 
 Scenario: Execute prompt includes distilled knowledge (multi-file)
-  Given .claude/rules/ralph-testing.md and ralph-errors.md exist with distilled patterns
+  Given .ralph/rules/ralph-testing.md and ralph-errors.md exist with distilled patterns
   When execute prompt assembled
-  Then ALL ralph-*.md files loaded from .claude/rules/ (glob pattern)
-  And ralph-misc.md always loaded (no globs in frontmatter, L5)
-  And combined content injected via strings.Replace __RALPH_KNOWLEDGE__
+  Then ALL ralph-*.md files loaded from .ralph/rules/ (glob pattern)
+  And ralph-misc.md always loaded (no stage filtering, L5)
+  And combined content injected via strings.Replace __RALPH_KNOWLEDGE__ (user prompt)
+  And ralph-critical.md content ALSO passed via --append-system-prompt (system prompt channel)
   And injected alongside LEARNINGS.md (both present)
 
-Scenario: Shared buildKnowledgeReplacements function (H7)
+Scenario: Two-channel delivery architecture (v6)
+  Given .ralph/rules/ralph-critical.md exists with high-frequency rules
+  And .ralph/rules/ralph-{category}.md files exist with contextual rules
+  When session launched via claude -p
+  Then Channel 1: Go reads ralph-critical.md → passes content via --append-system-prompt string (~90-94% compliance)
+  And Channel 2: remaining ralph-*.md + LEARNINGS.md delivered via user prompt placeholders
+  And 0 files written to .claude/ directory
+  And no hooks needed (Growth phase only)
+
+Scenario: Shared buildKnowledgeReplacements function with per-task cache (H7/H3-fix)
   Given 3 AssemblePrompt call sites in runner.go (initial, retry, review)
   When knowledge replacements built
   Then buildKnowledgeReplacements(projectRoot string) (map[string]string, error) used
   And function defined in runner/knowledge_read.go
   And all 3 call sites use same shared function
   And returns map with __LEARNINGS_CONTENT__ and __RALPH_KNOWLEDGE__ keys
+  And results cached per task — repeated calls within same task reuse cached file reads
+  And review call site sets __LEARNINGS_CONTENT__ to empty string (no self-review of own writes)
 
 Scenario: HasLearnings template flag (H3)
   Given LEARNINGS.md has validated non-empty content
@@ -270,9 +305,10 @@ Scenario: Review prompt mutation asymmetry updated (M2)
 
 Scenario: Missing knowledge files handled gracefully
   Given LEARNINGS.md does not exist
-  And no .claude/rules/ralph-*.md files exist
+  And no .ralph/rules/ralph-*.md files exist
   When prompts assembled
   Then knowledge placeholders replaced with empty string
+  And --append-system-prompt flag omitted (no critical rules file)
   And HasLearnings = false, self-review section omitted
   And no error
 
@@ -291,15 +327,17 @@ Scenario: Knowledge sections use Stage 2 injection
 Scenario: Stderr warning when LEARNINGS.md exceeds budget (M6)
   Given LEARNINGS.md has more lines than learnings_budget config value
   When session starts and prompts assembled
-  Then stderr warning printed: "⚠ LEARNINGS.md: {lines}/{budget} lines ({ratio}x budget). Run `ralph distill` or switch to distill_gate: human"
+  Then stderr warning printed: "⚠ LEARNINGS.md: {lines}/{budget} lines ({ratio}x budget). Run `ralph distill` to compress."
   And warning is informational only (does not block session)
 ```
 
 **Technical Notes:**
 - Modifies: `runner/prompts/execute.md`, `runner/prompts/review.md` — add placeholder sections
 - Assembly: Stage 2 replacements map gets 2 new keys
-- **H7:** `buildKnowledgeReplacements(projectRoot string) (map[string]string, error)` in runner/knowledge_read.go.
-  All 3 AssemblePrompt call sites use this shared function — no per-call-site changes needed
+- **H7/H3-fix:** `buildKnowledgeReplacements(projectRoot string) (map[string]string, error)` in runner/knowledge_read.go.
+  All 3 AssemblePrompt call sites use this shared function. Results cached per task (file reads happen once,
+  not 3 times). Review call site overrides __LEARNINGS_CONTENT__ to empty — review не должен видеть
+  LEARNINGS.md, потому что review сам пишет в этот файл (self-review loop prevention).
 - **H3:** `HasLearnings bool` added to `config.TemplateData`. Runner sets true when validated content
   is non-empty. Template: `{{- if .HasLearnings}}...{{- end}}`
 - **LEARNINGS.md = buffer of recent entries not yet distilled.** Old entries already in ralph-*.md.
@@ -308,15 +346,20 @@ Scenario: Stderr warning when LEARNINGS.md exceeds budget (M6)
 - **L5:** ralph-misc.md always loaded via Stage 2 injection. NO globs in frontmatter.
 - **M2:** Update prompt invariants in review.md and execute.md — review CAN write LEARNINGS.md
 - **M6:** Budget overflow warning: stderr at session start when lines > budget. Informational only,
-  does not block. Format: `"⚠ LEARNINGS.md: {lines}/{budget} lines ({ratio}x budget). Run `ralph distill` or switch to distill_gate: human"`
+  does not block. Format: `"⚠ LEARNINGS.md: {lines}/{budget} lines ({ratio}x budget). Run `ralph distill` to compress."`
 - **M9:** JIT validation = `os.Stat` only for file existence. No line range validation (Growth phase)
 - **ValidateLearnings(projectRoot, content) (string, string)** — returns (valid, stale)
   - Parse by `## ` headers, extract `[file:line]` citation (any file extension)
   - `os.Stat(filepath.Join(projectRoot, file))` — exists? (no line range check)
   - Cost: O(N) stat calls, ~50 entries × ~1ms = 50ms (negligible)
   - Stale entries excluded from prompt, marked for removal at distillation
-- **Multi-file read:** `filepath.Glob("{projectRoot}/.claude/rules/ralph-*.md")` → read + concatenate
+- **Multi-file read:** `filepath.Glob("{projectRoot}/.ralph/rules/ralph-*.md")` → read + concatenate
   - Exclude `ralph-index.md` from concatenation (it's metadata, not rules)
+- **Two-channel delivery (v6):**
+  - Channel 1: `--append-system-prompt "<content>"` — Go reads ralph-critical.md, passes as string arg
+  - Channel 2: `__RALPH_KNOWLEDGE__` + `__LEARNINGS_CONTENT__` in user prompt — contextual rules
+  - session.Options gets new field: AppendSystemPrompt *string (nil = omit flag, string = content)
+  - 0 files in `.claude/`, 0 CVE surface, 100% testable via mock
 - **Self-review step:** Added to execute.md after Proceed/Findings, before Gates (~50 tokens)
   - Conditional: `{{- if .HasLearnings}}` (H3)
   - Research: Live-SWE-agent +12% quality from single reflection prompt
@@ -479,31 +522,19 @@ Scenario: Cooldown via MonotonicTaskCounter (H1)
   And no distillation triggered
   And runner continues
 
-Scenario: Human GATE on distillation failure when distill_gate = human (C2, default)
-  Given distill_gate config = "human" (default)
-  And auto-distillation failed (crash, timeout >2min, bad format, validation reject, I/O error)
+Scenario: Human GATE on distillation failure (v6: human only)
+  Given auto-distillation failed (crash, timeout >2min, bad format, validation reject, I/O error)
   When failure detected
   Then human GATE presented with error description + current file size status
-  And gate options: retry once, retry 5-10 times, or skip
+  And gate options: skip, retry once, retry 5 times
   And if retry: re-run distillation (up to selected count)
   And if skip: restore all backups, log warning, continue
   And runner continues normally after gate resolution
-
-Scenario: Auto-skip distillation failure (distill_gate: auto)
-  Given distill_gate config = "auto"
-  And auto-distillation failed
-  When failure detected
-  Then circuit breaker increments consecutive failure counter
-  And if consecutive failures < 3: retry once automatically
-  And if consecutive failures >= 3: auto-skip distillation, restore backups, log warning
-  And runner continues without human interaction
-  And consecutive failure counter resets on successful distillation
-
 Scenario: Bad format gets free retry with reinforced prompt (H4)
   Given distillation output is unparseable (missing BEGIN/END markers or bad structure)
   When failure type = bad_format
   Then ONE automatic retry with reinforced prompt instructions (no gate yet)
-  And if retry also fails: gate as per distill_gate config
+  And if retry also fails: human gate (skip/retry 1/retry 5)
 
 Scenario: Missing LEARNINGS.md — no action
   Given LEARNINGS.md does not exist
@@ -521,16 +552,16 @@ Scenario: DistillFunc injectable for testing
 **Technical Notes:**
 - Trigger point: runner.go Execute(), AFTER gate check, BEFORE next iteration
   (задача полностью завершена — review чистый, gate пройден)
-- **distill_gate config:** `distill_gate: human|auto` (default: human). Human mode: interactive gate
-  as before. Auto mode: CB auto-skip after 3 consecutive failures.
-- Config additions: `distill_gate: "human"` (default), `distill_cooldown: 5`
+- **distill_gate:** Human gate ONLY (v6 simplification — no auto/circuit breaker mode).
+  Options: skip, retry once, retry 5 times.
+- Config additions: `distill_cooldown: 5` (no distill_gate config needed — always human)
 - **H1 — MonotonicTaskCounter:** persisted in DistillState JSON, never resets. Incremented at each
   clean review. Cooldown: MonotonicTaskCounter - LastDistillTask >= 5.
 - **H4 — Failure types:** crash (non-zero exit), hang (timeout >2min), bad format (unparseable output —
   free retry with reinforced prompt first), validation reject, I/O error.
 - **DistillFunc injectable** — follows ReviewFn/GatePromptFn/ResumeExtractFn pattern
 - BudgetCheck() from Story 6.1
-- All non-fatal: any failure → gate/auto-skip → continue, NEVER interrupt task loop
+- All non-fatal: any failure → human gate (skip/retry) → continue, NEVER interrupt task loop
 
 **Prerequisites:** Story 6.1 (BudgetCheck + LEARNINGS.md format), Story 6.2 (knowledge injection)
 
@@ -569,7 +600,7 @@ Scenario: Distillation prompt instructions
   And distillation prompt instructs: merge duplicate categories
   And distillation prompt instructs: fix all [needs-formatting] entries
   And distillation prompt instructs: output grouped by category for multi-file split
-  And distillation prompt instructs: auto-promote categories with >=6 entries -> ralph-{category}.md
+  And distillation prompt instructs: auto-promote categories with >=5 entries -> ralph-{category}.md (lazy creation)
   And distillation prompt instructs: promote [freq:N>=10] entries -> ralph-critical.md
   And distillation prompt instructs: add ANCHOR marker to entries with freq >= 10 (L4)
   And distillation prompt instructs: preserve ANCHOR entries unchanged
@@ -579,6 +610,8 @@ Scenario: Distillation prompt instructions
   And distillation prompt instructs: use ## CATEGORY: <name> sections (H6)
   And distillation prompt instructs: use NEW_CATEGORY: <name> for new categories (H2)
   And distillation prompt instructs: use only canonical categories: testing, errors, config, cli, architecture, performance, security + misc (H2)
+  And distillation prompt instructs: assign stage tag [stage:execute|review|both] to each entry (v6)
+  And stage tags metadata-only until 80+ rules — then Go filters by current session stage
 
 Scenario: Output parsing with BEGIN/END markers (H6)
   Given distillation session completed
@@ -595,7 +628,7 @@ Scenario: Multi-file category output with scope hints
   And scope hints auto-detected from project file types (M4)
   And Go scans top 2 levels of project, collects file extensions, maps to known language globs
   And Claude uses scope info to create globs, Go validates glob syntax with filepath.Match
-  And minimum 3 rules per file (smaller categories merged into ralph-misc.md)
+  And minimum 5 rules per file — lazy creation (smaller categories merged into ralph-misc.md)
   And ralph-misc.md has NO globs in frontmatter — always loaded (L5)
   And high-frequency rules (freq:N>=10) written to ralph-critical.md with globs: ["**"]
   And ANCHOR marker automatically added to entries with freq >= 10 (L4)
@@ -604,7 +637,7 @@ Scenario: LEARNINGS.md replaced with compressed output
   Given distillation output valid (passes ValidateDistillation from Story 6.5c)
   When output written
   Then LEARNINGS.md replaced with compressed output
-  And auto-promoted categories written to .claude/rules/ralph-{category}.md with scope hints
+  And auto-promoted categories written to .ralph/rules/ralph-{category}.md with scope hints
   And log: "Auto-distilled LEARNINGS.md (160->N lines, K categories)"
 
 Scenario: Index file auto-generation
@@ -617,7 +650,7 @@ Scenario: Index file auto-generation
 Scenario: T1 promotion via ralph-critical.md
   Given distillation detects entries with [freq:N] where N >= 10
   When entry promoted to T1
-  Then written to .claude/rules/ralph-critical.md with globs: ["**"] (always loaded)
+  Then written to .ralph/rules/ralph-critical.md with globs: ["**"] (always loaded)
   And ANCHOR marker added (L4)
   And original entry in ralph-{category}.md replaced with reference
   And log: "T1 promoted: <topic> (freq:N)"
@@ -642,7 +675,7 @@ Scenario: NEW_CATEGORY proposal (H2)
 - **3-layer architecture:**
   - Layer 1 (Go, 0 tokens): semantic dedup in post-validation (Story 6.1)
   - Layer 2 (LLM, ~8K tokens): auto `claude -p` at 150-line soft threshold
-  - Layer 3 (Go, 0 tokens): gate/auto-skip on failure, cooldown, post-validation
+  - Layer 3 (Go, 0 tokens): human gate on failure (skip/retry 1/retry 5), cooldown, post-validation
 - **H6 — Output protocol:** BEGIN_DISTILLED_OUTPUT / END_DISTILLED_OUTPUT markers. Category sections:
   `## CATEGORY: <name>`. New category proposal: `NEW_CATEGORY: <name>`. Go parses only between markers.
 - **H2 — Canonical categories:** testing, errors, config, cli, architecture, performance, security + misc.
@@ -658,11 +691,14 @@ Scenario: NEW_CATEGORY proposal (H2)
   splits into ralph-{category}.md files with auto-generated YAML frontmatter (scope hints)
 - **Backup:** ALL ralph-*.md + LEARNINGS.md backed up with 2-generation rotation before distillation
 - **T1 promotion:** high-frequency (>=10 occurrences) → ralph-critical.md (globs: ["**"])
-  Safe: writes to .claude/rules/ only (no config editing, no hook modification, zero CVE risk)
+  Safe: writes to .ralph/rules/ only (no config editing, no hook modification, zero CVE risk)
 - **Violation frequency:** `[freq:N]` marker in distilled entries, incremented by distillation prompt
 - Config additions: `distill_target_pct: 50`, `distill_timeout: 120`
 - Token cost: ~8K per distillation (~30K/100 tasks, 0.015× one execute session)
-- File paths: `{projectRoot}/LEARNINGS.md`, `{projectRoot}/.claude/rules/ralph-*.md`
+- File paths: `{projectRoot}/LEARNINGS.md`, `{projectRoot}/.ralph/rules/ralph-*.md`
+- **Stage tags (v6):** `[stage:execute]`, `[stage:review]`, `[stage:both]` — assigned by distillation prompt.
+  Go stores tags but does NOT filter until 80+ total rules across all files. Below threshold = inject all.
+- **Lazy creation (v6):** Category file created only when 5+ rules in category (was 3). Fewer files on start.
 
 **Prerequisites:** Story 6.5a (trigger + gate logic)
 
@@ -677,19 +713,14 @@ Scenario: NEW_CATEGORY proposal (H2)
 **Acceptance Criteria:**
 
 ```gherkin
-Scenario: Post-validation rejects bad distillation (ValidateDistillation)
+Scenario: Post-validation rejects bad distillation (ValidateDistillation, v6 simplified)
   Given auto-distillation produced output
   When ValidateDistillation(old, new) runs
-  Then checks 8 criteria:
-    1. Output <= 200 lines
-    2. Topic headers preserved (no category loss)
-    3. Entries from last 20% of original file preserved (H5 — distillation safety net)
-    4. Citation preservation >= 80%
-    5. No duplicate entries
-    6. Category count preserved >= 80% of original categories
-    7. All [needs-formatting] entries either fixed or preserved (none silently dropped)
-    8. All ralph-*.md have valid YAML frontmatter with globs: field (M8)
-  And if any check fails: treated as distillation failure (triggers gate per Story 6.5a)
+  Then checks 3 criteria (v6 — simplified from 7):
+    1. Output <= 200 lines (budget guard)
+    2. Citation preservation >= 80% (no mass knowledge loss)
+    3. All [needs-formatting] entries either fixed or preserved (none silently dropped)
+  And if any check fails: treated as distillation failure (triggers human gate per Story 6.5a)
 
 Scenario: DistillState persisted in .ralph/distill-state.json
   Given distillation state needs persistence
@@ -711,12 +742,22 @@ Scenario: DistillState included in backup rotation
   Then .ralph/distill-state.json backed up alongside LEARNINGS.md and ralph-*.md
   And backup rotation: .bak + .bak.1 (same as other files)
 
+Scenario: Atomic multi-file distillation via intent file (CR1)
+  Given distillation about to write multiple files (LEARNINGS.md, ralph-*.md, distill-state.json)
+  When write sequence starts
+  Then Phase 1: create backups → write .pending files → write `.ralph/distill-intent.json`
+  And Phase 2: rename .pending → target → update distill-state.json → delete intent file
+  And `.ralph/distill-intent.json` contains: timestamp, list of target files, phase (backup|write|commit)
+  And if any rename fails in Phase 2: remaining files left as .pending (recoverable)
+
 Scenario: Crash recovery at startup (M7)
-  Given runner starts and finds .bak files for LEARNINGS.md or ralph-*.md
+  Given runner starts
   When startup check runs
-  Then .bak files restored to original paths
-  And .ralph/distill-state.json.bak restored if present
-  And log warning: "Recovered from interrupted distillation"
+  Then if `.ralph/distill-intent.json` exists: interrupted distillation detected
+  And Phase 2 incomplete → complete pending renames OR rollback from .bak (based on phase field)
+  And if no intent file but .bak files exist → normal state (previous successful distillation)
+  And log warning: "Recovered from interrupted distillation" (only when intent file found)
+  And clean up: delete intent file + .pending files after recovery
 
 Scenario: Effectiveness metrics after distillation
   Given auto-distillation completed
@@ -732,12 +773,14 @@ Scenario: Effectiveness metrics after distillation
   Version int, MonotonicTaskCounter int, LastDistillTask int, Categories []string, Metrics struct
 - **Version field:** forward compatibility — allows migration from older formats. Current version: 1.
 - **Backup rotation:** DistillState backed up with 2-generation rotation alongside LEARNINGS.md and ralph-*.md
-- **M7 — Crash recovery:** At startup, check for .bak files → restore → log warning.
-  Covers LEARNINGS.md, ralph-*.md, and .ralph/distill-state.json
-- **Post-validation (ValidateDistillation):** Go code, deterministic, checks 8 criteria
-- **H5 — criterion #3:** "last 20% of entries" in ValidateDistillation is a safety net for distillation —
-  ensures recent entries are not lost during compression. This is about preservation during distillation,
-  not about injection filtering.
+- **CR1 — Atomic multi-file write:** Intent file `.ralph/distill-intent.json` ensures crash recovery
+  can distinguish interrupted from normal state. Two-phase: (1) backup + .pending writes + intent,
+  (2) rename .pending → target + delete intent. Recovery: intent exists → complete or rollback.
+- **M7 — Crash recovery:** At startup, check for intent file first (interrupted distillation),
+  then handle accordingly. No intent file + .bak files = normal (previous successful distillation).
+- **Post-validation (ValidateDistillation):** Go code, deterministic, checks 3 criteria (v6 simplified from 7):
+  1. Output <= budget, 2. Citation >= 80%, 3. [needs-formatting] handled.
+  Removed: topic headers, duplicates, category count, YAML frontmatter checks — overengineered for MVP.
 - **Effectiveness metrics:** logged + stored in DistillState for trend tracking
 - **No forced truncation:** user decision — 300+ lines = 3-4% of 200K context, linear decay.
   If human skips distillation, file stays as-is. No FIFO. No archive.
@@ -767,11 +810,11 @@ Scenario: ralph distill compresses LEARNINGS.md
   And runs `claude -p` (pipe mode, non-interactive)
   And post-validation via ValidateDistillation (same as Story 6.5c)
   And if valid: LEARNINGS.md replaced with compressed output
-  And auto-promoted categories written to .claude/rules/ralph-{category}.md
+  And auto-promoted categories written to .ralph/rules/ralph-{category}.md
   And ralph-index.md regenerated
 
 Scenario: Backup before distillation (L4)
-  Given .claude/rules/ralph-*.md files exist with previous content
+  Given .ralph/rules/ralph-*.md files exist with previous content
   When ralph distill runs
   Then creates LEARNINGS.md.bak + .bak.1 (2-generation rotation)
   And backs up all ralph-*.md with 2-generation rotation
@@ -810,7 +853,7 @@ Scenario: Advisory concurrent run note (L6)
 - **Reuses:** `runner/prompts/distillation.md` from Story 6.5b (same prompt, same validation)
 - **Reuses:** `AutoDistill()` from Story 6.5b / `ValidateDistillation()` from Story 6.5c — CLI wraps same logic
 - Distillation session: `session.Execute` with pipe mode (`-p` flag via Options.Prompt)
-- Output target: `{projectRoot}/.claude/rules/ralph-{category}.md` (auto-loaded by Claude Code)
+- Output target: `{projectRoot}/.ralph/rules/ralph-{category}.md` (injected by Ralph via --append-system-prompt + user prompt)
 - **L4:** 2-generation backups (.bak + .bak.1), including .ralph/distill-state.json
 - **L6:** Advisory note in help text about not running concurrently. No file lock code.
 - Exit code mapping: 0=success, 1=error (reuses cmd/ralph exit patterns)
@@ -876,7 +919,7 @@ Scenario: Minimal CodeIndexerDetector interface (M5/C3)
   Ralph does NOT call Serena directly. Only provides prompt hint.
 - **M5:** Minimal interface: `CodeIndexerDetector{Available(projectRoot) bool, PromptHint() string}`
 - Config: `serena_enabled` (default true) — already in config.go
-- `serena_timeout` config field can be removed or kept as no-op (no longer used for index calls)
+- `serena_timeout` config field: REMOVE (no longer used — no index calls, only config file detection)
 - Detection: `os.ReadFile` + JSON parse for `.claude/settings.json` / `.mcp.json`
 - Best-effort: any detection failure = Available() returns false
 
@@ -929,27 +972,17 @@ Scenario: FINAL — auto-distillation multi-file output with human gate
   When clean review completes and budget check runs
   Then auto-distillation triggered (DistillFn called)
   And LEARNINGS.md replaced with compressed output
-  And ralph-{category}.md files created in .claude/rules/
+  And ralph-{category}.md files created in .ralph/rules/
   And ralph-index.md generated
   And log contains "Auto-distilled LEARNINGS.md"
   And next execute session gets distilled knowledge context from ralph-*.md files
 
-Scenario: FINAL — distillation failure triggers human gate (C2)
+Scenario: FINAL — distillation failure triggers human gate (v6: human only)
   Given auto-distillation fails (mock returns error)
-  And distill_gate = "human" (default)
   When failure detected
-  Then human gate presented with error description
+  Then human gate presented with error description + options: skip / retry 1 / retry 5
   And if skip chosen: all backups restored, LEARNINGS.md unchanged
   And runner continues normally
-  And NO circuit breaker state checked
-
-Scenario: FINAL — distillation failure auto-skip (distill_gate: auto)
-  Given auto-distillation fails 3 times consecutively (mock returns errors)
-  And distill_gate = "auto"
-  When failure detected
-  Then auto-skip after 3rd failure, backups restored
-  And runner continues without human interaction
-  And log warning about auto-skipped distillation
 
 Scenario: FINAL — JIT citation validation filters stale
   Given LEARNINGS.md has 5 entries, 2 citing deleted files
@@ -982,13 +1015,15 @@ Scenario: FINAL — [needs-formatting] tag and fix cycle
   When auto-distillation runs
   Then [needs-formatting] entries present in distillation input
   And output has properly formatted entries (tags removed, format fixed)
-  And ValidateDistillation criterion #7 passes (all [needs-formatting] handled)
+  And ValidateDistillation criterion #3 passes (all [needs-formatting] handled)
 
-Scenario: FINAL — crash recovery at startup (M7)
-  Given LEARNINGS.md.bak exists from interrupted distillation
-  And .ralph/distill-state.json.bak exists
+Scenario: FINAL — crash recovery at startup via intent file (M7)
+  Given `.ralph/distill-intent.json` exists from interrupted distillation
+  And LEARNINGS.md.bak and .ralph/distill-state.json.bak exist
   When runner starts
-  Then .bak files restored to originals
+  Then intent file detected → recovery triggered (Story 6.5c intent-file model)
+  And Phase 2 completed or rolled back from .bak (based on phase field)
+  And intent file + .pending files cleaned up
   And log warning: "Recovered from interrupted distillation"
   And runner proceeds normally
 
@@ -1008,7 +1043,7 @@ Scenario: FINAL — cross-language scope hints (M12)
 - Mock DistillFn: injectable (same pattern as ReviewFn, GatePromptFn)
 - Mock Serena detection: CodeIndexerDetector mock (returns true/false)
 - Reuses test helpers from runner/test_helpers_test.go
-- Auto-distillation scenarios verify: trigger threshold, human gate, auto-skip, multi-file output
+- Auto-distillation scenarios verify: trigger threshold, human gate (skip/retry 1/retry 5), multi-file output
 - Citation validation scenario: create temp files, delete some, verify filtering
 - [needs-formatting] scenario: verify tag → fix → validation cycle
 - **M12 — Cross-language tests:** Go, Python, JS/TS, Java, mixed stacks
@@ -1075,20 +1110,20 @@ Scenario: Metrics available in DistillState JSON
 | Story | Title | FRs | Key Files | AC Count |
 |:-----:|-------|:---:|:---------:|:--------:|
 | 6.1 | FileKnowledgeWriter — LEARNINGS.md Post-Validation | FR27 | runner/knowledge_write.go, runner/knowledge_read.go | 10 |
-| 6.2 | Knowledge Injection into Prompts | FR29 | runner/prompts/*.md, config/prompt.go | 13 |
+| 6.2 | Knowledge Injection into Prompts | FR29 | runner/prompts/*.md, config/prompt.go, session/ | 14 |
 | 6.3 | Resume-Extraction Knowledge | FR28 | runner/ (prompt update), session/session.go | 5 |
 | 6.4 | Review Knowledge | FR28a | runner/ (prompt update) | 5 |
-| 6.5a | Budget Check & Distillation Trigger | FR27,FR28a | runner/knowledge_write.go, runner/runner.go | 8 |
-| 6.5b | Distillation Session & Output Parsing | FR27,FR28a | runner/knowledge_distill.go | 11 |
-| 6.5c | Distillation Validation & State | FR27 | runner/knowledge_state.go | 6 |
+| 6.5a | Budget Check & Distillation Trigger | FR27,FR28a | runner/knowledge_write.go, runner/runner.go | 7 |
+| 6.5b | Distillation Session & Output Parsing | FR27,FR28a | runner/knowledge_distill.go | 10 |
+| 6.5c | Distillation Validation & State | FR27 | runner/knowledge_state.go | 7 |
 | 6.6 | Distillation CLI — ralph distill (Manual Override) | FR27 | cmd/ralph/distill.go | 6 |
 | 6.7 | Serena MCP Integration | FR39 | runner/runner.go | 6 |
-| 6.8 | Final Integration Test | ALL | runner/runner_final_integration_test.go | 12 |
+| 6.8 | Final Integration Test | ALL | runner/runner_final_integration_test.go | 10 |
 | 6.9 | Knowledge Effectiveness Trend Tracking | FR29 | runner/knowledge_state.go, runner/runner.go | 4 |
-| | **Total** | **FR26-FR29,FR28a,FR39** | | **86** |
+| | **Total** | **FR26-FR29,FR28a,FR39** | | **84** |
 
 **FR Coverage:**
-- FR26: Satisfied vacuously — ralph does NOT modify project CLAUDE.md (zero corruption risk)
+- FR26: Satisfied vacuously — ralph does NOT modify project CLAUDE.md and does NOT write to `.claude/` (zero CVE surface)
 - FR27: 6.1 (post-validation), 6.5a/b/c (auto-distillation → ralph-{category}.md), 6.6 (manual override)
 - FR28: 6.3 (resume-extraction writes lessons via Claude)
 - FR28a: 6.4 (review writes lessons via Claude on findings), 6.5a/b (budget enforcement + auto-distill)
@@ -1113,38 +1148,38 @@ Tier 1 — Hot (LEARNINGS.md, soft threshold 150 lines)
   Budget overflow: stderr warning at session start when lines > budget (M6)
   No forced truncation: 300+ lines = 3-4% context, linear decay (user decision)
 
-Tier 2 — Distilled (.claude/rules/ralph-*.md, multi-file by category)
-  Auto-promoted from Tier 1 during auto-distillation (categories >=6 entries)
+Tier 2 — Distilled (.ralph/rules/ralph-*.md, multi-file by category)
+  Auto-promoted from Tier 1 during auto-distillation (categories >=5 entries — lazy creation v6)
   Canonical categories: testing, errors, config, cli, architecture, performance, security + misc (H2)
   NEW_CATEGORY proposal via marker (H2) — list only grows, never shrinks
   Output protocol: BEGIN_DISTILLED_OUTPUT / END_DISTILLED_OUTPUT markers (H6)
-  Each file has scope hints (globs) for contextual loading by Claude Code
-  ralph-misc.md: always loaded, no globs (L5)
+  Stage tags: [stage:execute|review|both] on each entry — filtering at 80+ rules (v6)
+  ralph-misc.md: always loaded, no stage filtering (L5)
   Manual override via `ralph distill` CLI (Story 6.6)
-  Auto-loaded by Claude Code for ALL sessions (bonus visibility)
+  Delivery: --append-system-prompt for critical rules, user prompt for contextual (v6)
+  NOT in .claude/ — 0 CVE surface, Ralph reads and injects itself (v6)
   Injected into ralph prompts via Stage 2 (__RALPH_KNOWLEDGE__)
   Trend tracking: findings_per_task, first_clean_review_rate (Story 6.9)
   Three sub-tiers (Progressive Disclosure T1-T3, R2-R6 pattern):
-    T1: ralph-critical.md — globs: ["**"] — always loaded, freq:N>=10 + ANCHOR (L4)
-    T2: ralph-{category}.md — globs: [<specific>] — contextual loading
-    T3: LEARNINGS.md — injected via Stage 2 — full raw knowledge
+    T1: ralph-critical.md — delivered via --append-system-prompt, freq:N>=10 + ANCHOR (L4)
+    T2: ralph-{category}.md — delivered via user prompt (__RALPH_KNOWLEDGE__), stage-filtered at 80+
+    T3: LEARNINGS.md — delivered via user prompt (__LEARNINGS_CONTENT__) — full raw knowledge
   Index: ralph-index.md — auto-generated TOC with category, count, scope, updated
 
 R1-R7 Knowledge Enforcement (proven patterns from 5 epics):
-  R2-R1: Multi-file by category (ralph-{category}.md, min 3 rules/file)
-  R2-R2: T1 promotion to ralph-critical.md (safe: .claude/rules/ only, zero CVE risk)
+  R2-R1: Multi-file by category (ralph-{category}.md, min 5 rules/file — lazy creation v6)
+  R2-R2: T1 promotion to ralph-critical.md → delivered via --append-system-prompt (v6)
   R2-R5: Violation frequency tracking — [freq:N] markers, Claude assigns, Go validates monotonicity (M11)
   R2-R6: Progressive disclosure T1-T3 (critical -> scoped -> raw)
-  R2-R7: Scope hints in YAML frontmatter (globs for contextual loading)
+  R2-R7: Scope hints in YAML frontmatter (for Go-side filtering at 80+ rules, v6)
   R6:    Effectiveness metrics (entries before/after, stale %, categories, fixes)
 
-Safety nets (human-gated or auto-skip, configurable via distill_gate):
+Safety nets (human-gated only, v6 simplified):
   - Layer 1: Go-level semantic dedup on every post-validation (0 tokens)
   - Layer 2: Auto claude -p distillation at 150 lines (~8K tokens, 2-min timeout H8)
-  - Layer 3: distill_gate: human → Human GATE on every failure (C2) — retry/skip options
-  - Layer 3: distill_gate: auto → CB auto-skip after 3 consecutive failures (C2)
+  - Layer 3: Human GATE on every failure — skip / retry 1 / retry 5 (v6: no auto mode)
   - Layer 3: Cooldown via MonotonicTaskCounter (H1) — >=5 tasks between distillations
-  - Post-validation: 8 criteria check on distillation output (including YAML frontmatter M8)
+  - Post-validation: 3 criteria check (budget, citations >=80%, needs-formatting handled)
   - Self-review step in execute prompt via HasLearnings flag (H3, +12% quality)
   - [needs-formatting] tag preserves knowledge (fix at distillation, no loss)
   - 2-generation backups: .bak + .bak.1 (L4)
@@ -1172,13 +1207,13 @@ Knowledge source files (knowledge.go split):
                ├──→ 6.3 ──→ 6.8
                ├──→ 6.4 ──→ 6.8
                ├──→ 6.5a ──→ 6.5b ──→ 6.5c ──→ 6.6 ──→ 6.8
-               │                  ╰──→ 6.9 ──→ 6.8
+               │                         ╰──→ 6.9 ──→ 6.8
 3.5 ────→ 6.7 ──────────────────→ 6.8
 6.2 ─────────────→ 6.9 ──→ 6.8
 ```
 
 **Parallelism opportunities:**
-- 6.2 и 6.7 — independent after 6.1 (prompt injection vs Serena MCP)
+- 6.2 (after 6.1) и 6.7 (after 3.5) — independent, can start in parallel
 - 6.3 и 6.4 — parallel-capable (resume vs review knowledge)
 - 6.5a depends on 6.1+6.2; 6.5b depends on 6.5a; 6.5c depends on 6.5b
 - 6.6 depends on 6.5b+6.5c (reuses distill logic + validation)
@@ -1235,7 +1270,7 @@ Knowledge source files (knowledge.go split):
   - New Story 6.9: A/B testing — scoped vs flat injection modes
 - v4→v5: 6-agent review (3 pairs analytic+architect, 11 corrections):
   - C1: Line-count guard in snapshot-diff — detect LEARNINGS.md rewrite (lines decreased → full revalidation)
-  - C2: distill_gate config: human|auto (default: human). Auto mode: CB auto-skip after 3 consecutive failures
+  - C2: distill_gate simplified to human-only in v6 (was human|auto with circuit breaker)
   - M6: Stderr warning when LEARNINGS.md exceeds budget at session start (informational, non-blocking)
   - H5: Inject ALL entries from LEARNINGS.md (not 20%) — LEARNINGS.md is recent buffer, old knowledge in ralph-*.md
   - Story 6.5 split into 6.5a (trigger+gate), 6.5b (session+parsing), 6.5c (validation+state) — manageable scope
@@ -1244,4 +1279,14 @@ Knowledge source files (knowledge.go split):
   - knowledge.go split into 4 files: knowledge_write.go, knowledge_read.go, knowledge_distill.go, knowledge_state.go
   - Story 6.9 simplified: A/B testing → trend tracking (findings_per_task, first_clean_review_rate)
   - All LEARNINGS.md.state references updated to .ralph/distill-state.json
-  - Total: 11 stories (was 9 in v4), 86 AC (was 78 in v4)
+  - Total: 11 stories (was 9 in v4), 84 AC (was 78 in v4, 86 in v5)
+- v5→v6: 10-analyst review (v2-analyst-1 through v2-analyst-10, corrected framing for NEW projects):
+  - Storage: `.ralph/rules/` instead of `.claude/rules/` (0 CVE surface, 0 files in .claude/)
+  - Delivery: `--append-system-prompt` for critical rules (~90-94% compliance, analyst-10 discovery)
+  - Delivery: user prompt placeholder for contextual rules (Channel 2)
+  - Hooks via `--settings`: deferred to Growth (Channel 3 = future)
+  - distill_gate: human-only (removed auto/circuit breaker mode)
+  - Validation criteria: 7 → 3 (budget, citations >=80%, needs-formatting)
+  - Lazy file creation: 5+ rules per category (was 3)
+  - Stage tags: [stage:execute|review|both] from day 1, filtering at 80+ rules
+  - session.Options: new AppendSystemPromptFile field for --append-system-prompt delivery
