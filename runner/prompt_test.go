@@ -319,7 +319,7 @@ func TestPrompt_Review(t *testing.T) {
 		{"task content injected", taskContent, true},
 		// Invariant guardrails
 		{"invariant no modify source", "MUST NOT modify source code", true},
-		{"invariant no write learnings", "MUST NOT write LEARNINGS", true},
+		{"invariant may write learnings", "MAY write to LEARNINGS.md", true},
 		{"invariant mutation asymmetry", "Mutation Asymmetry", true},
 		// Clean review handling (Story 4.5)
 		{"clean review mark [x]", "mark [x]", true},
@@ -330,7 +330,7 @@ func TestPrompt_Review(t *testing.T) {
 		{"clean sprint-tasks.md ref", "sprint-tasks.md", true},
 		{"clean atomic operation", "atomically", true},
 		{"clean no git commands", "MUST NOT run any git", true},
-		{"clean only two files constraint", "ONLY modify sprint-tasks.md and review-findings.md", true},
+		{"clean only allowed files constraint", "ONLY modify sprint-tasks.md, review-findings.md, and LEARNINGS.md", true},
 		// Findings write (Story 4.6)
 		{"findings overwrite instruction", "overwrite review-findings", true},
 		{"findings never appended", "never appended", true},
@@ -342,6 +342,16 @@ func TestPrompt_Review(t *testing.T) {
 		{"findings self-contained", "self-contained", true},
 		{"findings only current task", "ONLY current task findings", true},
 		{"findings no mark task done", "Do NOT mark [x]", true},
+		// Knowledge Extraction section (Story 6.4)
+		{"knowledge extraction section", "Knowledge Extraction", true},
+		{"knowledge write on findings", "write lessons to LEARNINGS.md", true},
+		{"knowledge atomized fact format", "atomized fact", true},
+		{"knowledge categories", "testing, errors, architecture", true},
+		{"knowledge no lessons on clean", "Do NOT write lessons on clean review", true},
+		{"knowledge append only", "only append new ones", true},
+		{"knowledge citation format", "category: topic [review, file:line]", true},
+		// CLAUDE.md/config protection (Story 6.4)
+		{"invariant no claude.md write", "MUST NOT write to CLAUDE.md", true},
 	}
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) {
@@ -619,5 +629,231 @@ func TestPrompt_Agent_DetectionStructure(t *testing.T) {
 					c.name+" Instructions section detection keyword")
 			}
 		})
+	}
+}
+
+// --- Story 6.2: Knowledge Injection Prompt Tests ---
+
+// Task 9.9: Execute prompt with knowledge sections
+func TestPrompt_Execute_KnowledgeSections(t *testing.T) {
+	data := config.TemplateData{
+		HasLearnings: true,
+	}
+	replacements := map[string]string{
+		"__FORMAT_CONTRACT__":   config.SprintTasksFormat(),
+		"__RALPH_KNOWLEDGE__":   "Distilled testing patterns here",
+		"__LEARNINGS_CONTENT__": "Recent learning about assertions",
+		"__FINDINGS_CONTENT__":  "",
+	}
+
+	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
+	if err != nil {
+		t.Fatalf("AssemblePrompt error: %v", err)
+	}
+
+	checks := []struct {
+		name    string
+		substr  string
+		present bool
+	}{
+		{"distilled knowledge section", "Distilled Knowledge", true},
+		{"distilled content injected", "Distilled testing patterns here", true},
+		{"recent learnings section", "Recent Learnings", true},
+		{"learnings content injected", "Recent learning about assertions", true},
+		{"self-review section present", "Self-Review", true},
+		{"self-review instruction", "Re-read the top 5 most recent learnings", true},
+		{"no knowledge placeholder", "__RALPH_KNOWLEDGE__", false},
+		{"no learnings placeholder", "__LEARNINGS_CONTENT__", false},
+		// Ordering: distilled BEFORE learnings BEFORE guardrails
+		{"guardrails still present", "999-Rules Guardrails", true},
+	}
+	for _, c := range checks {
+		t.Run(c.name, func(t *testing.T) {
+			found := strings.Contains(got, c.substr)
+			if c.present && !found {
+				t.Errorf("expected prompt to contain %q, but it does not", c.substr)
+			}
+			if !c.present && found {
+				t.Errorf("expected prompt NOT to contain %q, but it does", c.substr)
+			}
+		})
+	}
+
+	// Verify ordering: distilled → learnings → guardrails
+	idxDistilled := strings.Index(got, "Distilled Knowledge")
+	idxLearnings := strings.Index(got, "Recent Learnings")
+	idxGuardrails := strings.Index(got, "999-Rules Guardrails")
+	if idxDistilled >= idxLearnings {
+		t.Errorf("Distilled Knowledge (at %d) should come BEFORE Recent Learnings (at %d)", idxDistilled, idxLearnings)
+	}
+	if idxLearnings >= idxGuardrails {
+		t.Errorf("Recent Learnings (at %d) should come BEFORE 999-Rules Guardrails (at %d)", idxLearnings, idxGuardrails)
+	}
+
+	goldenTest(t, "TestPrompt_Execute_KnowledgeSections", got)
+}
+
+// Task 9.10: Self-review conditional on HasLearnings
+func TestPrompt_Execute_SelfReview(t *testing.T) {
+	cases := []struct {
+		name         string
+		hasLearnings bool
+		wantReview   bool
+	}{
+		{"with learnings", true, true},
+		{"without learnings", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := config.TemplateData{HasLearnings: tc.hasLearnings}
+			replacements := map[string]string{
+				"__FORMAT_CONTRACT__":   config.SprintTasksFormat(),
+				"__RALPH_KNOWLEDGE__":   "",
+				"__LEARNINGS_CONTENT__": "",
+			}
+
+			got, err := config.AssemblePrompt(executeTemplate, data, replacements)
+			if err != nil {
+				t.Fatalf("AssemblePrompt error: %v", err)
+			}
+
+			hasSelfReview := strings.Contains(got, "Self-Review")
+			if tc.wantReview && !hasSelfReview {
+				t.Errorf("expected Self-Review section to be present")
+			}
+			if !tc.wantReview && hasSelfReview {
+				t.Errorf("expected Self-Review section to be absent")
+			}
+		})
+	}
+}
+
+// Task 9.11: Execute prompt with no knowledge files
+func TestPrompt_Execute_NoKnowledge(t *testing.T) {
+	data := config.TemplateData{
+		HasLearnings: false,
+	}
+	replacements := map[string]string{
+		"__FORMAT_CONTRACT__":   config.SprintTasksFormat(),
+		"__RALPH_KNOWLEDGE__":   "",
+		"__LEARNINGS_CONTENT__": "",
+	}
+
+	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
+	if err != nil {
+		t.Fatalf("AssemblePrompt error: %v", err)
+	}
+
+	checks := []struct {
+		name    string
+		substr  string
+		present bool
+	}{
+		{"no knowledge placeholder", "__RALPH_KNOWLEDGE__", false},
+		{"no learnings placeholder", "__LEARNINGS_CONTENT__", false},
+		{"no self-review", "Self-Review", false},
+		{"guardrails present", "999-Rules Guardrails", true},
+		{"format contract present", "Sprint Tasks Format", true},
+	}
+	for _, c := range checks {
+		t.Run(c.name, func(t *testing.T) {
+			found := strings.Contains(got, c.substr)
+			if c.present && !found {
+				t.Errorf("expected prompt to contain %q, but it does not", c.substr)
+			}
+			if !c.present && found {
+				t.Errorf("expected prompt NOT to contain %q, but it does", c.substr)
+			}
+		})
+	}
+}
+
+// Task 9.12: Review prompt with knowledge sections
+func TestPrompt_Review_KnowledgeSections(t *testing.T) {
+	data := config.TemplateData{}
+	replacements := map[string]string{
+		"__TASK_CONTENT__":      "Implement feature X",
+		"__RALPH_KNOWLEDGE__":   "Distilled review patterns",
+		"__LEARNINGS_CONTENT__": "Recent review learning",
+	}
+
+	got, err := config.AssemblePrompt(reviewTemplate, data, replacements)
+	if err != nil {
+		t.Fatalf("AssemblePrompt error: %v", err)
+	}
+
+	checks := []struct {
+		name    string
+		substr  string
+		present bool
+	}{
+		{"distilled section", "Distilled Knowledge", true},
+		{"distilled content", "Distilled review patterns", true},
+		{"learnings section", "Recent Learnings", true},
+		{"learnings content", "Recent review learning", true},
+		{"no knowledge placeholder", "__RALPH_KNOWLEDGE__", false},
+		{"no learnings placeholder", "__LEARNINGS_CONTENT__", false},
+	}
+	for _, c := range checks {
+		t.Run(c.name, func(t *testing.T) {
+			found := strings.Contains(got, c.substr)
+			if c.present && !found {
+				t.Errorf("expected prompt to contain %q, but it does not", c.substr)
+			}
+			if !c.present && found {
+				t.Errorf("expected prompt NOT to contain %q, but it does", c.substr)
+			}
+		})
+	}
+
+	goldenTest(t, "TestPrompt_Review_KnowledgeSections", got)
+}
+
+// Task 9.13: Review prompt — __LEARNINGS_CONTENT__ empty for review
+func TestPrompt_Review_NoLearningsContent(t *testing.T) {
+	data := config.TemplateData{}
+	replacements := map[string]string{
+		"__TASK_CONTENT__":      "Review task",
+		"__RALPH_KNOWLEDGE__":   "Some rules",
+		"__LEARNINGS_CONTENT__": "", // H7: review overrides to empty
+	}
+
+	got, err := config.AssemblePrompt(reviewTemplate, data, replacements)
+	if err != nil {
+		t.Fatalf("AssemblePrompt error: %v", err)
+	}
+
+	// Section header exists but content is empty (placeholder replaced with "")
+	if !strings.Contains(got, "Recent Learnings") {
+		t.Errorf("expected 'Recent Learnings' section header to be present")
+	}
+	// No actual learnings content between section header and next section
+	// The content should effectively be empty after the header
+	if strings.Contains(got, "actual learnings text") {
+		t.Errorf("should not contain actual learnings text in review mode")
+	}
+}
+
+// Task 9.14: Review prompt invariant updated
+func TestPrompt_Review_InvariantUpdated(t *testing.T) {
+	data := config.TemplateData{}
+	replacements := map[string]string{
+		"__TASK_CONTENT__":      "Review task",
+		"__RALPH_KNOWLEDGE__":   "",
+		"__LEARNINGS_CONTENT__": "",
+	}
+
+	got, err := config.AssemblePrompt(reviewTemplate, data, replacements)
+	if err != nil {
+		t.Fatalf("AssemblePrompt error: %v", err)
+	}
+
+	// M2: "MUST NOT write LEARNINGS.md" should be REMOVED
+	if strings.Contains(got, "MUST NOT write LEARNINGS") {
+		t.Errorf("review prompt should NOT contain old invariant 'MUST NOT write LEARNINGS'")
+	}
+	// New invariant: "MAY write to LEARNINGS.md"
+	if !strings.Contains(got, "MAY write to LEARNINGS.md") {
+		t.Errorf("review prompt should contain new invariant 'MAY write to LEARNINGS.md'")
 	}
 }

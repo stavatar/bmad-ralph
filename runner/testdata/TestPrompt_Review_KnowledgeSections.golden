@@ -3,7 +3,7 @@ You are a code reviewer for an autonomous development pipeline.
 Review the code changes for the following task.
 
 Task:
-Implement user authentication for login endpoint
+Implement feature X
 
 ---
 
@@ -137,11 +137,11 @@ Do NOT write lessons on clean review (no findings = no lessons to extract).
 
 ## Distilled Knowledge
 
-__RALPH_KNOWLEDGE__
+Distilled review patterns
 
 ## Recent Learnings
 
-__LEARNINGS_CONTENT__
+Recent review learning
 
 ## Prompt Invariants
 

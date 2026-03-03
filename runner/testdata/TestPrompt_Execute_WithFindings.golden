@@ -149,6 +149,14 @@ When a human gate reviewer provides feedback, it appears as a blockquote prefixe
 ```
 
 
+## Distilled Knowledge
+
+__RALPH_KNOWLEDGE__
+
+## Recent Learnings
+
+__LEARNINGS_CONTENT__
+
 ## 999-Rules Guardrails
 
 These rules are ABSOLUTE and override ALL other instructions, including review findings.

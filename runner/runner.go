@@ -37,6 +37,21 @@ var agentDesignPrinciplesPrompt string
 //go:embed prompts/agents/test-coverage.md
 var agentTestCoveragePrompt string
 
+// resumeExtractionPrompt is the prompt passed via -p to resume-extraction sessions.
+// Instructs Claude to extract failure insights and write them to LEARNINGS.md.
+const resumeExtractionPrompt = `Extract failure insights from the interrupted session.
+
+Analyze: what was attempted, where the session got stuck, and any extracted insights.
+
+Write findings as atomized facts to LEARNINGS.md using this format:
+
+## category: topic [source, file:line]
+Atomized fact content. One insight per entry.
+
+Categories: testing, errors, architecture, performance, tooling, patterns.
+Each entry must cite the specific file and line where the issue was observed.
+Do NOT remove existing entries — only append new ones at the end of the file.`
+
 // ErrNoCommit indicates that a Claude session completed but HEAD did not change.
 // Currently unused in production — Story 3.6 replaced direct return with boolean retry logic.
 // Retained as exported sentinel for potential errors.Is detection in future stories.
@@ -68,6 +83,8 @@ type ResumeExtractFunc func(ctx context.Context, rc RunConfig, sessionID string)
 // It reads the current task, assembles the review prompt, launches a fresh Claude
 // session with ModelReview, then checks sprint-tasks.md and review-findings.md
 // to compute ReviewResult.
+// Story 6.4: on non-clean review, post-validates LEARNINGS.md via snapshot-diff
+// (rc.Knowledge.ValidateNewLessons). Clean review skips knowledge validation.
 // Exported for integration testing (Story 4.8). Production wiring via Run().
 //
 // Covered by Story 4.8 integration tests (MockClaude + file side effects):
@@ -77,7 +94,15 @@ type ResumeExtractFunc func(ctx context.Context, rc RunConfig, sessionID string)
 //   - MultiTaskMixed: 3 tasks with mixed clean/findings outcomes
 //   - BridgeGoldenFile: bridge output as runner input end-to-end
 //
+// Covered by Story 6.4 knowledge tests:
+//   - FindingsWriteLessons: ValidateNewLessons called after findings review
+//   - CleanNoLessons: ValidateNewLessons NOT called on clean review
+//   - SnapshotDiff: snapshot taken before session, diff after
+//   - ValidateLessonsError: error propagation from ValidateNewLessons
+//
 // Not yet covered (future stories or manual testing):
+//   - SnapshotReadError: snapshot error path (line 168) is defensive but
+//     unreachable — buildKnowledgeReplacements reads same file first
 //   - SessionError_ExitError: *exec.ExitError → proceed to file-state check
 //   - SessionError_Fatal: non-ExitError → return wrapped error
 //   - FreshSession: verify opts has no Resume field
@@ -98,12 +123,28 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 
 	currentTaskText := result.OpenTasks[0].Text
 
+	// Story 6.2: build knowledge for review — override __LEARNINGS_CONTENT__ to empty
+	// (self-review loop prevention: review must not see LEARNINGS.md it writes to)
+	reviewKnowledge, reviewAppendSys, reviewKnowledgeErr := buildKnowledgeReplacements(rc.Cfg.ProjectRoot)
+	if reviewKnowledgeErr != nil {
+		return ReviewResult{}, fmt.Errorf("runner: review: build knowledge: %w", reviewKnowledgeErr)
+	}
+	reviewKnowledge["__LEARNINGS_CONTENT__"] = "" // H7: no self-review of own writes
+
+	reviewReplacements := map[string]string{
+		"__TASK_CONTENT__": currentTaskText,
+		"__SERENA_HINT__":  rc.SerenaHint,
+	}
+	for k, v := range reviewKnowledge {
+		reviewReplacements[k] = v
+	}
+
 	prompt, err := config.AssemblePrompt(
 		reviewTemplate,
-		config.TemplateData{},
-		map[string]string{
-			"__TASK_CONTENT__": currentTaskText,
+		config.TemplateData{
+			SerenaEnabled: rc.SerenaHint != "",
 		},
+		reviewReplacements,
 	)
 	if err != nil {
 		return ReviewResult{}, fmt.Errorf("runner: review: assemble prompt: %w", err)
@@ -117,6 +158,16 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 		Model:                      rc.Cfg.ModelReview,
 		OutputJSON:                 true,
 		DangerouslySkipPermissions: true,
+		AppendSystemPrompt:         reviewAppendSys,
+	}
+
+	// Story 6.4: snapshot LEARNINGS.md before review session for post-validation diff
+	learningsPath := filepath.Join(rc.Cfg.ProjectRoot, "LEARNINGS.md")
+	learningsSnapshot := ""
+	if snapshotData, snapErr := os.ReadFile(learningsPath); snapErr == nil {
+		learningsSnapshot = string(snapshotData)
+	} else if !errors.Is(snapErr, os.ErrNotExist) {
+		return ReviewResult{}, fmt.Errorf("runner: review: snapshot: %w", snapErr)
 	}
 
 	start := time.Now()
@@ -136,7 +187,24 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 		_, _ = session.ParseResult(raw, elapsed)
 	}
 
-	return DetermineReviewOutcome(rc.TasksFile, currentTaskText, rc.Cfg.ProjectRoot)
+	outcome, outcomeErr := DetermineReviewOutcome(rc.TasksFile, currentTaskText, rc.Cfg.ProjectRoot)
+	if outcomeErr != nil {
+		return ReviewResult{}, outcomeErr
+	}
+
+	// Story 6.4: post-validate lessons on non-clean review (FR28a)
+	// Clean review = no findings = no lessons to validate.
+	if !outcome.Clean && rc.Knowledge != nil {
+		if err := rc.Knowledge.ValidateNewLessons(ctx, LessonsData{
+			Source:      "review",
+			Snapshot:    learningsSnapshot,
+			BudgetLimit: rc.Cfg.LearningsBudget,
+		}); err != nil {
+			return ReviewResult{}, fmt.Errorf("runner: review: validate lessons: %w", err)
+		}
+	}
+
+	return outcome, nil
 }
 
 // DetermineReviewOutcome computes ReviewResult from file state after a review session.
@@ -183,17 +251,27 @@ func taskDescription(taskLine string) string {
 	return trimmed
 }
 
-// ResumeExtraction invokes claude --resume to capture WIP progress from an
-// interrupted execute session. Returns nil when sessionID is empty (nothing to resume).
+// ResumeExtraction invokes claude --resume with -p extraction prompt to capture
+// WIP progress and failure insights from an interrupted execute session.
+// Returns nil when sessionID is empty (nothing to resume).
+// After session: snapshot-diffs LEARNINGS.md and validates new entries via KnowledgeWriter.
 func ResumeExtraction(ctx context.Context, cfg *config.Config, kw KnowledgeWriter, sessionID string) error {
 	if sessionID == "" {
 		return nil
+	}
+
+	// Snapshot LEARNINGS.md before session for post-validation diff
+	learningsPath := filepath.Join(cfg.ProjectRoot, "LEARNINGS.md")
+	snapshot, readErr := os.ReadFile(learningsPath)
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return fmt.Errorf("runner: resume extraction: snapshot: %w", readErr)
 	}
 
 	opts := session.Options{
 		Command:                    cfg.ClaudeCommand,
 		Dir:                        cfg.ProjectRoot,
 		Resume:                     sessionID,
+		Prompt:                     resumeExtractionPrompt,
 		MaxTurns:                   cfg.MaxTurns,
 		Model:                      cfg.ModelExecute,
 		OutputJSON:                 true,
@@ -213,9 +291,17 @@ func ResumeExtraction(ctx context.Context, cfg *config.Config, kw KnowledgeWrite
 		return fmt.Errorf("runner: resume extraction: parse: %w", parseErr)
 	}
 
-	// TaskDescription left empty — no plumbing from caller yet (Epic 6 may add)
 	if err := kw.WriteProgress(ctx, ProgressData{SessionID: sr.SessionID}); err != nil {
 		return fmt.Errorf("runner: resume extraction: write progress: %w", err)
+	}
+
+	// Post-validate new LEARNINGS.md entries via snapshot-diff
+	if err := kw.ValidateNewLessons(ctx, LessonsData{
+		Source:      "resume-extraction",
+		Snapshot:    string(snapshot),
+		BudgetLimit: cfg.LearningsBudget,
+	}); err != nil {
+		return fmt.Errorf("runner: resume extraction: validate lessons: %w", err)
 	}
 
 	return nil
@@ -309,15 +395,18 @@ func SkipTask(tasksFile, taskDesc string) error {
 
 // RunConfig passes dependencies to runner functions.
 type RunConfig struct {
-	Cfg       *config.Config
-	Git       GitClient
-	TasksFile string // path to sprint-tasks.md
+	Cfg        *config.Config
+	Git        GitClient
+	TasksFile  string          // path to sprint-tasks.md
+	SerenaHint string          // Serena MCP prompt hint (empty if unavailable)
+	Knowledge  KnowledgeWriter // records execution progress and validates lessons (nil = skip)
 }
 
 // Runner orchestrates the execute-review loop with injectable dependencies.
 // Public API: Run() creates a Runner internally. Tests construct Runner directly.
 // EmergencyGatePromptFn: called at execute/review exhaustion when gates enabled.
 // Uses same GatePromptFunc type as GatePromptFn but creates Gate{Emergency: true}.
+// DistillFn: called after clean review when budget check and cooldown pass (Story 6.5a).
 type Runner struct {
 	Cfg                   *config.Config
 	Git                   GitClient
@@ -326,8 +415,10 @@ type Runner struct {
 	GatePromptFn          GatePromptFunc      // called after clean review on [GATE] or checkpoint tasks when gates enabled
 	EmergencyGatePromptFn GatePromptFunc      // called at execute/review exhaustion when gates enabled (Story 5.5)
 	ResumeExtractFn       ResumeExtractFunc   // called before retry to extract session context
+	DistillFn             DistillFunc         // called after clean review when budget+cooldown checks pass (Story 6.5a)
 	SleepFn               func(time.Duration) // injectable sleep for testable backoff
-	Knowledge             KnowledgeWriter     // records execution progress; no-op in Epic 3
+	Knowledge             KnowledgeWriter     // records execution progress and validates lessons
+	CodeIndexer           CodeIndexerDetector // detects code indexing tools (Serena MCP)
 }
 
 // Execute runs the main task loop: startup recovery, then iterate over tasks.
@@ -351,18 +442,69 @@ type Runner struct {
 // Quit returns wrapped GateDecision error (exit code 2).
 // Retry decrements completedTasks, injects feedback into sprint-tasks.md, reverts
 // task [x]→[ ], and continues the outer loop. Retries count toward MaxIterations.
+// After gate: increments MonotonicTaskCounter in DistillState, checks budget (NearLimit)
+// and cooldown (counter - lastDistill >= DistillCooldown). If both pass, calls DistillFn.
+// Distillation failures are non-fatal: ErrBadFormat gets one free retry, then human gate.
 // Loops up to Cfg.MaxIterations task-processing cycles in the outer loop.
 // Returns nil when all tasks are complete. Returns error on any failure.
 func (r *Runner) Execute(ctx context.Context) error {
+	// M7: Recover interrupted distillation BEFORE git state recovery
+	if err := RecoverDistillation(r.Cfg.ProjectRoot); err != nil {
+		return fmt.Errorf("runner: startup: %w", err)
+	}
+
 	// recovered bool unused — no startup logging plumbing yet
 	if _, err := RecoverDirtyState(ctx, r.Git); err != nil {
 		return fmt.Errorf("runner: startup: %w", err)
 	}
 
+	// Story 6.7: Serena MCP detection at startup
+	serenaHint := ""
+	if r.CodeIndexer != nil {
+		serenaHint = DetectSerena(r.CodeIndexer, r.Cfg.ProjectRoot)
+	}
+
+	// Story 6.2: build knowledge replacements for prompt injection
+	knowledgeReplacements, appendSysPrompt, knowledgeErr := buildKnowledgeReplacements(r.Cfg.ProjectRoot)
+	if knowledgeErr != nil {
+		return fmt.Errorf("runner: startup: %w", knowledgeErr)
+	}
+	hasLearnings := knowledgeReplacements["__LEARNINGS_CONTENT__"] != ""
+
+	// Story 6.2: budget warning (M6)
+	if hasLearnings {
+		learningsPathForBudget := filepath.Join(r.Cfg.ProjectRoot, "LEARNINGS.md")
+		budgetStatus, budgetErr := BudgetCheck(ctx, learningsPathForBudget, r.Cfg.LearningsBudget)
+		if budgetErr == nil && budgetStatus.OverBudget {
+			ratio := 0
+			if budgetStatus.Limit > 0 {
+				ratio = budgetStatus.Lines / budgetStatus.Limit
+			}
+			fmt.Fprintf(os.Stderr, "⚠ LEARNINGS.md: %d/%d lines (%dx budget). Run `ralph distill` to compress.\n",
+				budgetStatus.Lines, budgetStatus.Limit, ratio)
+		}
+	}
+
 	rc := RunConfig{
-		Cfg:       r.Cfg,
-		Git:       r.Git,
-		TasksFile: r.TasksFile,
+		Cfg:        r.Cfg,
+		Git:        r.Git,
+		TasksFile:  r.TasksFile,
+		SerenaHint: serenaHint,
+		Knowledge:  r.Knowledge,
+	}
+
+	// Story 6.1: snapshot LEARNINGS.md before task execution for post-validation diff
+	learningsPath := filepath.Join(r.Cfg.ProjectRoot, "LEARNINGS.md")
+	learningsSnapshot := ""
+	if snapshotData, snapErr := os.ReadFile(learningsPath); snapErr == nil {
+		learningsSnapshot = string(snapshotData)
+	}
+
+	// Story 6.5a: load distillation state for budget check + cooldown
+	distillStatePath := filepath.Join(r.Cfg.ProjectRoot, ".ralph", "distill-state.json")
+	distillState, distillLoadErr := LoadDistillState(distillStatePath)
+	if distillLoadErr != nil {
+		return fmt.Errorf("runner: startup: %w", distillLoadErr)
 	}
 
 	completedTasks := 0 // Story 5.4: cumulative counter, persists across all iterations
@@ -395,16 +537,24 @@ func (r *Runner) Execute(ctx context.Context) error {
 				findingsContent = string(findingsData)
 			}
 
+			executeReplacements := map[string]string{
+				"__FORMAT_CONTRACT__":  config.SprintTasksFormat(),
+				"__FINDINGS_CONTENT__": findingsContent,
+				"__SERENA_HINT__":      serenaHint,
+			}
+			for k, v := range knowledgeReplacements {
+				executeReplacements[k] = v
+			}
+
 			prompt, err := config.AssemblePrompt(
 				executeTemplate,
 				config.TemplateData{
-					GatesEnabled: r.Cfg.GatesEnabled,
-					HasFindings:  len(strings.TrimSpace(findingsContent)) > 0,
+					GatesEnabled:  r.Cfg.GatesEnabled,
+					SerenaEnabled: serenaHint != "",
+					HasFindings:   len(strings.TrimSpace(findingsContent)) > 0,
+					HasLearnings:  hasLearnings,
 				},
-				map[string]string{
-					"__FORMAT_CONTRACT__":  config.SprintTasksFormat(),
-					"__FINDINGS_CONTENT__": findingsContent,
-				},
+				executeReplacements,
 			)
 			if err != nil {
 				return fmt.Errorf("runner: assemble prompt: %w", err)
@@ -418,6 +568,7 @@ func (r *Runner) Execute(ctx context.Context) error {
 				Model:                      r.Cfg.ModelExecute,
 				OutputJSON:                 true,
 				DangerouslySkipPermissions: true,
+				AppendSystemPrompt:         appendSysPrompt,
 			}
 			// Per-review-cycle retry loop: executeAttempts resets each cycle
 			executeAttempts := 0
@@ -571,6 +722,19 @@ func (r *Runner) Execute(ctx context.Context) error {
 			}
 		}
 
+		// Story 6.1: post-validate LEARNINGS.md entries after session ends
+		if err := r.Knowledge.ValidateNewLessons(ctx, LessonsData{
+			Source:      "execute",
+			Snapshot:    learningsSnapshot,
+			BudgetLimit: r.Cfg.LearningsBudget,
+		}); err != nil {
+			return fmt.Errorf("runner: post-validate lessons: %w", err)
+		}
+		// Update snapshot for next task iteration
+		if snapshotData, snapErr := os.ReadFile(learningsPath); snapErr == nil {
+			learningsSnapshot = string(snapshotData)
+		}
+
 		// Story 5.5: emergency skip bypasses completion counter and gate check
 		if wasSkipped {
 			continue
@@ -613,9 +777,104 @@ func (r *Runner) Execute(ctx context.Context) error {
 			}
 			// approve, skip → continue to next task (fall through)
 		}
+
+		// Story 6.5a: distillation trigger — after gate, before next iteration.
+		// Increment monotonic counter (persists across runs, unlike completedTasks).
+		distillState.MonotonicTaskCounter++
+		if saveErr := SaveDistillState(distillStatePath, distillState); saveErr != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: save distill state: %v\n", saveErr)
+		}
+
+		if r.DistillFn != nil {
+			budgetStatus, budgetErr := BudgetCheck(ctx, learningsPath, r.Cfg.LearningsBudget)
+			if budgetErr == nil && budgetStatus.NearLimit {
+				cooldownMet := distillState.MonotonicTaskCounter-distillState.LastDistillTask >= r.Cfg.DistillCooldown
+				if cooldownMet {
+					r.runDistillation(ctx, distillState, distillStatePath, budgetStatus)
+				}
+			}
+		}
 	}
 
 	return nil
+}
+
+// runDistillation calls DistillFn with failure handling (Story 6.5a).
+// ErrBadFormat: ONE free retry before gate. Other errors: immediate gate.
+// All failures are non-fatal: human gate or log warning, then continue.
+// On success: updates LastDistillTask and saves state.
+func (r *Runner) runDistillation(ctx context.Context, state *DistillState, statePath string, budget BudgetStatus) {
+	err := r.DistillFn(ctx, state)
+
+	// ErrBadFormat: one free retry (H4)
+	if err != nil && errors.Is(err, ErrBadFormat) {
+		err = r.DistillFn(ctx, state)
+	}
+
+	if err != nil {
+		// Human gate on failure — non-fatal
+		r.handleDistillFailure(ctx, err, state, statePath, budget)
+		return
+	}
+
+	// Success: update state
+	state.LastDistillTask = state.MonotonicTaskCounter
+	if saveErr := SaveDistillState(statePath, state); saveErr != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: save distill state after success: %v\n", saveErr)
+	}
+}
+
+// handleDistillFailure presents human gate on distillation failure.
+// Gate options: skip (log + continue), retry once, retry 5 times, quit.
+// All failures are non-fatal (Task 5.12): quit logs warning and continues.
+func (r *Runner) handleDistillFailure(ctx context.Context, distillErr error, state *DistillState, statePath string, budget BudgetStatus) {
+	if r.GatePromptFn == nil || !r.Cfg.GatesEnabled {
+		fmt.Fprintf(os.Stderr, "WARNING: distillation failed: %v\n", distillErr)
+		return
+	}
+
+	gateText := fmt.Sprintf("distillation failed: %v. LEARNINGS.md: %d/%d lines",
+		distillErr, budget.Lines, budget.Limit)
+
+	decision, gateErr := r.GatePromptFn(ctx, gateText)
+	if gateErr != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: distillation gate error: %v\n", gateErr)
+		return
+	}
+	if decision.Action == config.ActionQuit {
+		// Quit is the only fatal path — but distillation is inside the loop,
+		// so we log and return (non-fatal). Caller continues to next iteration.
+		fmt.Fprintf(os.Stderr, "WARNING: distillation quit requested, continuing\n")
+		return
+	}
+
+	retryCount := 0
+	switch decision.Action {
+	case config.ActionRetry:
+		retryCount = 1
+	case config.ActionSkip:
+		fmt.Fprintf(os.Stderr, "WARNING: distillation skipped by user\n")
+		return
+	default:
+		// approve or unknown → treat as skip
+		return
+	}
+
+	// Check feedback for retry count override: "retry 5" pattern
+	if decision.Feedback == "5" {
+		retryCount = 5
+	}
+
+	for i := 0; i < retryCount; i++ {
+		if retryErr := r.DistillFn(ctx, state); retryErr == nil {
+			state.LastDistillTask = state.MonotonicTaskCounter
+			if saveErr := SaveDistillState(statePath, state); saveErr != nil {
+				fmt.Fprintf(os.Stderr, "WARNING: save distill state after retry success: %v\n", saveErr)
+			}
+			return
+		}
+	}
+	fmt.Fprintf(os.Stderr, "WARNING: distillation retries exhausted, continuing\n")
 }
 
 // RunOnce executes a single standalone iteration of the task loop.
@@ -641,12 +900,27 @@ func RunOnce(ctx context.Context, rc RunConfig) error {
 		return fmt.Errorf("runner: git health: %w", err)
 	}
 
+	// Story 6.2: knowledge injection for walking skeleton
+	onceKnowledge, onceAppendSys, onceKnowledgeErr := buildKnowledgeReplacements(rc.Cfg.ProjectRoot)
+	if onceKnowledgeErr != nil {
+		return fmt.Errorf("runner: build knowledge: %w", onceKnowledgeErr)
+	}
+	onceHasLearnings := onceKnowledge["__LEARNINGS_CONTENT__"] != ""
+
+	onceReplacements := map[string]string{
+		"__FORMAT_CONTRACT__": config.SprintTasksFormat(),
+	}
+	for k, v := range onceKnowledge {
+		onceReplacements[k] = v
+	}
+
 	prompt, err := config.AssemblePrompt(
 		executeTemplate,
-		config.TemplateData{GatesEnabled: rc.Cfg.GatesEnabled},
-		map[string]string{
-			"__FORMAT_CONTRACT__": config.SprintTasksFormat(),
+		config.TemplateData{
+			GatesEnabled: rc.Cfg.GatesEnabled,
+			HasLearnings: onceHasLearnings,
 		},
+		onceReplacements,
 	)
 	if err != nil {
 		return fmt.Errorf("runner: assemble prompt: %w", err)
@@ -659,6 +933,7 @@ func RunOnce(ctx context.Context, rc RunConfig) error {
 		MaxTurns:                   rc.Cfg.MaxTurns,
 		OutputJSON:                 true,
 		DangerouslySkipPermissions: true,
+		AppendSystemPrompt:         onceAppendSys,
 	}
 
 	start := time.Now()
@@ -700,14 +975,21 @@ func RecoverDirtyState(ctx context.Context, git GitClient) (bool, error) {
 // Run is the main entry point for the execute-review loop.
 // It creates a Runner with production defaults and delegates to Runner.Execute.
 // When cfg.GatesEnabled is true, wires GatePromptFn to gates.Prompt with os.Stdin/os.Stdout.
+// When cfg.SerenaEnabled is true, wires CodeIndexer to SerenaMCPDetector for detection.
 func Run(ctx context.Context, cfg *config.Config) error {
+	var indexer CodeIndexerDetector = &NoOpCodeIndexerDetector{}
+	if cfg.SerenaEnabled {
+		indexer = &SerenaMCPDetector{}
+	}
+
 	r := &Runner{
-		Cfg:       cfg,
-		Git:       &ExecGitClient{Dir: cfg.ProjectRoot},
-		TasksFile: filepath.Join(cfg.ProjectRoot, "sprint-tasks.md"),
-		ReviewFn:  RealReview,
-		SleepFn:   time.Sleep,
-		Knowledge: &NoOpKnowledgeWriter{},
+		Cfg:         cfg,
+		Git:         &ExecGitClient{Dir: cfg.ProjectRoot},
+		TasksFile:   filepath.Join(cfg.ProjectRoot, "sprint-tasks.md"),
+		ReviewFn:    RealReview,
+		SleepFn:     time.Sleep,
+		Knowledge:   &FileKnowledgeWriter{projectRoot: cfg.ProjectRoot},
+		CodeIndexer: indexer,
 	}
 	if cfg.GatesEnabled {
 		r.GatePromptFn = func(ctx context.Context, taskText string) (*config.GateDecision, error) {
@@ -719,6 +1001,9 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}
 	r.ResumeExtractFn = func(_ context.Context, _ RunConfig, sid string) error {
 		return ResumeExtraction(ctx, cfg, r.Knowledge, sid)
+	}
+	r.DistillFn = func(ctx context.Context, state *DistillState) error {
+		return AutoDistill(ctx, cfg, state)
 	}
 	return r.Execute(ctx)
 }

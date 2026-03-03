@@ -85,7 +85,7 @@ On a clean review, perform these TWO operations atomically (both or neither):
 
 Both operations MUST succeed together. Do not mark [x] without clearing findings, and do not clear findings without marking [x].
 
-MUST NOT run any git commands — no `git add`, `git commit`, or any other git operations. Review sessions ONLY modify sprint-tasks.md and review-findings.md.
+MUST NOT run any git commands — no `git add`, `git commit`, or any other git operations. Review sessions ONLY modify sprint-tasks.md, review-findings.md, and LEARNINGS.md (on findings).
 
 If review-findings.md does not exist after review, treat as already clean — do not create it just to clear it.
 
@@ -114,8 +114,44 @@ Do NOT mark [x] in sprint-tasks.md when findings exist — task marking is for c
 
 ---
 
+## Knowledge Extraction
+
+When CONFIRMED findings exist (non-clean review), write lessons to LEARNINGS.md.
+
+For each confirmed finding, extract a lesson as an atomized fact:
+
+```
+## category: topic [review, file:line]
+Atomized fact content. One insight per entry.
+```
+
+Categories: testing, errors, architecture, performance, tooling, patterns.
+Each entry must cite the specific file and line where the issue was observed.
+
+Include: error type, what the agent forgets or misses, pattern for future sessions.
+
+Do NOT remove existing entries — only append new ones at the end of the file.
+Do NOT write lessons on clean review (no findings = no lessons to extract).
+
+---
+
+## Distilled Knowledge
+
+__RALPH_KNOWLEDGE__
+
+## Recent Learnings
+
+__LEARNINGS_CONTENT__
+{{- if .SerenaEnabled}}
+
+## Code Navigation
+
+__SERENA_HINT__
+{{- end}}
+
 ## Prompt Invariants
 
 - **MUST NOT modify source code** (FR17): this is a review session — you read and analyze code, you do NOT change it
-- **MUST NOT write LEARNINGS.md or CLAUDE.md**: knowledge extraction is deferred to Epic 6
-- **Mutation Asymmetry**: review sessions write task markers and findings ONLY; execute sessions MUST NOT write task markers
+- **Review sessions MAY write to LEARNINGS.md** for knowledge extraction (FR28a)
+- **MUST NOT write to CLAUDE.md or .claude/ directory**: Ralph controls its own configuration files
+- **Mutation Asymmetry**: review sessions write task markers, findings, and lessons ONLY; execute sessions MUST NOT write task markers

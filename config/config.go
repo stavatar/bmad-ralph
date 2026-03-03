@@ -27,9 +27,10 @@ type Config struct {
 	ModelReview         string `yaml:"model_review"`
 	ReviewMinSeverity   string `yaml:"review_min_severity"`
 	AlwaysExtract       bool   `yaml:"always_extract"`
-	SerenaEnabled       bool   `yaml:"serena_enabled"`
-	SerenaTimeout       int    `yaml:"serena_timeout"`
-	LearningsBudget     int    `yaml:"learnings_budget"`
+	SerenaEnabled   bool `yaml:"serena_enabled"`
+	LearningsBudget int  `yaml:"learnings_budget"`
+	DistillCooldown int  `yaml:"distill_cooldown"`
+	DistillTimeout  int  `yaml:"distill_timeout"`
 	LogDir              string `yaml:"log_dir"`
 	ProjectRoot         string `yaml:"-"`
 }

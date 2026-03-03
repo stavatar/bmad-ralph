@@ -50,6 +50,48 @@ func runTestHelper(scenario string) {
 	}
 }
 
+// --- Task 9.15-9.16: AppendSystemPrompt flag tests ---
+
+func TestBuildArgs_AppendSystemPrompt(t *testing.T) {
+	content := "Critical rules content"
+	got := buildArgs(Options{
+		Prompt:                     "test",
+		AppendSystemPrompt:         &content,
+		DangerouslySkipPermissions: true,
+	})
+
+	foundFlag := false
+	for i, arg := range got {
+		if arg == "--append-system-prompt" {
+			foundFlag = true
+			if i+1 >= len(got) {
+				t.Fatal("--append-system-prompt flag missing value")
+			}
+			if got[i+1] != content {
+				t.Errorf("--append-system-prompt value = %q, want %q", got[i+1], content)
+			}
+			break
+		}
+	}
+	if !foundFlag {
+		t.Errorf("expected --append-system-prompt flag in args: %v", got)
+	}
+}
+
+func TestBuildArgs_AppendSystemPrompt_Nil(t *testing.T) {
+	got := buildArgs(Options{
+		Prompt:                     "test",
+		AppendSystemPrompt:         nil,
+		DangerouslySkipPermissions: true,
+	})
+
+	for _, arg := range got {
+		if arg == "--append-system-prompt" {
+			t.Errorf("--append-system-prompt flag should be absent when nil, got args: %v", got)
+		}
+	}
+}
+
 func TestBuildArgs_BasicPrompt(t *testing.T) {
 	tests := []struct {
 		name string
@@ -122,14 +164,15 @@ func TestBuildArgs_BasicPrompt(t *testing.T) {
 			},
 		},
 		{
-			name: "resume overrides prompt",
+			name: "resume with prompt both present",
 			opts: Options{
-				Prompt:                     "this should be ignored",
+				Prompt:                     "extraction prompt",
 				Resume:                     "session-456",
 				DangerouslySkipPermissions: true,
 			},
 			want: []string{
 				"--resume", "session-456",
+				"-p", "extraction prompt",
 				"--dangerously-skip-permissions",
 			},
 		},
@@ -152,7 +195,7 @@ func TestBuildArgs_BasicPrompt(t *testing.T) {
 			name: "resume all fields set",
 			opts: Options{
 				Resume:                     "session-789",
-				Prompt:                     "ignored",
+				Prompt:                     "extract insights",
 				MaxTurns:                   5,
 				Model:                      "claude-sonnet-4-5-20250514",
 				OutputJSON:                 true,
@@ -160,6 +203,7 @@ func TestBuildArgs_BasicPrompt(t *testing.T) {
 			},
 			want: []string{
 				"--resume", "session-789",
+				"-p", "extract insights",
 				"--max-turns", "5",
 				"--model", "claude-sonnet-4-5-20250514",
 				"--output-format", "json",

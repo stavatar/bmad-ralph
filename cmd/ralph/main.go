@@ -63,4 +63,5 @@ func run() int {
 func init() {
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(bridgeCmd)
+	rootCmd.AddCommand(distillCmd)
 }

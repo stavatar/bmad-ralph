@@ -14,7 +14,7 @@ For core rules, see CLAUDE.md `## Testing Core Rules`.
 - **test-assertions-base.md** — Core assertion patterns: counts, substrings, symmetric checks, integration (23 rules)
 - **test-assertions-prompt.md** — Prompt/template test assertions: scope guards, constraints, discriminating (12 rules)
 - **test-mocks-infra.md** — Mock & test infrastructure + CLI testing (22 rules)
-- **code-quality-patterns.md** — Code quality patterns for all Go files (28 rules)
+- **code-quality-patterns.md** — Code quality patterns for all Go files (38 rules)
 - **test-templates-review.md** — Template testing + review process (14 rules)
 
-Total: ~122 patterns from code reviews (Epics 1-5, 192 findings across 32 stories).
+Total: ~132 patterns from code reviews (Epics 1-6, 226 findings across 40 stories).

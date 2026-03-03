@@ -28,6 +28,7 @@ type TemplateData struct {
 	GatesEnabled     bool
 	HasExistingTasks bool // bridge merge mode
 	HasFindings      bool // execute findings mode
+	HasLearnings     bool // true when validated LEARNINGS.md content is non-empty
 
 	// Stage 2: string fields for caller convenience / type grouping.
 	// Injected via replacements map, NOT via {{.FieldName}} in templates.

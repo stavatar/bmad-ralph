@@ -1942,31 +1942,45 @@ func TestRunner_Execute_EmptySessionIDField(t *testing.T) {
 // TestResumeExtraction_Scenarios verifies ResumeExtraction behavior via table-driven tests.
 func TestResumeExtraction_Scenarios(t *testing.T) {
 	tests := []struct {
-		name                   string
-		sessionID              string
-		scenarioSteps          []testutil.ScenarioStep
-		knowledgeErr           error
-		wantErr                bool
-		wantErrContains        string
-		wantErrContainsInner   string
-		wantWriteProgressCount int
-		wantSessionInvoked     bool
-		checkArgs              func(t *testing.T, args []string)
-		checkData              func(t *testing.T, kw *trackingKnowledgeWriter)
+		name                     string
+		sessionID                string
+		scenarioSteps            []testutil.ScenarioStep
+		knowledgeErr             error
+		validateLessonsErr       error
+		wantErr                  bool
+		wantErrContains          string
+		wantErrContainsInner     string
+		wantWriteProgressCount   int
+		wantValidateLessonsCount int
+		wantSessionInvoked       bool
+		checkArgs                func(t *testing.T, args []string)
+		checkData                func(t *testing.T, kw *trackingKnowledgeWriter)
 	}{
 		{
-			name:      "valid session ID",
+			name:      "valid session ID with extraction prompt",
 			sessionID: "abc-123",
 			scenarioSteps: []testutil.ScenarioStep{
 				{Type: "execute", ExitCode: 0, SessionID: "resumed-001"},
 			},
-			wantErr:                false,
-			wantWriteProgressCount: 1,
-			wantSessionInvoked:     true,
+			wantErr:                  false,
+			wantWriteProgressCount:   1,
+			wantValidateLessonsCount: 1,
+			wantSessionInvoked:       true,
 			checkArgs: func(t *testing.T, args []string) {
 				t.Helper()
 				assertArgsContainFlagValue(t, args, "--resume", "abc-123")
-				assertArgsFlagAbsent(t, args, "-p")
+				assertArgsContainFlag(t, args, "-p")
+				// Verify extraction prompt contains key instruction
+				promptValue := argValueAfterFlag(args, "-p")
+				if !strings.Contains(promptValue, "failure insights") {
+					t.Errorf("-p value should contain 'failure insights', got %q", promptValue)
+				}
+				if !strings.Contains(promptValue, "LEARNINGS.md") {
+					t.Errorf("-p value should contain 'LEARNINGS.md', got %q", promptValue)
+				}
+				if !strings.Contains(promptValue, "atomized facts") {
+					t.Errorf("-p value should contain 'atomized facts', got %q", promptValue)
+				}
 				assertArgsContainFlagValue(t, args, "--max-turns", "5")
 				assertArgsContainFlagValue(t, args, "--model", "opus")
 			},
@@ -1978,24 +1992,33 @@ func TestResumeExtraction_Scenarios(t *testing.T) {
 				if kw.writeProgressData[0].SessionID != "resumed-001" {
 					t.Errorf("ProgressData.SessionID = %q, want %q", kw.writeProgressData[0].SessionID, "resumed-001")
 				}
+				// Verify ValidateNewLessons called with correct source
+				if len(kw.validateLessonsData) != 1 {
+					t.Fatalf("validateLessonsData len = %d, want 1", len(kw.validateLessonsData))
+				}
+				if kw.validateLessonsData[0].Source != "resume-extraction" {
+					t.Errorf("LessonsData.Source = %q, want %q", kw.validateLessonsData[0].Source, "resume-extraction")
+				}
 			},
 		},
 		{
-			name:                   "empty session ID",
-			sessionID:              "",
-			wantErr:                false,
-			wantWriteProgressCount: 0,
-			wantSessionInvoked:     false,
+			name:                     "empty session ID",
+			sessionID:                "",
+			wantErr:                  false,
+			wantWriteProgressCount:   0,
+			wantValidateLessonsCount: 0,
+			wantSessionInvoked:       false,
 		},
 		{
 			name:      "session execute error",
 			sessionID: "err-session",
 			// No scenario steps: use nonexistent binary to trigger exec error
-			wantErr:                true,
-			wantErrContains:        "runner: resume extraction: execute:",
-			wantErrContainsInner:   "/nonexistent/binary",
-			wantWriteProgressCount: 0,
-			wantSessionInvoked:     false, // binary not found, no invocation logged
+			wantErr:                  true,
+			wantErrContains:          "runner: resume extraction: execute:",
+			wantErrContainsInner:     "/nonexistent/binary",
+			wantWriteProgressCount:   0,
+			wantValidateLessonsCount: 0,
+			wantSessionInvoked:       false, // binary not found, no invocation logged
 		},
 		{
 			name:      "write progress error",
@@ -2003,12 +2026,13 @@ func TestResumeExtraction_Scenarios(t *testing.T) {
 			scenarioSteps: []testutil.ScenarioStep{
 				{Type: "execute", ExitCode: 0, SessionID: "wp-001"},
 			},
-			knowledgeErr:           errors.New("write failed"),
-			wantErr:                true,
-			wantErrContains:        "runner: resume extraction: write progress:",
-			wantErrContainsInner:   "write failed",
-			wantWriteProgressCount: 1,
-			wantSessionInvoked:     true,
+			knowledgeErr:             errors.New("write failed"),
+			wantErr:                  true,
+			wantErrContains:          "runner: resume extraction: write progress:",
+			wantErrContainsInner:     "write failed",
+			wantWriteProgressCount:   1,
+			wantValidateLessonsCount: 0, // write progress fails before validate
+			wantSessionInvoked:       true,
 		},
 		{
 			name:      "mutation asymmetry preserved",
@@ -2016,9 +2040,24 @@ func TestResumeExtraction_Scenarios(t *testing.T) {
 			scenarioSteps: []testutil.ScenarioStep{
 				{Type: "execute", ExitCode: 0, SessionID: "mut-001"},
 			},
-			wantErr:                false,
-			wantWriteProgressCount: 1,
-			wantSessionInvoked:     true,
+			wantErr:                  false,
+			wantWriteProgressCount:   1,
+			wantValidateLessonsCount: 1,
+			wantSessionInvoked:       true,
+		},
+		{
+			name:      "validate lessons error",
+			sessionID: "vl-err-session",
+			scenarioSteps: []testutil.ScenarioStep{
+				{Type: "execute", ExitCode: 0, SessionID: "vl-001"},
+			},
+			validateLessonsErr:       errors.New("validation failed"),
+			wantErr:                  true,
+			wantErrContains:          "runner: resume extraction: validate lessons:",
+			wantErrContainsInner:     "validation failed",
+			wantWriteProgressCount:   1,
+			wantValidateLessonsCount: 1,
+			wantSessionInvoked:       true,
 		},
 	}
 
@@ -2049,7 +2088,10 @@ func TestResumeExtraction_Scenarios(t *testing.T) {
 				cfg.ClaudeCommand = "/nonexistent/binary"
 			}
 
-			kw := &trackingKnowledgeWriter{writeProgressErr: tc.knowledgeErr}
+			kw := &trackingKnowledgeWriter{
+				writeProgressErr:   tc.knowledgeErr,
+				validateLessonsErr: tc.validateLessonsErr,
+			}
 
 			err = runner.ResumeExtraction(context.Background(), cfg, kw, tc.sessionID)
 
@@ -2069,6 +2111,9 @@ func TestResumeExtraction_Scenarios(t *testing.T) {
 
 			if kw.writeProgressCount != tc.wantWriteProgressCount {
 				t.Errorf("WriteProgress count = %d, want %d", kw.writeProgressCount, tc.wantWriteProgressCount)
+			}
+			if kw.validateLessonsCount != tc.wantValidateLessonsCount {
+				t.Errorf("ValidateNewLessons count = %d, want %d", kw.validateLessonsCount, tc.wantValidateLessonsCount)
 			}
 
 			if tc.wantSessionInvoked && stateDir != "" {
@@ -2118,6 +2163,116 @@ func TestResumeExtraction_ParseError(t *testing.T) {
 	}
 	if kw.writeProgressCount != 0 {
 		t.Errorf("WriteProgress count = %d, want 0 (parse failed before write)", kw.writeProgressCount)
+	}
+}
+
+// TestResumeExtraction_SnapshotDiff verifies that pre-existing LEARNINGS.md content
+// is passed as snapshot to ValidateNewLessons for diff-based validation (AC #3).
+func TestResumeExtraction_SnapshotDiff(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create pre-existing LEARNINGS.md
+	existingContent := "## testing: patterns [review, runner/runner.go:1]\nExisting lesson\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "LEARNINGS.md"), []byte(existingContent), 0644); err != nil {
+		t.Fatalf("write LEARNINGS.md: %v", err)
+	}
+
+	cfg := testConfig(tmpDir, 1)
+	cfg.ModelExecute = "opus"
+	cfg.LearningsBudget = 200
+
+	scenario := testutil.Scenario{
+		Name: "resume-snapshot",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "snap-001"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+
+	kw := &trackingKnowledgeWriter{}
+
+	err := runner.ResumeExtraction(context.Background(), cfg, kw, "snap-session")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if kw.validateLessonsCount != 1 {
+		t.Fatalf("ValidateNewLessons count = %d, want 1", kw.validateLessonsCount)
+	}
+	data := kw.validateLessonsData[0]
+	if data.Source != "resume-extraction" {
+		t.Errorf("Source = %q, want %q", data.Source, "resume-extraction")
+	}
+	if data.Snapshot != existingContent {
+		t.Errorf("Snapshot = %q, want %q", data.Snapshot, existingContent)
+	}
+	if data.BudgetLimit != 200 {
+		t.Errorf("BudgetLimit = %d, want 200", data.BudgetLimit)
+	}
+}
+
+// TestResumeExtraction_NoChanges verifies that when LEARNINGS.md does not exist,
+// ValidateNewLessons is still called with empty snapshot and no error (AC #5).
+func TestResumeExtraction_NoChanges(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := testConfig(tmpDir, 1)
+	cfg.ModelExecute = "opus"
+
+	scenario := testutil.Scenario{
+		Name: "resume-no-changes",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "nc-001"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+
+	kw := &trackingKnowledgeWriter{}
+
+	err := runner.ResumeExtraction(context.Background(), cfg, kw, "nc-session")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if kw.validateLessonsCount != 1 {
+		t.Fatalf("ValidateNewLessons count = %d, want 1", kw.validateLessonsCount)
+	}
+	if kw.validateLessonsData[0].Snapshot != "" {
+		t.Errorf("Snapshot should be empty when LEARNINGS.md missing, got %q", kw.validateLessonsData[0].Snapshot)
+	}
+}
+
+// TestResumeExtraction_SnapshotReadError verifies that a non-NotExist error on
+// LEARNINGS.md read returns a wrapped error with "runner: resume extraction: snapshot:" prefix.
+func TestResumeExtraction_SnapshotReadError(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create LEARNINGS.md as a directory to trigger non-NotExist read error
+	learningsDir := filepath.Join(tmpDir, "LEARNINGS.md")
+	if err := os.MkdirAll(learningsDir, 0755); err != nil {
+		t.Fatalf("create LEARNINGS.md dir: %v", err)
+	}
+
+	cfg := testConfig(tmpDir, 1)
+	cfg.ModelExecute = "opus"
+
+	kw := &trackingKnowledgeWriter{}
+
+	err := runner.ResumeExtraction(context.Background(), cfg, kw, "snap-read-err")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: resume extraction: snapshot:") {
+		t.Errorf("error: want containing %q, got %q", "runner: resume extraction: snapshot:", err.Error())
+	}
+	if !strings.Contains(err.Error(), "LEARNINGS.md") {
+		t.Errorf("error: want containing file path, got %q", err.Error())
+	}
+	if kw.writeProgressCount != 0 {
+		t.Errorf("WriteProgress count = %d, want 0 (snapshot failed before session)", kw.writeProgressCount)
+	}
+	if kw.validateLessonsCount != 0 {
+		t.Errorf("ValidateNewLessons count = %d, want 0", kw.validateLessonsCount)
 	}
 }
 
@@ -3502,7 +3657,7 @@ func TestSkipTask_Scenarios(t *testing.T) {
 		name            string
 		content         string
 		taskDesc        string
-		skipCreate      bool   // true = don't create file (test read error)
+		skipCreate      bool // true = don't create file (test read error)
 		wantErr         bool
 		wantErrContains string
 		wantContent     string // expected file content after skip (empty = no check)
@@ -4026,3 +4181,724 @@ func TestRunner_Execute_EmergencyGateDisabled(t *testing.T) {
 		t.Error("EmergencyGatePromptFn should NOT be called when gates disabled")
 	}
 }
+
+// =============================================================================
+// Story 6.4: RealReview Knowledge Tests
+// =============================================================================
+
+// TestRealReview_FindingsWriteLessons verifies ValidateNewLessons is called
+// after a review that produces findings (non-clean review).
+// AC: #2 — Go post-validates review-written lessons.
+func TestRealReview_FindingsWriteLessons(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oneTask := "- [ ] Fix auth bug\n"
+	findingsContent := "## [HIGH] Auth bypass\n- **ЧТО не так** — missing validation\n"
+
+	scenario := testutil.Scenario{
+		Name: "findings-review",
+		Steps: []testutil.ScenarioStep{
+			{
+				Type:       "review",
+				ExitCode:   0,
+				SessionID:  "rev-1",
+				WriteFiles: map[string]string{"review-findings.md": findingsContent},
+			},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+	t.Setenv("MOCK_CLAUDE_PROJECT_ROOT", tmpDir)
+
+	tasksPath := writeTasksFile(t, tmpDir, oneTask)
+
+	kw := &trackingKnowledgeWriter{}
+	cfg := testConfig(tmpDir, 1)
+	rc := runner.RunConfig{
+		Cfg:       cfg,
+		TasksFile: tasksPath,
+		Knowledge: kw,
+	}
+
+	result, err := runner.RealReview(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("RealReview: unexpected error: %v", err)
+	}
+	if result.Clean {
+		t.Error("RealReview: want non-clean result, got clean")
+	}
+
+	// AC: ValidateNewLessons called exactly once
+	if kw.validateLessonsCount != 1 {
+		t.Errorf("ValidateNewLessons count = %d, want 1", kw.validateLessonsCount)
+	}
+	// Source must be "review"
+	if len(kw.validateLessonsData) < 1 {
+		t.Fatal("ValidateNewLessons: no data recorded")
+	}
+	if kw.validateLessonsData[0].Source != "review" {
+		t.Errorf("ValidateNewLessons Source = %q, want %q", kw.validateLessonsData[0].Source, "review")
+	}
+	// BudgetLimit passed through
+	if kw.validateLessonsData[0].BudgetLimit != cfg.LearningsBudget {
+		t.Errorf("ValidateNewLessons BudgetLimit = %d, want %d", kw.validateLessonsData[0].BudgetLimit, cfg.LearningsBudget)
+	}
+}
+
+// TestRealReview_CleanNoLessons verifies ValidateNewLessons is NOT called
+// on a clean review (no findings, task marked [x]).
+// AC: #3 — Clean review does NOT write lessons.
+func TestRealReview_CleanNoLessons(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oneTask := "- [ ] Implement feature X\n"
+	markedTask := "- [x] Implement feature X\n"
+
+	scenario := testutil.Scenario{
+		Name: "clean-review",
+		Steps: []testutil.ScenarioStep{
+			{
+				Type:        "review",
+				ExitCode:    0,
+				SessionID:   "rev-1",
+				WriteFiles:  map[string]string{"sprint-tasks.md": markedTask},
+				DeleteFiles: []string{"review-findings.md"},
+			},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+	t.Setenv("MOCK_CLAUDE_PROJECT_ROOT", tmpDir)
+
+	tasksPath := writeTasksFile(t, tmpDir, oneTask)
+
+	kw := &trackingKnowledgeWriter{}
+	cfg := testConfig(tmpDir, 1)
+	rc := runner.RunConfig{
+		Cfg:       cfg,
+		TasksFile: tasksPath,
+		Knowledge: kw,
+	}
+
+	result, err := runner.RealReview(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("RealReview: unexpected error: %v", err)
+	}
+	if !result.Clean {
+		t.Error("RealReview: want clean result, got non-clean")
+	}
+
+	// AC: ValidateNewLessons NOT called on clean review
+	if kw.validateLessonsCount != 0 {
+		t.Errorf("ValidateNewLessons count = %d, want 0 (clean review)", kw.validateLessonsCount)
+	}
+}
+
+// TestRealReview_SnapshotDiff verifies LEARNINGS.md snapshot is taken before
+// session and passed to ValidateNewLessons with correct content.
+// AC: #2 — Go diffs LEARNINGS.md (snapshot vs current).
+func TestRealReview_SnapshotDiff(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	existingLearnings := "## testing: assertion-quality [review, runner/runner_test.go:42]\nExisting lesson content here.\n"
+	learningsPath := filepath.Join(tmpDir, "LEARNINGS.md")
+	if err := os.WriteFile(learningsPath, []byte(existingLearnings), 0644); err != nil {
+		t.Fatalf("write LEARNINGS.md: %v", err)
+	}
+
+	oneTask := "- [ ] Fix auth bug\n"
+	findingsContent := "## [HIGH] Auth bypass\n- **ЧТО не так** — missing validation\n"
+
+	scenario := testutil.Scenario{
+		Name: "snapshot-review",
+		Steps: []testutil.ScenarioStep{
+			{
+				Type:       "review",
+				ExitCode:   0,
+				SessionID:  "rev-1",
+				WriteFiles: map[string]string{"review-findings.md": findingsContent},
+			},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+	t.Setenv("MOCK_CLAUDE_PROJECT_ROOT", tmpDir)
+
+	tasksPath := writeTasksFile(t, tmpDir, oneTask)
+
+	kw := &trackingKnowledgeWriter{}
+	cfg := testConfig(tmpDir, 1)
+	rc := runner.RunConfig{
+		Cfg:       cfg,
+		TasksFile: tasksPath,
+		Knowledge: kw,
+	}
+
+	result, err := runner.RealReview(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("RealReview: unexpected error: %v", err)
+	}
+	if result.Clean {
+		t.Error("RealReview: want non-clean result, got clean")
+	}
+
+	// Verify snapshot content matches pre-session LEARNINGS.md
+	if kw.validateLessonsCount != 1 {
+		t.Fatalf("ValidateNewLessons count = %d, want 1", kw.validateLessonsCount)
+	}
+	data := kw.validateLessonsData[0]
+	if data.Snapshot != existingLearnings {
+		t.Errorf("ValidateNewLessons Snapshot = %q, want %q", data.Snapshot, existingLearnings)
+	}
+	if data.Source != "review" {
+		t.Errorf("ValidateNewLessons Source = %q, want %q", data.Source, "review")
+	}
+}
+
+// TestRealReview_ValidateLessonsError verifies error propagation when
+// ValidateNewLessons fails after a non-clean review.
+func TestRealReview_ValidateLessonsError(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oneTask := "- [ ] Fix auth bug\n"
+	findingsContent := "## [HIGH] Auth bypass\n- **ЧТО не так** — missing validation\n"
+
+	scenario := testutil.Scenario{
+		Name: "validate-error-review",
+		Steps: []testutil.ScenarioStep{
+			{
+				Type:       "review",
+				ExitCode:   0,
+				SessionID:  "rev-1",
+				WriteFiles: map[string]string{"review-findings.md": findingsContent},
+			},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+	t.Setenv("MOCK_CLAUDE_PROJECT_ROOT", tmpDir)
+
+	tasksPath := writeTasksFile(t, tmpDir, oneTask)
+
+	kw := &trackingKnowledgeWriter{
+		validateLessonsErr: errors.New("validation failed"),
+	}
+	cfg := testConfig(tmpDir, 1)
+	rc := runner.RunConfig{
+		Cfg:       cfg,
+		TasksFile: tasksPath,
+		Knowledge: kw,
+	}
+
+	_, err := runner.RealReview(context.Background(), rc)
+	if err == nil {
+		t.Fatal("RealReview: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: review: validate lessons:") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "runner: review: validate lessons:")
+	}
+	if !strings.Contains(err.Error(), "validation failed") {
+		t.Errorf("error = %q, want containing inner error %q", err.Error(), "validation failed")
+	}
+}
+
+// TestRealReview_LearningsReadError verifies that a non-NotExist error on
+// LEARNINGS.md read returns a wrapped error. buildKnowledgeReplacements reads
+// LEARNINGS.md before the snapshot code, so the error surfaces with
+// "runner: review: build knowledge:" prefix.
+func TestRealReview_LearningsReadError(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create LEARNINGS.md as a directory to trigger non-NotExist read error
+	learningsDir := filepath.Join(tmpDir, "LEARNINGS.md")
+	if err := os.MkdirAll(learningsDir, 0755); err != nil {
+		t.Fatalf("create LEARNINGS.md dir: %v", err)
+	}
+
+	oneTask := "- [ ] Fix auth bug\n"
+	tasksPath := writeTasksFile(t, tmpDir, oneTask)
+
+	kw := &trackingKnowledgeWriter{}
+	cfg := testConfig(tmpDir, 1)
+	rc := runner.RunConfig{
+		Cfg:       cfg,
+		TasksFile: tasksPath,
+		Knowledge: kw,
+	}
+
+	_, err := runner.RealReview(context.Background(), rc)
+	if err == nil {
+		t.Fatal("RealReview: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: review: build knowledge:") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "runner: review: build knowledge:")
+	}
+	if !strings.Contains(err.Error(), "read learnings:") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "read learnings:")
+	}
+	if kw.validateLessonsCount != 0 {
+		t.Errorf("ValidateNewLessons count = %d, want 0 (error before session)", kw.validateLessonsCount)
+	}
+}
+
+// --- Story 6.5a: Distillation Trigger Tests ---
+
+// TestRunner_Execute_BudgetUnderLimit verifies no distillation when LEARNINGS.md is under
+// soft threshold (100 lines < 150). (AC: Scenario 1)
+func TestRunner_Execute_BudgetUnderLimit(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeLearningsFile(t, tmpDir, 100)
+	// Pre-seed state: cooldown met (counter=10, lastDistill=0)
+	writeDistillState(t, tmpDir, 10, 0)
+
+	scenario := testutil.Scenario{
+		Name: "distill-under-limit",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-001"},
+		},
+	}
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	td := &trackingDistillFunc{}
+	r.DistillFn = td.fn
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if td.count != 0 {
+		t.Errorf("DistillFn count = %d, want 0 (budget under limit)", td.count)
+	}
+}
+
+// TestRunner_Execute_DistillationTrigger verifies distillation is called when budget
+// exceeds soft threshold and cooldown is met. (AC: Scenario 2)
+func TestRunner_Execute_DistillationTrigger(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeLearningsFile(t, tmpDir, 160)
+	// Pre-seed state: cooldown met (counter=10, lastDistill=0, diff=10 >= 5)
+	writeDistillState(t, tmpDir, 10, 0)
+
+	scenario := testutil.Scenario{
+		Name: "distill-trigger",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-001"},
+		},
+	}
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	td := &trackingDistillFunc{}
+	r.DistillFn = td.fn
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if td.count != 1 {
+		t.Errorf("DistillFn count = %d, want 1 (budget over limit, cooldown met)", td.count)
+	}
+}
+
+// TestRunner_Execute_CooldownNotMet verifies no distillation when cooldown check fails.
+// counter=15, lastDistill=12, diff=3 < 5. (AC: Scenario 3)
+func TestRunner_Execute_CooldownNotMet(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeLearningsFile(t, tmpDir, 160)
+	// Pre-seed state: cooldown NOT met (counter=15, lastDistill=12, diff=3 < 5)
+	writeDistillState(t, tmpDir, 15, 12)
+
+	scenario := testutil.Scenario{
+		Name: "distill-cooldown-not-met",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-001"},
+		},
+	}
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	td := &trackingDistillFunc{}
+	r.DistillFn = td.fn
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	// Counter increments: 15+1=16, lastDistill=12, diff=4 < 5 → still not met
+	if td.count != 0 {
+		t.Errorf("DistillFn count = %d, want 0 (cooldown not met)", td.count)
+	}
+}
+
+// TestRunner_Execute_DistillationBadFormatRetry verifies ErrBadFormat gets one free retry,
+// and if retry succeeds, no gate. (AC: Scenario 5, H4)
+func TestRunner_Execute_DistillationBadFormatRetry(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeLearningsFile(t, tmpDir, 160)
+	writeDistillState(t, tmpDir, 10, 0)
+
+	scenario := testutil.Scenario{
+		Name: "distill-bad-format-retry",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-001"},
+		},
+	}
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	// First call: ErrBadFormat, second call: success (nil)
+	td := &trackingDistillFunc{errs: []error{fmt.Errorf("parse: %w", runner.ErrBadFormat)}}
+	r.DistillFn = td.fn
+
+	gp := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionApprove},
+	}
+	r.GatePromptFn = gp.fn
+	r.Cfg.GatesEnabled = true
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if td.count != 2 {
+		t.Errorf("DistillFn count = %d, want 2 (first=ErrBadFormat, second=success)", td.count)
+	}
+	// Gate should NOT be called (free retry succeeded)
+	if gp.count != 0 {
+		t.Errorf("GatePromptFn count = %d, want 0 (no gate on successful retry)", gp.count)
+	}
+}
+
+// TestRunner_Execute_DistillationBadFormatRetryFails verifies ErrBadFormat retry that also
+// fails triggers human gate. (AC: Scenario 5)
+func TestRunner_Execute_DistillationBadFormatRetryFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeLearningsFile(t, tmpDir, 160)
+	writeDistillState(t, tmpDir, 10, 0)
+
+	scenario := testutil.Scenario{
+		Name: "distill-bad-format-retry-fails",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-001"},
+		},
+	}
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	// Both calls fail: first ErrBadFormat, retry also ErrBadFormat
+	td := &trackingDistillFunc{errs: []error{
+		fmt.Errorf("parse: %w", runner.ErrBadFormat),
+		fmt.Errorf("parse again: %w", runner.ErrBadFormat),
+	}}
+	r.DistillFn = td.fn
+
+	gp := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionSkip},
+	}
+	r.GatePromptFn = gp.fn
+	r.Cfg.GatesEnabled = true
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if td.count != 2 {
+		t.Errorf("DistillFn count = %d, want 2 (first=ErrBadFormat, retry=ErrBadFormat)", td.count)
+	}
+	// Gate should be called (retry failed)
+	if gp.count != 1 {
+		t.Errorf("GatePromptFn count = %d, want 1 (gate on retry failure)", gp.count)
+	}
+	if gp.taskText == "" || !strings.Contains(gp.taskText, "distillation failed:") {
+		t.Errorf("gate text = %q, want containing %q", gp.taskText, "distillation failed:")
+	}
+}
+
+// TestRunner_Execute_DistillationFailureHumanGate verifies non-format error triggers
+// immediate human gate with skip action. (AC: Scenario 4)
+func TestRunner_Execute_DistillationFailureHumanGate(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeLearningsFile(t, tmpDir, 160)
+	writeDistillState(t, tmpDir, 10, 0)
+
+	scenario := testutil.Scenario{
+		Name: "distill-failure-gate",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-001"},
+		},
+	}
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	// Non-format error → immediate gate (no free retry)
+	td := &trackingDistillFunc{errs: []error{errors.New("I/O timeout")}}
+	r.DistillFn = td.fn
+
+	gp := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionSkip},
+	}
+	r.GatePromptFn = gp.fn
+	r.Cfg.GatesEnabled = true
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if td.count != 1 {
+		t.Errorf("DistillFn count = %d, want 1 (no free retry for non-format error)", td.count)
+	}
+	if gp.count != 1 {
+		t.Errorf("GatePromptFn count = %d, want 1 (gate on non-format error)", gp.count)
+	}
+	if !strings.Contains(gp.taskText, "I/O timeout") {
+		t.Errorf("gate text = %q, want containing error %q", gp.taskText, "I/O timeout")
+	}
+	if !strings.Contains(gp.taskText, "160/200") {
+		t.Errorf("gate text = %q, want containing budget info %q", gp.taskText, "160/200")
+	}
+}
+
+// TestRunner_Execute_MissingLearnings verifies no distillation when LEARNINGS.md absent.
+// BudgetCheck returns NearLimit=false for missing files. (AC: Scenario 6)
+func TestRunner_Execute_MissingLearnings(t *testing.T) {
+	tmpDir := t.TempDir()
+	// No LEARNINGS.md file
+	writeDistillState(t, tmpDir, 10, 0)
+
+	scenario := testutil.Scenario{
+		Name: "distill-no-learnings",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-001"},
+		},
+	}
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	td := &trackingDistillFunc{}
+	r.DistillFn = td.fn
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if td.count != 0 {
+		t.Errorf("DistillFn count = %d, want 0 (no LEARNINGS.md)", td.count)
+	}
+}
+
+// TestRunner_Execute_MonotonicCounterPersist verifies MonotonicTaskCounter is incremented
+// and persisted after clean review. (AC: H1)
+func TestRunner_Execute_MonotonicCounterPersist(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Start with counter=5, lastDistill=5 (cooldown not met, so distill won't trigger)
+	writeDistillState(t, tmpDir, 5, 5)
+
+	scenario := testutil.Scenario{
+		Name: "distill-counter-persist",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-001"},
+		},
+	}
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	td := &trackingDistillFunc{}
+	r.DistillFn = td.fn
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	// Verify counter was incremented and persisted
+	statePath := filepath.Join(tmpDir, ".ralph", "distill-state.json")
+	loaded, loadErr := runner.LoadDistillState(statePath)
+	if loadErr != nil {
+		t.Fatalf("LoadDistillState: %v", loadErr)
+	}
+	if loaded.MonotonicTaskCounter != 6 {
+		t.Errorf("MonotonicTaskCounter = %d, want 6 (5+1)", loaded.MonotonicTaskCounter)
+	}
+	if loaded.LastDistillTask != 5 {
+		t.Errorf("LastDistillTask = %d, want 5 (unchanged, no distill)", loaded.LastDistillTask)
+	}
+}
+
+// TestRunner_Execute_DistillSuccess_UpdatesLastDistillTask verifies LastDistillTask is
+// updated to MonotonicTaskCounter after successful distillation. (AC: Scenario 2)
+func TestRunner_Execute_DistillSuccess_UpdatesLastDistillTask(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeLearningsFile(t, tmpDir, 160)
+	// Pre-seed: counter=10, lastDistill=0 → cooldown met
+	writeDistillState(t, tmpDir, 10, 0)
+
+	scenario := testutil.Scenario{
+		Name: "distill-success-updates-state",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-001"},
+		},
+	}
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	td := &trackingDistillFunc{} // returns nil (success)
+	r.DistillFn = td.fn
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	// Verify LastDistillTask updated
+	statePath := filepath.Join(tmpDir, ".ralph", "distill-state.json")
+	loaded, loadErr := runner.LoadDistillState(statePath)
+	if loadErr != nil {
+		t.Fatalf("LoadDistillState: %v", loadErr)
+	}
+	// Counter was 10, incremented to 11 → LastDistillTask should be 11
+	if loaded.MonotonicTaskCounter != 11 {
+		t.Errorf("MonotonicTaskCounter = %d, want 11 (10+1)", loaded.MonotonicTaskCounter)
+	}
+	if loaded.LastDistillTask != 11 {
+		t.Errorf("LastDistillTask = %d, want 11 (updated on success)", loaded.LastDistillTask)
+	}
+}
+
+// TestRunner_Execute_DistillationRetry5 verifies gate "retry 5" path via
+// Feedback=="5" triggers up to 5 retries. (AC: Scenario 4, retry 5 times)
+func TestRunner_Execute_DistillationRetry5(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeLearningsFile(t, tmpDir, 160)
+	writeDistillState(t, tmpDir, 10, 0)
+
+	scenario := testutil.Scenario{
+		Name: "distill-retry-5",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-001"},
+		},
+	}
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	// All calls fail: initial + free retry + 5 gate retries = 7 calls total
+	td := &trackingDistillFunc{errs: []error{
+		errors.New("crash"),   // initial call → immediate gate (non-format)
+		errors.New("crash 2"), // gate retry 1
+		errors.New("crash 3"), // gate retry 2
+		errors.New("crash 4"), // gate retry 3
+		errors.New("crash 5"), // gate retry 4
+		errors.New("crash 6"), // gate retry 5
+	}}
+	r.DistillFn = td.fn
+
+	gp := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionRetry, Feedback: "5"},
+	}
+	r.GatePromptFn = gp.fn
+	r.Cfg.GatesEnabled = true
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	// 1 initial call + 5 gate retries = 6 total (non-format error, no free retry)
+	if td.count != 6 {
+		t.Errorf("DistillFn count = %d, want 6 (1 initial + 5 gate retries)", td.count)
+	}
+	if gp.count != 1 {
+		t.Errorf("GatePromptFn count = %d, want 1", gp.count)
+	}
+}
+
+// TestRunner_Execute_DistillationFailureGatesDisabled verifies distillation failure
+// with gates disabled logs warning and continues (non-fatal). (AC: Scenario 4 edge case)
+func TestRunner_Execute_DistillationFailureGatesDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeLearningsFile(t, tmpDir, 160)
+	writeDistillState(t, tmpDir, 10, 0)
+
+	scenario := testutil.Scenario{
+		Name: "distill-failure-no-gates",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-001"},
+		},
+	}
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	r.Cfg.GatesEnabled = false // gates disabled
+	td := &trackingDistillFunc{errs: []error{errors.New("crash")}}
+	r.DistillFn = td.fn
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v (distillation should be non-fatal)", err)
+	}
+	if td.count != 1 {
+		t.Errorf("DistillFn count = %d, want 1", td.count)
+	}
+}
+

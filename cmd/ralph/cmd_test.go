@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,7 +13,7 @@ import (
 )
 
 func TestRootCmd_HasSubcommands(t *testing.T) {
-	want := map[string]bool{"bridge": false, "run": false}
+	want := map[string]bool{"bridge": false, "run": false, "distill": false}
 
 	for _, cmd := range rootCmd.Commands() {
 		if _, ok := want[cmd.Name()]; ok {
@@ -245,5 +246,89 @@ func TestEnsureLogDir_ReadOnlyDir(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), fmt.Sprintf("ralph: create log file:")) {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "ralph: create log file:")
+	}
+}
+
+// --- Distill command tests (Story 6.6) ---
+
+func TestDistillCmd_SubcommandRegistered(t *testing.T) {
+	found := false
+	for _, cmd := range rootCmd.Commands() {
+		if cmd.Name() == "distill" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("distill subcommand not registered on rootCmd")
+	}
+}
+
+func TestDistillCmd_HelpText(t *testing.T) {
+	if distillCmd.Short == "" {
+		t.Error("distillCmd.Short is empty")
+	}
+	if !strings.Contains(distillCmd.Long, "WARNING") {
+		t.Error("distillCmd.Long does not contain advisory WARNING")
+	}
+	if !strings.Contains(distillCmd.Long, "concurrently") {
+		t.Error("distillCmd.Long does not contain concurrent run advisory")
+	}
+}
+
+func TestDistillCmd_MissingLearnings(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create minimal ralph.yaml so config.Load works
+	ralphDir := filepath.Join(tmpDir, ".ralph")
+	if err := os.MkdirAll(ralphDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "ralph.yaml"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Override working directory for config.Load
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	err := runDistill(distillCmd, nil)
+	if err == nil {
+		t.Fatal("runDistill: expected error for missing LEARNINGS.md")
+	}
+
+	var exitErr *config.ExitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitCodeError, got %T: %v", err, err)
+	}
+	if exitErr.Code != 1 {
+		t.Errorf("exit code = %d, want 1", exitErr.Code)
+	}
+	if !strings.Contains(exitErr.Message, "LEARNINGS.md not found") {
+		t.Errorf("message = %q, want to contain %q", exitErr.Message, "LEARNINGS.md not found")
+	}
+}
+
+func TestCountFileLines_ReturnsLineCount(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "test.md")
+	content := "line1\nline2\nline3\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	count := countFileLines(path)
+	if count != 3 {
+		t.Errorf("countFileLines = %d, want 3", count)
+	}
+}
+
+func TestCountFileLines_MissingFile(t *testing.T) {
+	count := countFileLines("/nonexistent/file.md")
+	if count != 0 {
+		t.Errorf("countFileLines for missing file = %d, want 0", count)
 	}
 }

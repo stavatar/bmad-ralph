@@ -44,7 +44,6 @@ model_review: "sonnet"
 review_min_severity: "HIGH"
 always_extract: true
 serena_enabled: false
-serena_timeout: 30
 learnings_budget: 500
 log_dir: "/tmp/ralph-logs"
 `
@@ -91,9 +90,6 @@ log_dir: "/tmp/ralph-logs"
 	}
 	if cfg.SerenaEnabled {
 		t.Error("SerenaEnabled = true, want false")
-	}
-	if cfg.SerenaTimeout != 30 {
-		t.Errorf("SerenaTimeout = %d, want 30", cfg.SerenaTimeout)
 	}
 	if cfg.LearningsBudget != 500 {
 		t.Errorf("LearningsBudget = %d, want 500", cfg.LearningsBudget)
@@ -144,7 +140,7 @@ func TestConfig_Load_PartialConfig(t *testing.T) {
 		},
 		{
 			"several fields set",
-			"claude_command: cc\nreview_every: 5\nserena_timeout: 60\n",
+			"claude_command: cc\nreview_every: 5\nserena_enabled: false\n",
 			func(t *testing.T, cfg *Config) {
 				if cfg.ClaudeCommand != "cc" {
 					t.Errorf("ClaudeCommand = %q, want %q", cfg.ClaudeCommand, "cc")
@@ -152,8 +148,8 @@ func TestConfig_Load_PartialConfig(t *testing.T) {
 				if cfg.ReviewEvery != 5 {
 					t.Errorf("ReviewEvery = %d, want 5", cfg.ReviewEvery)
 				}
-				if cfg.SerenaTimeout != 60 {
-					t.Errorf("SerenaTimeout = %d, want 60", cfg.SerenaTimeout)
+				if cfg.SerenaEnabled {
+					t.Error("SerenaEnabled = true, want false")
 				}
 				if cfg.MaxTurns != 50 {
 					t.Errorf("default MaxTurns = %d, want 50", cfg.MaxTurns)
@@ -314,11 +310,14 @@ func TestConfig_Load_DefaultsComplete(t *testing.T) {
 	if !cfg.SerenaEnabled {
 		t.Error("SerenaEnabled should default to true")
 	}
-	if cfg.SerenaTimeout != 10 {
-		t.Errorf("SerenaTimeout = %d, want 10", cfg.SerenaTimeout)
-	}
 	if cfg.LearningsBudget != 200 {
 		t.Errorf("LearningsBudget = %d, want 200", cfg.LearningsBudget)
+	}
+	if cfg.DistillCooldown != 5 {
+		t.Errorf("DistillCooldown = %d, want 5", cfg.DistillCooldown)
+	}
+	if cfg.DistillTimeout != 120 {
+		t.Errorf("DistillTimeout = %d, want 120", cfg.DistillTimeout)
 	}
 	if cfg.LogDir != ".ralph/logs" {
 		t.Errorf("LogDir = %q, want %q", cfg.LogDir, ".ralph/logs")
@@ -709,7 +708,6 @@ model_review: "opus"
 review_min_severity: "HIGH"
 always_extract: true
 serena_enabled: false
-serena_timeout: 30
 learnings_budget: 500
 log_dir: "/custom/logs"
 `)
@@ -769,9 +767,6 @@ log_dir: "/custom/logs"
 	}
 	if cfg.SerenaEnabled {
 		t.Error("SerenaEnabled = true, want false (config-only, set to false in config)")
-	}
-	if cfg.SerenaTimeout != 30 {
-		t.Errorf("SerenaTimeout = %d, want 30 (config-only)", cfg.SerenaTimeout)
 	}
 	if cfg.LearningsBudget != 500 {
 		t.Errorf("LearningsBudget = %d, want 500 (config-only)", cfg.LearningsBudget)

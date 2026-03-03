@@ -16,27 +16,29 @@ import (
 // These are session-local (not in config/constants.go) because they're
 // Claude CLI flags, not project sprint-tasks.md markers.
 const (
-	flagPrompt          = "-p"
-	flagMaxTurns        = "--max-turns"
-	flagModel           = "--model"
-	flagOutputFormat    = "--output-format"
-	flagResume          = "--resume"
-	flagSkipPermissions = "--dangerously-skip-permissions"
-	outputFormatJSON    = "json"
+	flagPrompt             = "-p"
+	flagMaxTurns           = "--max-turns"
+	flagModel              = "--model"
+	flagOutputFormat       = "--output-format"
+	flagResume             = "--resume"
+	flagSkipPermissions    = "--dangerously-skip-permissions"
+	flagAppendSystemPrompt = "--append-system-prompt"
+	outputFormatJSON       = "json"
 )
 
 // Options configures a Claude CLI session invocation.
 // The caller (runner/bridge) fills this from config.Config values.
 // Session package does NOT import config — receives everything via Options.
 type Options struct {
-	Command                    string // Claude CLI path (config.ClaudeCommand)
-	Dir                        string // Working directory (config.ProjectRoot)
-	Prompt                     string // -p flag content
-	MaxTurns                   int    // --max-turns value (0 = omit)
-	Model                      string // --model value (empty = omit)
-	OutputJSON                 bool   // --output-format json
-	Resume                     string // --resume session_id (empty = omit)
-	DangerouslySkipPermissions bool   // --dangerously-skip-permissions
+	Command                    string  // Claude CLI path (config.ClaudeCommand)
+	Dir                        string  // Working directory (config.ProjectRoot)
+	Prompt                     string  // -p flag content
+	MaxTurns                   int     // --max-turns value (0 = omit)
+	Model                      string  // --model value (empty = omit)
+	OutputJSON                 bool    // --output-format json
+	Resume                     string  // --resume session_id (empty = omit)
+	DangerouslySkipPermissions bool    // --dangerously-skip-permissions
+	AppendSystemPrompt         *string // Channel 1 delivery — critical rules via system prompt (nil = omit)
 }
 
 // RawResult contains raw output from a Claude CLI invocation.
@@ -82,12 +84,15 @@ func Execute(ctx context.Context, opts Options) (*RawResult, error) {
 }
 
 // buildArgs constructs the CLI argument slice from Options.
+// Resume and Prompt are independent (not mutually exclusive) — Claude CLI
+// supports both --resume and -p simultaneously for resume-with-prompt workflows.
 func buildArgs(opts Options) []string {
 	var args []string
 
 	if opts.Resume != "" {
 		args = append(args, flagResume, opts.Resume)
-	} else if opts.Prompt != "" {
+	}
+	if opts.Prompt != "" {
 		args = append(args, flagPrompt, opts.Prompt)
 	}
 
@@ -105,6 +110,10 @@ func buildArgs(opts Options) []string {
 
 	if opts.DangerouslySkipPermissions {
 		args = append(args, flagSkipPermissions)
+	}
+
+	if opts.AppendSystemPrompt != nil {
+		args = append(args, flagAppendSystemPrompt, *opts.AppendSystemPrompt)
 	}
 
 	return args

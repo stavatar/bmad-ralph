@@ -2,6 +2,7 @@ package runner_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -312,17 +313,26 @@ var noopResumeExtractFn runner.ResumeExtractFunc = func(_ context.Context, _ run
 
 // --- KnowledgeWriter test helpers (Story 3.7) ---
 
-// trackingKnowledgeWriter records WriteProgress calls for assertion.
+// trackingKnowledgeWriter records WriteProgress and ValidateNewLessons calls for assertion.
 type trackingKnowledgeWriter struct {
-	writeProgressCount int
-	writeProgressData  []runner.ProgressData
-	writeProgressErr   error // inject error for error-path tests
+	writeProgressCount   int
+	writeProgressData    []runner.ProgressData
+	writeProgressErr     error // inject error for error-path tests
+	validateLessonsCount int
+	validateLessonsData  []runner.LessonsData
+	validateLessonsErr   error // inject error for error-path tests
 }
 
 func (tk *trackingKnowledgeWriter) WriteProgress(_ context.Context, data runner.ProgressData) error {
 	tk.writeProgressCount++
 	tk.writeProgressData = append(tk.writeProgressData, data)
 	return tk.writeProgressErr
+}
+
+func (tk *trackingKnowledgeWriter) ValidateNewLessons(_ context.Context, data runner.LessonsData) error {
+	tk.validateLessonsCount++
+	tk.validateLessonsData = append(tk.validateLessonsData, data)
+	return tk.validateLessonsErr
 }
 
 // setupRunnerIntegration creates a Runner with all fields initialized for integration tests.
@@ -397,5 +407,58 @@ func reviewAndMarkDoneFn(tasksPath string, counter *int) runner.ReviewFunc {
 		// Error ignored: test helper in controlled tmpDir; failure surfaces via downstream assertions
 		_ = os.WriteFile(tasksPath, []byte(allDoneTasks), 0644)
 		return runner.ReviewResult{Clean: true}, nil
+	}
+}
+
+// --- DistillFunc test helpers (Story 6.5a) ---
+
+// trackingDistillFunc records DistillFn calls for assertion.
+// Returns errors from the errs sequence; nil after exhaustion.
+type trackingDistillFunc struct {
+	count  int
+	states []*runner.DistillState
+	errs   []error // errors to return in sequence
+}
+
+func (td *trackingDistillFunc) fn(_ context.Context, state *runner.DistillState) error {
+	idx := td.count
+	td.count++
+	td.states = append(td.states, state)
+	if idx < len(td.errs) {
+		return td.errs[idx]
+	}
+	return nil
+}
+
+// noopDistillFn is a no-op distill for tests that don't care about distillation.
+var noopDistillFn runner.DistillFunc = func(_ context.Context, _ *runner.DistillState) error {
+	return nil
+}
+
+// writeLearningsFile writes a LEARNINGS.md file with the given number of lines.
+func writeLearningsFile(t *testing.T, dir string, lineCount int) {
+	t.Helper()
+	var sb strings.Builder
+	sb.WriteString("# LEARNINGS\n\n")
+	for i := 0; i < lineCount-2; i++ {
+		sb.WriteString("- lesson line\n")
+	}
+	p := filepath.Join(dir, "LEARNINGS.md")
+	if err := os.WriteFile(p, []byte(sb.String()), 0644); err != nil {
+		t.Fatalf("write LEARNINGS.md: %v", err)
+	}
+}
+
+// writeDistillState pre-seeds distill-state.json for tests that need specific counter values.
+func writeDistillState(t *testing.T, dir string, counter, lastDistill int) {
+	t.Helper()
+	stateDir := filepath.Join(dir, ".ralph")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatalf("create .ralph dir: %v", err)
+	}
+	content := fmt.Sprintf(`{"version":1,"monotonic_task_counter":%d,"last_distill_task":%d}`, counter, lastDistill)
+	p := filepath.Join(stateDir, "distill-state.json")
+	if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+		t.Fatalf("write distill-state.json: %v", err)
 	}
 }

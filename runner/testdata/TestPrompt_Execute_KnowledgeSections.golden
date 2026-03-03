@@ -151,11 +151,11 @@ When a human gate reviewer provides feedback, it appears as a blockquote prefixe
 
 ## Distilled Knowledge
 
-__RALPH_KNOWLEDGE__
+Distilled testing patterns here
 
 ## Recent Learnings
 
-__LEARNINGS_CONTENT__
+Recent learning about assertions
 
 ## 999-Rules Guardrails
 
@@ -208,3 +208,7 @@ Violation of any rule is grounds for immediate session termination.
 ## Proceed
 
 No pending review findings. Proceed with the next open task from sprint-tasks.md.
+
+## Self-Review
+
+Re-read the top 5 most recent learnings. For each modified file, verify that the patterns from learnings are applied correctly.
