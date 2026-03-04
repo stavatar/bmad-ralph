@@ -173,6 +173,33 @@ func TestAssemblePrompt_EdgeCases(t *testing.T) {
 			// "__B____A__" → replace __A__ first → "__B__1" → replace __B__ → "21"
 			want: "21",
 		},
+		{
+			name:         "unreplaced placeholder error",
+			tmpl:         `Hello __FOO__ and __BAR__`,
+			data:         TemplateData{},
+			replacements: nil,
+			wantErr:      true,
+			errContains:  "config: assemble prompt: unreplaced placeholders:",
+		},
+		{
+			name: "all placeholders replaced no error",
+			tmpl: `Hello __FOO__`,
+			data: TemplateData{},
+			replacements: map[string]string{
+				"__FOO__": "world",
+			},
+			want: "Hello world",
+		},
+		{
+			name: "partial replacement leaves unreplaced",
+			tmpl: `__FOO__ and __BAR__`,
+			data: TemplateData{},
+			replacements: map[string]string{
+				"__FOO__": "hello",
+			},
+			wantErr:     true,
+			errContains: "__BAR__",
+		},
 	}
 
 	for _, tt := range tests {

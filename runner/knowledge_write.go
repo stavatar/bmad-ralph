@@ -118,8 +118,10 @@ func (f *FileKnowledgeWriter) ValidateNewLessons(_ context.Context, data Lessons
 		return nil
 	}
 
-	// Semantic dedup (G3): merge entries with same category:topic prefix
-	content, merged := mergeDedup(content, newEntries, snapshotEntries)
+	// Semantic dedup (G3): merge entries with same category:topic prefix.
+	// Pass allEntries (parsed from current content) so existing entry positions
+	// match the content being modified — snapshotEntries have stale line indices.
+	content, merged := mergeDedup(content, newEntries, allEntries)
 
 	if merged {
 		// Re-parse after merge
@@ -137,7 +139,7 @@ func (f *FileKnowledgeWriter) ValidateNewLessons(_ context.Context, data Lessons
 	totalLines := len(lines)
 
 	for i, entry := range newEntries {
-		issues := validateEntry(entry, newEntries, i, totalLines, budgetLimit)
+		issues := validateEntry(entry, i, totalLines, budgetLimit)
 		if len(issues) > 0 {
 			tagEntryInContent(&lines, entry, issues)
 			modified = true
@@ -226,7 +228,7 @@ func parseHeader(line string) LessonEntry {
 }
 
 // validateEntry runs quality gates G1-G6 on an entry. Returns list of failed gate names.
-func validateEntry(entry parsedEntry, allNew []parsedEntry, idx, totalLines, budgetLimit int) []string {
+func validateEntry(entry parsedEntry, idx, totalLines, budgetLimit int) []string {
 	var issues []string
 
 	// G1: Format check — header must match pattern
@@ -304,15 +306,26 @@ func categoryTopicPrefix(header string) string {
 }
 
 // mergeDedup merges new entries with same category:topic prefix into existing entries.
+// allEntries must be parsed from the current content (not snapshot) so line positions match.
 // Returns modified content and whether any merge occurred.
-func mergeDedup(content string, newEntries, existingEntries []parsedEntry) (string, bool) {
+func mergeDedup(content string, newEntries, allEntries []parsedEntry) (string, bool) {
 	merged := false
-	existingPrefixes := make(map[string]*parsedEntry, len(existingEntries))
-	for i := range existingEntries {
-		prefix := categoryTopicPrefix(existingEntries[i].rawHeader)
+
+	// Build set of new entry headers to exclude from "existing" map
+	newHeaders := make(map[string]bool, len(newEntries))
+	for _, e := range newEntries {
+		newHeaders[normalizeHeader(e.rawHeader)] = true
+	}
+
+	// Build prefix map from entries NOT in newEntries (i.e., pre-existing entries)
+	existingPrefixes := make(map[string]int, len(allEntries)) // prefix → index in allEntries
+	for i := range allEntries {
+		if newHeaders[normalizeHeader(allEntries[i].rawHeader)] {
+			continue
+		}
+		prefix := categoryTopicPrefix(allEntries[i].rawHeader)
 		if prefix != "" {
-			existingEntries[i] = existingEntries[i] // copy for pointer stability
-			existingPrefixes[prefix] = &existingEntries[i]
+			existingPrefixes[prefix] = i
 		}
 	}
 
@@ -321,12 +334,36 @@ func mergeDedup(content string, newEntries, existingEntries []parsedEntry) (stri
 		if newPrefix == "" {
 			continue
 		}
-		existing, found := existingPrefixes[newPrefix]
-		if !found {
+		if _, found := existingPrefixes[newPrefix]; !found {
 			continue
 		}
-		// Same category:topic — merge content and citations
-		content = mergeEntryContent(content, existing, &newEntry)
+		// Same category:topic — merge content and citations.
+		// Re-parse content after each merge to get fresh line positions,
+		// avoiding stale indices after insertion/removal shifts.
+		freshEntries := parseEntries(content)
+		var freshExisting *parsedEntry
+		for i := range freshEntries {
+			if categoryTopicPrefix(freshEntries[i].rawHeader) == newPrefix &&
+				!newHeaders[normalizeHeader(freshEntries[i].rawHeader)] {
+				freshExisting = &freshEntries[i]
+				break
+			}
+		}
+		if freshExisting == nil {
+			continue
+		}
+		// Re-locate newEntry in freshly parsed content
+		var freshNew *parsedEntry
+		for i := range freshEntries {
+			if normalizeHeader(freshEntries[i].rawHeader) == normalizeHeader(newEntry.rawHeader) {
+				freshNew = &freshEntries[i]
+				break
+			}
+		}
+		if freshNew == nil {
+			continue
+		}
+		content = mergeEntryContent(content, freshExisting, freshNew)
 		merged = true
 	}
 

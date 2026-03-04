@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -38,6 +39,10 @@ func runTestHelper(scenario string) {
 		fmt.Fprint(os.Stdout, dir)
 	case "sleep":
 		time.Sleep(30 * time.Second)
+	case "echo_stdin":
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(os.Stdin)
+		fmt.Fprint(os.Stdout, buf.String())
 	case "json_success":
 		fmt.Fprint(os.Stdout, `[{"type":"system","subtype":"init","session_id":"integ-test-001","tools":[],"model":"claude-sonnet-4-5-20250514"},{"type":"result","subtype":"success","session_id":"integ-test-001","result":"Integration test output.","is_error":false,"duration_ms":1000,"num_turns":1}]`)
 	case "resume_json":
@@ -385,5 +390,41 @@ func TestExecute_WorkingDir(t *testing.T) {
 	}
 	if !os.SameFile(gotInfo, wantInfo) {
 		t.Errorf("working dir = %q, want %q", got, dir)
+	}
+}
+
+func TestExecute_PromptViaStdin(t *testing.T) {
+	t.Setenv("SESSION_TEST_HELPER", "echo_stdin")
+	dir := t.TempDir()
+
+	prompt := strings.Repeat("x", maxPromptArgLen+1)
+	result, err := Execute(context.Background(), Options{
+		Command: os.Args[0],
+		Dir:     dir,
+		Prompt:  prompt,
+	})
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+	if got := string(result.Stdout); got != prompt {
+		t.Errorf("stdin content = %q, want %q", got, prompt)
+	}
+}
+
+func TestExecute_EmptyPromptNoStdin(t *testing.T) {
+	t.Setenv("SESSION_TEST_HELPER", "echo_stdin")
+	dir := t.TempDir()
+
+	result, err := Execute(context.Background(), Options{
+		Command: os.Args[0],
+		Dir:     dir,
+		Prompt:  "",
+	})
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+	// No stdin written — subprocess reads empty stdin, outputs nothing.
+	if got := string(result.Stdout); got != "" {
+		t.Errorf("stdout = %q, want empty when no prompt", got)
 	}
 }

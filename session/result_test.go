@@ -62,6 +62,30 @@ func TestParseResult_Success(t *testing.T) {
 			wantExit: 1,
 		},
 		{
+			name:     "object format success (Claude CLI 2.x)",
+			fixture:  "result_success_object.json",
+			exitCode: 0,
+			wantSID:  "abc-123-def-456",
+			wantOut:  "Implementation complete. All tests pass.",
+			wantExit: 0,
+		},
+		{
+			name:     "object format non-zero exit",
+			fixture:  "result_success_object.json",
+			exitCode: 2,
+			wantSID:  "abc-123-def-456",
+			wantOut:  "Implementation complete. All tests pass.",
+			wantExit: 2,
+		},
+		{
+			name:     "object format is_error true still parses",
+			fixture:  "result_is_error_object.json",
+			exitCode: 1,
+			wantSID:  "abc-123-def-456",
+			wantOut:  "Error: task failed validation",
+			wantExit: 1,
+		},
+		{
 			name:     "with stderr no contamination",
 			fixture:  "result_success.json",
 			exitCode: 0,
@@ -149,6 +173,14 @@ func TestParseResult_ErrorCases(t *testing.T) {
 			]`)},
 			wantErr: "session: parse: no result message in JSON array",
 		},
+		{
+			// Array element is a JSON number (not an object): inner Unmarshal into
+			// jsonResultMessage fails → continue branch executed → loop ends with
+			// no result → "no result message" error.
+			name:    "JSON array with non-object element",
+			raw:     &RawResult{Stdout: []byte(`[42]`)},
+			wantErr: "session: parse: no result message in JSON array",
+		},
 	}
 
 	for _, tt := range tests {
@@ -164,6 +196,26 @@ func TestParseResult_ErrorCases(t *testing.T) {
 				t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestParseResult_ObjectFormatNonResultFallback(t *testing.T) {
+	// JSON object starting with '{' but type != "result" hits plain-text fallback.
+	stdout := []byte(`{"type":"system","session_id":"abc-123","subtype":"init"}`)
+	raw := &RawResult{Stdout: stdout, ExitCode: 0}
+
+	result, err := ParseResult(raw, time.Second)
+	if err != nil {
+		t.Fatalf("ParseResult() unexpected error for non-result object: %v", err)
+	}
+	if result == nil {
+		t.Fatal("ParseResult() returned nil result")
+	}
+	if result.SessionID != "" {
+		t.Errorf("SessionID = %q, want empty (plain-text fallback)", result.SessionID)
+	}
+	if result.Output != string(stdout) {
+		t.Errorf("Output = %q, want raw stdout", result.Output)
 	}
 }
 

@@ -259,8 +259,10 @@ func TestBridge_Integration_CreateFlow(t *testing.T) {
 		{"verify instruction", "[VERIFY]"},
 		{"e2e instruction", "[E2E]"},
 		{"source traceability", "source:"},
-		{"test derivation", "red-green"},
-		{"conversion instructions", "For each AC, create"},
+		{"AC classification", "AC Classification"},
+		{"granularity rule", "Task Granularity Rule"},
+		{"testing within tasks", "Testing Within Tasks"},
+		{"conversion instructions", "Group related ACs into tasks"},
 		{"negative examples", "DO NOT"},
 	}
 	for _, pc := range promptChecks {

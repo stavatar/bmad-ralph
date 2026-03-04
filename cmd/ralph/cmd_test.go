@@ -1,8 +1,8 @@
 package main
 
 import (
+	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,6 +72,12 @@ func TestBridgeCmd_Usage(t *testing.T) {
 	}
 	if bridgeCmd.Use != "bridge [story-files...]" {
 		t.Errorf("bridgeCmd.Use = %q, want %q", bridgeCmd.Use, "bridge [story-files...]")
+	}
+	if !strings.Contains(bridgeCmd.Long, "auto-discovers") {
+		t.Error("bridgeCmd.Long does not mention auto-discovers")
+	}
+	if !strings.Contains(bridgeCmd.Long, "StoriesDir") {
+		t.Error("bridgeCmd.Long does not mention StoriesDir")
 	}
 }
 
@@ -150,102 +156,6 @@ func TestBuildCLIFlags_NoFlagsChanged(t *testing.T) {
 	}
 	if flags.AlwaysExtract != nil {
 		t.Errorf("AlwaysExtract = %v, want nil", flags.AlwaysExtract)
-	}
-}
-
-func TestEnsureLogDir_CreatesDirectoryAndFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfg := &config.Config{
-		ProjectRoot: tmpDir,
-		LogDir:      ".ralph/logs",
-	}
-
-	err := ensureLogDir(cfg)
-	if err != nil {
-		t.Fatalf("ensureLogDir() error = %v", err)
-	}
-
-	logDir := filepath.Join(tmpDir, ".ralph", "logs")
-	info, err := os.Stat(logDir)
-	if err != nil {
-		t.Fatalf("log directory not created: %v", err)
-	}
-	if !info.IsDir() {
-		t.Error("log path exists but is not a directory")
-	}
-
-	// Verify log file was created with correct name format
-	entries, err := os.ReadDir(logDir)
-	if err != nil {
-		t.Fatalf("failed to read log directory: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 log file, got %d", len(entries))
-	}
-
-	logFile := entries[0].Name()
-	if !strings.HasPrefix(logFile, "run-") || !strings.HasSuffix(logFile, ".log") {
-		t.Errorf("log file name %q does not match pattern run-*.log", logFile)
-	}
-
-	// Verify log file content
-	content, err := os.ReadFile(filepath.Join(logDir, logFile))
-	if err != nil {
-		t.Fatalf("failed to read log file: %v", err)
-	}
-	if !strings.Contains(string(content), "INFO ralph run started") {
-		t.Errorf("log file content = %q, want to contain %q", content, "INFO ralph run started")
-	}
-}
-
-func TestEnsureLogDir_InvalidPath(t *testing.T) {
-	// Use a file as ProjectRoot — MkdirAll fails when path component is a file
-	tmpDir := t.TempDir()
-	blockingFile := filepath.Join(tmpDir, "blocker")
-	if err := os.WriteFile(blockingFile, []byte("x"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := &config.Config{
-		ProjectRoot: blockingFile, // file, not directory
-		LogDir:      ".ralph/logs",
-	}
-
-	err := ensureLogDir(cfg)
-	if err == nil {
-		t.Fatal("ensureLogDir() with file-as-root should return error")
-	}
-	if !strings.Contains(err.Error(), "ralph: create log dir:") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "ralph: create log dir:")
-	}
-}
-
-func TestEnsureLogDir_ReadOnlyDir(t *testing.T) {
-	tmpDir := t.TempDir()
-	logDir := filepath.Join(tmpDir, ".ralph", "logs")
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	// Make directory read-only to prevent file creation
-	if err := os.Chmod(logDir, 0555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		os.Chmod(logDir, 0755) // Restore for cleanup
-	})
-
-	cfg := &config.Config{
-		ProjectRoot: tmpDir,
-		LogDir:      ".ralph/logs",
-	}
-
-	err := ensureLogDir(cfg)
-	if err == nil {
-		// Some filesystems (WSL/NTFS) may not respect Unix permissions
-		t.Skip("filesystem does not enforce read-only directory permissions")
-	}
-	if !strings.Contains(err.Error(), fmt.Sprintf("ralph: create log file:")) {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "ralph: create log file:")
 	}
 }
 
@@ -330,5 +240,339 @@ func TestCountFileLines_MissingFile(t *testing.T) {
 	count := countFileLines("/nonexistent/file.md")
 	if count != 0 {
 		t.Errorf("countFileLines for missing file = %d, want 0", count)
+	}
+}
+
+// --- runRun error path tests ---
+
+// writeInvalidConfig creates a .ralph/config.yaml with invalid YAML so that
+// config.Load fails with a parse error. detectProjectRootFrom uses .ralph/ as
+// project root anchor, so the invalid file is found before any parent config.
+func writeInvalidConfig(t *testing.T, dir string) {
+	t.Helper()
+	ralphDir := filepath.Join(dir, ".ralph")
+	if err := os.MkdirAll(ralphDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ralphDir, "config.yaml"), []byte("{invalid: yaml: content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunRun_ConfigLoadError(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeInvalidConfig(t, tmpDir)
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
+
+	cmd := &cobra.Command{Use: "run"}
+	cmd.Flags().Int("max-turns", 0, "")
+	cmd.Flags().Bool("gates", false, "")
+	cmd.Flags().Int("every", 0, "")
+	cmd.Flags().String("model", "", "")
+	cmd.Flags().Bool("always-extract", false, "")
+	cmd.SetContext(context.Background())
+
+	err := runRun(cmd, nil)
+	if err == nil {
+		t.Fatal("runRun: expected error when config.Load fails (invalid config.yaml)")
+	}
+	if !strings.Contains(err.Error(), "ralph: load config:") {
+		t.Errorf("runRun error = %q, want containing %q", err.Error(), "ralph: load config:")
+	}
+	if !strings.Contains(err.Error(), "config:") {
+		t.Errorf("runRun error = %q, want inner error containing %q", err.Error(), "config:")
+	}
+}
+
+// writeValidConfig creates a .ralph/ directory so config.Load finds a project root
+// and succeeds with defaults. No config.yaml needed (missing = defaults apply).
+func writeValidConfig(t *testing.T, dir string) {
+	t.Helper()
+	ralphDir := filepath.Join(dir, ".ralph")
+	if err := os.MkdirAll(ralphDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// --- runBridge error path tests ---
+
+func TestRunBridge_ConfigLoadError(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeInvalidConfig(t, tmpDir)
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
+
+	cmd := &cobra.Command{Use: "bridge"}
+	cmd.SetContext(context.Background())
+
+	err := runBridge(cmd, []string{"story.md"})
+	if err == nil {
+		t.Fatal("runBridge: expected error when config.Load fails (invalid config.yaml)")
+	}
+	if !strings.Contains(err.Error(), "ralph: load config:") {
+		t.Errorf("runBridge error = %q, want containing %q", err.Error(), "ralph: load config:")
+	}
+	if !strings.Contains(err.Error(), "config:") {
+		t.Errorf("runBridge error = %q, want inner error containing %q", err.Error(), "config:")
+	}
+}
+
+func TestRunBridge_StoryReadError(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeValidConfig(t, tmpDir)
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
+
+	cmd := &cobra.Command{Use: "bridge"}
+	cmd.SetContext(context.Background())
+
+	err := runBridge(cmd, []string{filepath.Join(tmpDir, "nonexistent-story.md")})
+	if err == nil {
+		t.Fatal("runBridge: expected error for nonexistent story file")
+	}
+	if !strings.Contains(err.Error(), "bridge: read story:") {
+		t.Errorf("runBridge error = %q, want containing %q", err.Error(), "bridge: read story:")
+	}
+}
+
+// --- runBridge autodiscovery tests ---
+
+func TestRunBridge_AutoDiscover_FindsMdFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeValidConfig(t, tmpDir)
+
+	// Create StoriesDir with .md entries as directories — bridge.Run will fail
+	// with "bridge: read story:" (not "no story files found"), confirming that
+	// autodiscovery found the files and passed them to bridge.Run. Using
+	// directories avoids Windows file-lock issues during TempDir cleanup.
+	storiesDir := filepath.Join(tmpDir, "docs", "sprint-artifacts")
+	for _, name := range []string{"story-a.md", "story-b.md"} {
+		if err := os.MkdirAll(filepath.Join(storiesDir, name), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
+
+	cmd := &cobra.Command{Use: "bridge"}
+	cmd.SetContext(context.Background())
+
+	// No args — autodiscovery must find the .md entries and pass them to
+	// bridge.Run, which fails with "bridge: read story:" (not "no story files found").
+	err := runBridge(cmd, []string{})
+	if err == nil {
+		t.Fatal("runBridge: expected error from bridge.Run reading directory-as-file, got nil")
+	}
+	if strings.Contains(err.Error(), "no story files found") {
+		t.Errorf("runBridge: got 'no story files found' but .md entries exist in StoriesDir: %v", err)
+	}
+	if !strings.Contains(err.Error(), "bridge: read story:") {
+		t.Errorf("runBridge error = %q, want containing %q (autodiscovery passed files to bridge.Run)", err.Error(), "bridge: read story:")
+	}
+}
+
+func TestRunBridge_AutoDiscover_NoFiles_ReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeValidConfig(t, tmpDir)
+
+	// Create StoriesDir but leave it empty (no .md files)
+	storiesDir := filepath.Join(tmpDir, "docs", "sprint-artifacts")
+	if err := os.MkdirAll(storiesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
+
+	cmd := &cobra.Command{Use: "bridge"}
+	cmd.SetContext(context.Background())
+
+	err := runBridge(cmd, []string{})
+	if err == nil {
+		t.Fatal("runBridge: expected error when no .md files found, got nil")
+	}
+	if !strings.Contains(err.Error(), "no story files found") {
+		t.Errorf("runBridge error = %q, want containing %q", err.Error(), "no story files found")
+	}
+	if !strings.Contains(err.Error(), "ralph bridge <file.md>") {
+		t.Errorf("runBridge error = %q, want hint containing %q", err.Error(), "ralph bridge <file.md>")
+	}
+}
+
+func TestRunBridge_AutoDiscover_StoriesDirMissing_ReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeValidConfig(t, tmpDir)
+	// StoriesDir does not exist at all — glob returns no matches (not an error from filepath.Glob)
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
+
+	cmd := &cobra.Command{Use: "bridge"}
+	cmd.SetContext(context.Background())
+
+	err := runBridge(cmd, []string{})
+	if err == nil {
+		t.Fatal("runBridge: expected error when StoriesDir missing, got nil")
+	}
+	if !strings.Contains(err.Error(), "no story files found") {
+		t.Errorf("runBridge error = %q, want containing %q", err.Error(), "no story files found")
+	}
+}
+
+// --- runDistill error path tests ---
+
+func TestRunDistill_ConfigLoadError(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeInvalidConfig(t, tmpDir)
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
+
+	err := runDistill(distillCmd, nil)
+	if err == nil {
+		t.Fatal("runDistill: expected error when config.Load fails (invalid config.yaml)")
+	}
+	if !strings.Contains(err.Error(), "ralph: load config:") {
+		t.Errorf("runDistill error = %q, want containing %q", err.Error(), "ralph: load config:")
+	}
+	if !strings.Contains(err.Error(), "config:") {
+		t.Errorf("runDistill error = %q, want inner error containing %q", err.Error(), "config:")
+	}
+}
+
+func TestRunDistill_LoadStateError(t *testing.T) {
+	// Invalid distill-state.json → runner.LoadDistillState fails → runDistill returns
+	// "ralph: distill: runner: distill state: load:".
+	tmpDir := t.TempDir()
+	writeValidConfig(t, tmpDir)
+
+	// Create LEARNINGS.md so os.Stat succeeds.
+	if err := os.WriteFile(filepath.Join(tmpDir, "LEARNINGS.md"), []byte("content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create invalid distill-state.json to make LoadDistillState fail.
+	ralphDir := filepath.Join(tmpDir, ".ralph")
+	if err := os.WriteFile(filepath.Join(ralphDir, "distill-state.json"), []byte("{invalid json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
+
+	err := runDistill(distillCmd, nil)
+	if err == nil {
+		t.Fatal("runDistill: expected error for invalid distill-state.json")
+	}
+	if !strings.Contains(err.Error(), "ralph: distill:") {
+		t.Errorf("runDistill error = %q, want containing %q", err.Error(), "ralph: distill:")
+	}
+	if !strings.Contains(err.Error(), "runner: distill state: load:") {
+		t.Errorf("runDistill error = %q, want inner error containing %q", err.Error(), "runner: distill state: load:")
+	}
+}
+
+func TestSplitBySize_Cases(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// Create test files of known sizes
+	writeFile := func(name string, size int) string {
+		t.Helper()
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, make([]byte, size), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		return p
+	}
+
+	f100 := writeFile("f100", 100)
+	f200 := writeFile("f200", 200)
+	f300 := writeFile("f300", 300)
+
+	tests := []struct {
+		name       string
+		files      []string
+		maxBytes   int64
+		wantBatches int
+		wantFiles   []int // files per batch
+	}{
+		{
+			name:        "empty input",
+			files:       nil,
+			maxBytes:    1000,
+			wantBatches: 0,
+		},
+		{
+			name:        "all fit in one batch",
+			files:       []string{f100, f200},
+			maxBytes:    500,
+			wantBatches: 1,
+			wantFiles:   []int{2},
+		},
+		{
+			name:        "split into two batches",
+			files:       []string{f100, f200, f300},
+			maxBytes:    350,
+			wantBatches: 2,
+			wantFiles:   []int{2, 1},
+		},
+		{
+			name:        "each file in own batch",
+			files:       []string{f100, f200, f300},
+			maxBytes:    100,
+			wantBatches: 3,
+			wantFiles:   []int{1, 1, 1},
+		},
+		{
+			name:        "nonexistent file treated as zero size",
+			files:       []string{filepath.Join(dir, "missing"), f100},
+			maxBytes:    500,
+			wantBatches: 1,
+			wantFiles:   []int{2},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := splitBySize(tc.files, tc.maxBytes)
+			if len(got) != tc.wantBatches {
+				t.Fatalf("splitBySize batches = %d, want %d", len(got), tc.wantBatches)
+			}
+			for i, wantCount := range tc.wantFiles {
+				if len(got[i]) != wantCount {
+					t.Errorf("batch[%d] files = %d, want %d", i, len(got[i]), wantCount)
+				}
+			}
+		})
 	}
 }

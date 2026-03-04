@@ -1,0 +1,1 @@
+{"type":"result","subtype":"error","session_id":"abc-123-def-456","result":"Error: task failed validation","is_error":true,"duration_ms":1200,"duration_api_ms":1100,"total_cost_usd":0.01,"num_turns":1}

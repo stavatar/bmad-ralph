@@ -3,10 +3,14 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"text/template"
 )
+
+// unreplacedPlaceholderRe matches __UPPER_CASE__ placeholder patterns left after assembly.
+var unreplacedPlaceholderRe = regexp.MustCompile(`__[A-Z_]+__`)
 
 // TemplateData holds structured data for Stage 1 (text/template) processing.
 //
@@ -82,6 +86,11 @@ func AssemblePrompt(tmplContent string, data TemplateData, replacements map[stri
 		for _, k := range keys {
 			result = strings.ReplaceAll(result, k, replacements[k])
 		}
+	}
+
+	// Post-assembly validation: detect unreplaced __PLACEHOLDER__ patterns.
+	if matches := unreplacedPlaceholderRe.FindAllString(result, -1); len(matches) > 0 {
+		return "", fmt.Errorf("config: assemble prompt: unreplaced placeholders: %v", matches)
 	}
 
 	return result, nil

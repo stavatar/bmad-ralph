@@ -32,6 +32,7 @@ type Config struct {
 	DistillCooldown int  `yaml:"distill_cooldown"`
 	DistillTimeout  int  `yaml:"distill_timeout"`
 	LogDir              string `yaml:"log_dir"`
+	StoriesDir          string `yaml:"stories_dir"`
 	ProjectRoot         string `yaml:"-"`
 }
 
@@ -110,6 +111,9 @@ func Load(flags CLIFlags) (*Config, error) {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			applyCLIFlags(cfg, flags)
+			if vErr := cfg.Validate(); vErr != nil {
+				return nil, vErr
+			}
 			return cfg, nil
 		}
 		return nil, fmt.Errorf("config: read: %w", err)
@@ -124,6 +128,9 @@ func Load(flags CLIFlags) (*Config, error) {
 	}
 	if len(probe) == 0 {
 		applyCLIFlags(cfg, flags)
+		if vErr := cfg.Validate(); vErr != nil {
+			return nil, vErr
+		}
 		return cfg, nil
 	}
 
@@ -133,7 +140,43 @@ func Load(flags CLIFlags) (*Config, error) {
 
 	applyCLIFlags(cfg, flags)
 
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// Validate checks Config field constraints and returns a descriptive error on first violation.
+func (c *Config) Validate() error {
+	if c.MaxTurns <= 0 {
+		return fmt.Errorf("config: validate: max_turns must be > 0, got %d", c.MaxTurns)
+	}
+	if c.MaxIterations <= 0 {
+		return fmt.Errorf("config: validate: max_iterations must be > 0, got %d", c.MaxIterations)
+	}
+	if c.MaxReviewIterations <= 0 {
+		return fmt.Errorf("config: validate: max_review_iterations must be > 0, got %d", c.MaxReviewIterations)
+	}
+	switch c.ReviewMinSeverity {
+	case "", "HIGH", "MEDIUM", "LOW":
+		// valid
+	default:
+		return fmt.Errorf("config: validate: review_min_severity must be HIGH, MEDIUM, LOW, or empty, got %q", c.ReviewMinSeverity)
+	}
+	if c.GatesCheckpoint < 0 {
+		return fmt.Errorf("config: validate: gates_checkpoint must be >= 0, got %d", c.GatesCheckpoint)
+	}
+	if c.DistillCooldown < 0 {
+		return fmt.Errorf("config: validate: distill_cooldown must be >= 0, got %d", c.DistillCooldown)
+	}
+	if c.DistillTimeout <= 0 {
+		return fmt.Errorf("config: validate: distill_timeout must be > 0, got %d", c.DistillTimeout)
+	}
+	if c.LearningsBudget <= 0 {
+		return fmt.Errorf("config: validate: learnings_budget must be > 0, got %d", c.LearningsBudget)
+	}
+	return nil
 }
 
 // ResolvePath resolves a file through the three-level fallback chain:
@@ -156,6 +199,8 @@ func (c *Config) ResolvePath(name string, embedded []byte) ([]byte, string, erro
 		if data, err := os.ReadFile(globalPath); err == nil {
 			return data, "global", nil
 		}
+	} else {
+		fmt.Fprintf(os.Stderr, "WARNING: config: resolve %q: home dir unavailable: %v\n", name, err)
 	}
 
 	// 3. Embedded fallback

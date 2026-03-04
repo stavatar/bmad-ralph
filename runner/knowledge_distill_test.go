@@ -1,12 +1,15 @@
 package runner
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/bmad-ralph/bmad-ralph/config"
 )
 
 // --- Task 9: ParseDistillOutput tests ---
@@ -1095,5 +1098,140 @@ func TestRestoreDistillationBackups_MissingBak(t *testing.T) {
 	err := RestoreDistillationBackups(dir)
 	if err != nil {
 		t.Fatalf("RestoreDistillationBackups with no .bak files: unexpected error: %v", err)
+	}
+}
+
+// --- WriteDistillOutput additional branch coverage ---
+
+func TestWriteDistillOutput_CriticalMultilineContent(t *testing.T) {
+	// Entry with freq>=10, !IsAnchor, no "ANCHOR" in Content, AND "\n" in Content.
+	// Covers the rest = e.Content[idx:] branch (knowledge_distill.go:364-365).
+	dir := t.TempDir()
+	state := &DistillState{Version: 1}
+
+	output := &DistillOutput{
+		CompressedLearnings: "# Compressed",
+		Categories: map[string][]DistilledEntry{
+			"testing": {
+				{
+					Content:  "## testing: multiline [r, f:1] [freq:12] [stage:review]\nBody content here.",
+					Freq:     12,
+					Stage:    "review",
+					IsAnchor: false,
+				},
+			},
+		},
+	}
+
+	files, err := WriteDistillOutput(dir, output, state, "")
+	if err != nil {
+		t.Fatalf("WriteDistillOutput: unexpected error: %v", err)
+	}
+	if err := CommitPendingFiles(files); err != nil {
+		t.Fatalf("CommitPendingFiles: unexpected error: %v", err)
+	}
+
+	criticalPath := filepath.Join(dir, ".ralph", "rules", "ralph-critical.md")
+	content, readErr := os.ReadFile(criticalPath)
+	if readErr != nil {
+		t.Fatalf("read ralph-critical.md: %v", readErr)
+	}
+	// ANCHOR inserted after first line, before newline
+	if !strings.Contains(string(content), "ANCHOR") {
+		t.Error("ralph-critical.md: ANCHOR marker must be added to multiline entry")
+	}
+	// Body content preserved after ANCHOR insertion
+	if !strings.Contains(string(content), "Body content here.") {
+		t.Error("ralph-critical.md: body content must be preserved after ANCHOR insertion")
+	}
+}
+
+func TestWriteDistillOutput_InvalidGlobWarning(t *testing.T) {
+	// scopeHints with syntactically invalid glob: filepath.Match returns error
+	// → WARNING printed + continue (invalid glob skipped, no frontmatter written).
+	dir := t.TempDir()
+	state := &DistillState{Version: 1}
+
+	// 5 entries to trigger category file (not misc)
+	entries := make([]DistilledEntry, 5)
+	for i := range entries {
+		entries[i] = DistilledEntry{Content: fmt.Sprintf("## testing: entry%d [freq:1]", i), Freq: 1}
+	}
+	output := &DistillOutput{
+		CompressedLearnings: "# Compressed",
+		Categories:          map[string][]DistilledEntry{"testing": entries},
+	}
+
+	// "[" is syntactically invalid: unclosed bracket → filepath.Match returns ErrBadPattern
+	files, err := WriteDistillOutput(dir, output, state, "Relevant globs: [")
+	if err != nil {
+		t.Fatalf("WriteDistillOutput with invalid glob: unexpected error: %v", err)
+	}
+	if err := CommitPendingFiles(files); err != nil {
+		t.Fatalf("CommitPendingFiles: unexpected error: %v", err)
+	}
+
+	// With invalid glob skipped, no frontmatter should be written
+	catPath := filepath.Join(dir, ".ralph", "rules", "ralph-testing.md")
+	content, readErr := os.ReadFile(catPath)
+	if readErr != nil {
+		t.Fatalf("read ralph-testing.md: %v", readErr)
+	}
+	if strings.Contains(string(content), "globs:") {
+		t.Error("invalid glob must be skipped — no frontmatter should be written")
+	}
+}
+
+func TestWriteDistillOutput_MkdirAllError(t *testing.T) {
+	// Block .ralph/rules creation by making .ralph a file → MkdirAll returns error.
+	dir := t.TempDir()
+	// Create .ralph as a regular file (not directory) to block MkdirAll(.ralph/rules)
+	if err := os.WriteFile(filepath.Join(dir, ".ralph"), []byte("blocker"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	output := &DistillOutput{
+		CompressedLearnings: "# Compressed",
+		Categories:          map[string][]DistilledEntry{},
+	}
+	_, err := WriteDistillOutput(dir, output, &DistillState{Version: 1}, "")
+	if err == nil {
+		t.Fatal("WriteDistillOutput: expected error when MkdirAll fails")
+	}
+	if !strings.Contains(err.Error(), "runner: distill: write:") {
+		t.Errorf("WriteDistillOutput error = %q, want containing %q", err.Error(), "runner: distill: write:")
+	}
+	if !strings.Contains(err.Error(), ".ralph") {
+		t.Errorf("WriteDistillOutput inner error = %q, want containing path %q", err.Error(), ".ralph")
+	}
+}
+
+// --- AutoDistill timeout path (knowledge_distill.go:836-838) ---
+
+// TestAutoDistill_TimeoutError verifies AutoDistill returns a "timeout after Ns" error
+// when cfg.DistillTimeout=0 (context.WithTimeout(ctx, 0) is immediately expired).
+// Covers the DeadlineExceeded branch at line 836-838.
+func TestAutoDistill_TimeoutError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// Step 1 of AutoDistill reads LEARNINGS.md — must exist.
+	learningsPath := filepath.Join(dir, "LEARNINGS.md")
+	if err := os.WriteFile(learningsPath, []byte("## testing: topic [source, file.go:1]\nSome content.\n"), 0644); err != nil {
+		t.Fatalf("write LEARNINGS.md: %v", err)
+	}
+
+	cfg := &config.Config{
+		ProjectRoot:    dir,
+		ClaudeCommand:  "/nonexistent/binary",
+		DistillTimeout: 0, // context.WithTimeout(ctx, 0) → already expired
+	}
+
+	err := AutoDistill(context.Background(), cfg, &DistillState{Version: 1})
+	if err == nil {
+		t.Fatal("AutoDistill() expected timeout error, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: distill: execute: timeout after") {
+		t.Errorf("AutoDistill() error = %q, want to contain %q", err.Error(), "runner: distill: execute: timeout after")
 	}
 }

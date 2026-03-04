@@ -440,6 +440,235 @@ func TestScenario_ZeroValue(t *testing.T) {
 	}
 }
 
+func TestRunMockClaude_IsErrorStep(t *testing.T) {
+	// IsError: true → resultSubtype = "error" in JSON output → lines 140-142 covered.
+	scenario := testutil.Scenario{
+		Name: "is-error-step",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "err-step-001", IsError: true},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+	dir := t.TempDir()
+
+	start := time.Now()
+	raw, err := session.Execute(context.Background(), session.Options{
+		Command:    os.Args[0],
+		Dir:        dir,
+		OutputJSON: true,
+	})
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+
+	result, parseErr := session.ParseResult(raw, elapsed)
+	if parseErr != nil {
+		t.Fatalf("ParseResult() unexpected error: %v", parseErr)
+	}
+	if result == nil {
+		t.Fatal("ParseResult() returned nil result")
+	}
+	if result.SessionID != "err-step-001" {
+		t.Errorf("SessionID = %q, want %q", result.SessionID, "err-step-001")
+	}
+}
+
+func TestRunMockClaude_CorruptScenarioJSON(t *testing.T) {
+	// Scenario file is overwritten with invalid JSON after env vars are set.
+	// Subprocess: json.Unmarshal fails → os.Exit(1) → lines 83-86 covered.
+	scenario := testutil.Scenario{
+		Name: "placeholder",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "corrupt-001"},
+		},
+	}
+	scenarioPath, _ := testutil.SetupMockClaude(t, scenario)
+	// Overwrite with corrupt JSON so subprocess parse fails
+	if err := os.WriteFile(scenarioPath, []byte("{not valid json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	raw, execErr := session.Execute(context.Background(), session.Options{
+		Command: os.Args[0],
+		Dir:     dir,
+	})
+	if raw == nil {
+		t.Fatal("Execute() returned nil raw result")
+	}
+	if raw.ExitCode != 1 {
+		t.Errorf("ExitCode = %d, want 1 (subprocess exits non-zero on corrupt JSON)", raw.ExitCode)
+	}
+	// execErr is non-nil (ExitError for exit code 1) — expected, not a test failure
+	_ = execErr
+}
+
+func TestRunMockClaude_MissingOutputFile(t *testing.T) {
+	// Step.OutputFile references a non-existent file in the scenario dir →
+	// os.ReadFile fails → os.Exit(1) → lines 130-133 covered.
+	scenario := testutil.Scenario{
+		Name: "missing-output-file",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "missing-001", OutputFile: "nonexistent.txt"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+	dir := t.TempDir()
+
+	raw, execErr := session.Execute(context.Background(), session.Options{
+		Command: os.Args[0],
+		Dir:     dir,
+	})
+	if raw == nil {
+		t.Fatal("Execute() returned nil raw result")
+	}
+	if raw.ExitCode != 1 {
+		t.Errorf("ExitCode = %d, want 1 (subprocess exits non-zero on missing output file)", raw.ExitCode)
+	}
+	// execErr is non-nil (ExitError for exit code 1) — expected, not a test failure
+	_ = execErr
+}
+
+// --- Coverage: RunMockClaude error paths (mock_claude.go lines 92-95, 119-122, 175-178, 181-184) ---
+
+// TestRunMockClaude_CounterReadError verifies that RunMockClaude writes to stderr and
+// exits 1 when the counter file exists but is unreadable (non-ErrNotExist).
+// Covers lines 92-95: err != nil && !errors.Is(err, os.ErrNotExist) branch.
+func TestRunMockClaude_CounterReadError(t *testing.T) {
+	scenario := testutil.Scenario{
+		Name:  "counter-read-error",
+		Steps: []testutil.ScenarioStep{{Type: "execute", ExitCode: 0, SessionID: "x"}},
+	}
+	_, stateDir := testutil.SetupMockClaude(t, scenario)
+	dir := t.TempDir()
+
+	// Make counter a non-empty directory → os.ReadFile returns EISDIR (not ErrNotExist)
+	counterDir := filepath.Join(stateDir, "counter")
+	if err := os.MkdirAll(filepath.Join(counterDir, "subdir"), 0755); err != nil {
+		t.Fatalf("mkdir counter dir: %v", err)
+	}
+
+	raw, execErr := session.Execute(context.Background(), session.Options{
+		Command: os.Args[0],
+		Dir:     dir,
+	})
+	if execErr == nil {
+		t.Fatal("Execute() expected error when counter is a directory, got nil")
+	}
+	combined := string(raw.Stderr) + execErr.Error()
+	if !strings.Contains(combined, "read counter") {
+		t.Errorf("expected 'read counter' in stderr+error, got: %q", combined)
+	}
+}
+
+// TestRunMockClaude_InvocationWriteError verifies that RunMockClaude writes to stderr
+// and exits 1 when the invocation log file cannot be written (non-ErrNotExist).
+// Covers lines 119-122: os.WriteFile(invocationPath) error branch.
+func TestRunMockClaude_InvocationWriteError(t *testing.T) {
+	scenario := testutil.Scenario{
+		Name:  "invocation-write-error",
+		Steps: []testutil.ScenarioStep{{Type: "execute", ExitCode: 0, SessionID: "x"}},
+	}
+	_, stateDir := testutil.SetupMockClaude(t, scenario)
+	dir := t.TempDir()
+
+	// Make invocation_0.json a non-empty directory → WriteFile returns EISDIR
+	invDir := filepath.Join(stateDir, "invocation_0.json")
+	if err := os.MkdirAll(filepath.Join(invDir, "subdir"), 0755); err != nil {
+		t.Fatalf("mkdir invocation dir: %v", err)
+	}
+
+	raw, execErr := session.Execute(context.Background(), session.Options{
+		Command: os.Args[0],
+		Dir:     dir,
+	})
+	if execErr == nil {
+		t.Fatal("Execute() expected error when invocation path is a directory, got nil")
+	}
+	combined := string(raw.Stderr) + execErr.Error()
+	if !strings.Contains(combined, "write invocation log") {
+		t.Errorf("expected 'write invocation log' in stderr+error, got: %q", combined)
+	}
+}
+
+// TestRunMockClaude_WriteFileSideEffectError verifies that RunMockClaude writes to
+// stderr and exits 1 when a WriteFiles side-effect target is a non-empty directory.
+// Covers lines 175-178: os.WriteFile(filepath.Join(projectRoot, relPath)) error branch.
+func TestRunMockClaude_WriteFileSideEffectError(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	// Make the target path a non-empty directory → WriteFile returns EISDIR
+	targetDir := filepath.Join(projectRoot, "output.txt")
+	if err := os.MkdirAll(filepath.Join(targetDir, "subdir"), 0755); err != nil {
+		t.Fatalf("mkdir target dir: %v", err)
+	}
+
+	scenario := testutil.Scenario{
+		Name: "write-side-effect-error",
+		Steps: []testutil.ScenarioStep{{
+			Type:       "execute",
+			ExitCode:   0,
+			SessionID:  "x",
+			WriteFiles: map[string]string{"output.txt": "content"},
+		}},
+	}
+	testutil.SetupMockClaude(t, scenario)
+	t.Setenv("MOCK_CLAUDE_PROJECT_ROOT", projectRoot)
+	dir := t.TempDir()
+
+	raw, execErr := session.Execute(context.Background(), session.Options{
+		Command: os.Args[0],
+		Dir:     dir,
+	})
+	if execErr == nil {
+		t.Fatal("Execute() expected error when WriteFiles target is a directory, got nil")
+	}
+	combined := string(raw.Stderr) + execErr.Error()
+	if !strings.Contains(combined, "write file") {
+		t.Errorf("expected 'write file' in stderr+error, got: %q", combined)
+	}
+}
+
+// TestRunMockClaude_DeleteFileSideEffectError verifies that RunMockClaude writes to
+// stderr and exits 1 when a DeleteFiles target is a non-empty directory (ENOTEMPTY,
+// not ErrNotExist). Covers lines 181-184: os.Remove error != ErrNotExist branch.
+func TestRunMockClaude_DeleteFileSideEffectError(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	// Make the target a non-empty directory → os.Remove returns ENOTEMPTY (not ErrNotExist)
+	targetDir := filepath.Join(projectRoot, "to-delete")
+	if err := os.MkdirAll(filepath.Join(targetDir, "subdir"), 0755); err != nil {
+		t.Fatalf("mkdir target dir: %v", err)
+	}
+
+	scenario := testutil.Scenario{
+		Name: "delete-side-effect-error",
+		Steps: []testutil.ScenarioStep{{
+			Type:        "execute",
+			ExitCode:    0,
+			SessionID:   "x",
+			DeleteFiles: []string{"to-delete"},
+		}},
+	}
+	testutil.SetupMockClaude(t, scenario)
+	t.Setenv("MOCK_CLAUDE_PROJECT_ROOT", projectRoot)
+	dir := t.TempDir()
+
+	raw, execErr := session.Execute(context.Background(), session.Options{
+		Command: os.Args[0],
+		Dir:     dir,
+	})
+	if execErr == nil {
+		t.Fatal("Execute() expected error when DeleteFiles target is non-empty directory, got nil")
+	}
+	combined := string(raw.Stderr) + execErr.Error()
+	if !strings.Contains(combined, "delete file") {
+		t.Errorf("expected 'delete file' in stderr+error, got: %q", combined)
+	}
+}
+
 func TestScenarioStep_ZeroValue_MockResponse(t *testing.T) {
 	// Zero-value ScenarioStep should produce valid JSON response with ExitCode=0,
 	// empty SessionID, default output

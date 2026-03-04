@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 )
 
 // CLI flag constants for Claude CLI invocation.
@@ -24,6 +25,11 @@ const (
 	flagSkipPermissions    = "--dangerously-skip-permissions"
 	flagAppendSystemPrompt = "--append-system-prompt"
 	outputFormatJSON       = "json"
+
+	// maxPromptArgLen is the threshold above which the prompt is delivered
+	// via stdin instead of -p flag. Windows CreateProcess has a 32767-char
+	// command line limit; we use a conservative threshold.
+	maxPromptArgLen = 30000
 )
 
 // Options configures a Claude CLI session invocation.
@@ -32,7 +38,7 @@ const (
 type Options struct {
 	Command                    string  // Claude CLI path (config.ClaudeCommand)
 	Dir                        string  // Working directory (config.ProjectRoot)
-	Prompt                     string  // -p flag content
+	Prompt                     string  // -p flag content (stdin for prompts > maxPromptArgLen)
 	MaxTurns                   int     // --max-turns value (0 = omit)
 	Model                      string  // --model value (empty = omit)
 	OutputJSON                 bool    // --output-format json
@@ -52,12 +58,18 @@ type RawResult struct {
 }
 
 // Execute invokes the Claude CLI with the given options and captures output.
+// For prompts exceeding maxPromptArgLen, the prompt is delivered via stdin
+// instead of -p flag to avoid the Windows 32K command line length limit.
 func Execute(ctx context.Context, opts Options) (*RawResult, error) {
 	args := buildArgs(opts)
 
 	cmd := exec.CommandContext(ctx, opts.Command, args...)
 	cmd.Dir = opts.Dir
 	cmd.Env = os.Environ()
+
+	if opts.Prompt != "" && len(opts.Prompt) > maxPromptArgLen {
+		cmd.Stdin = strings.NewReader(opts.Prompt)
+	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
@@ -84,6 +96,8 @@ func Execute(ctx context.Context, opts Options) (*RawResult, error) {
 }
 
 // buildArgs constructs the CLI argument slice from Options.
+// Prompt is included as -p flag only when within maxPromptArgLen; longer
+// prompts are delivered via stdin by Execute.
 // Resume and Prompt are independent (not mutually exclusive) — Claude CLI
 // supports both --resume and -p simultaneously for resume-with-prompt workflows.
 func buildArgs(opts Options) []string {
@@ -93,7 +107,13 @@ func buildArgs(opts Options) []string {
 		args = append(args, flagResume, opts.Resume)
 	}
 	if opts.Prompt != "" {
-		args = append(args, flagPrompt, opts.Prompt)
+		if len(opts.Prompt) <= maxPromptArgLen {
+			// Short prompt: pass as positional arg after -p flag.
+			args = append(args, flagPrompt, opts.Prompt)
+		} else {
+			// Long prompt: -p flag only (prompt delivered via stdin by Execute).
+			args = append(args, flagPrompt)
+		}
 	}
 
 	if opts.MaxTurns > 0 {

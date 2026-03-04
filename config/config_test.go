@@ -247,6 +247,25 @@ func TestConfig_Load_MalformedYAML(t *testing.T) {
 	}
 }
 
+// TestConfig_Load_TypeMismatch covers the yaml.Unmarshal-into-cfg error path
+// at config.go:130-132. The probe (map) succeeds on valid YAML, but struct
+// unmarshal fails when a sequence is provided for an int field.
+func TestConfig_Load_TypeMismatch(t *testing.T) {
+	dir := t.TempDir()
+	// Valid YAML — probe map succeeds; struct unmarshal fails ([]string into int).
+	writeConfigYAML(t, dir, "max_turns: [a, b]\n")
+	t.Chdir(dir)
+
+	_, err := Load(CLIFlags{})
+	if err == nil {
+		t.Fatal("expected error for type mismatch, got nil")
+	}
+	// String check justified: yaml.v3 doesn't export type error types.
+	if !strings.Contains(err.Error(), "config: parse yaml:") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "config: parse yaml:")
+	}
+}
+
 func TestConfig_Load_UnknownFields(t *testing.T) {
 	dir := t.TempDir()
 	yaml := "max_turns: 77\nunknown_field: hello\nanother_unknown: 42\n"
@@ -322,8 +341,25 @@ func TestConfig_Load_DefaultsComplete(t *testing.T) {
 	if cfg.LogDir != ".ralph/logs" {
 		t.Errorf("LogDir = %q, want %q", cfg.LogDir, ".ralph/logs")
 	}
+	if cfg.StoriesDir != "docs/sprint-artifacts" {
+		t.Errorf("StoriesDir = %q, want %q", cfg.StoriesDir, "docs/sprint-artifacts")
+	}
 	if cfg.ProjectRoot == "" {
 		t.Error("ProjectRoot should not be empty")
+	}
+}
+
+func TestConfig_Load_StoriesDirFromFile(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigYAML(t, dir, "stories_dir: custom/stories\n")
+	t.Chdir(dir)
+
+	cfg, err := Load(CLIFlags{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.StoriesDir != "custom/stories" {
+		t.Errorf("StoriesDir = %q, want %q", cfg.StoriesDir, "custom/stories")
 	}
 }
 
@@ -944,5 +980,119 @@ func TestConfig_ResolvePath(t *testing.T) {
 				t.Errorf("source = %q, want %q", source, tt.wantSource)
 			}
 		})
+	}
+}
+
+func TestConfig_Validate_HappyPath(t *testing.T) {
+	cfg := Config{
+		MaxTurns:            50,
+		MaxIterations:       3,
+		MaxReviewIterations: 3,
+		ReviewMinSeverity:   "LOW",
+		GatesCheckpoint:     0,
+		DistillCooldown:     5,
+		DistillTimeout:      120,
+		LearningsBudget:     200,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: unexpected error: %v", err)
+	}
+}
+
+func TestConfig_Validate_Errors(t *testing.T) {
+	valid := Config{
+		MaxTurns:            50,
+		MaxIterations:       3,
+		MaxReviewIterations: 3,
+		ReviewMinSeverity:   "",
+		GatesCheckpoint:     0,
+		DistillCooldown:     5,
+		DistillTimeout:      120,
+		LearningsBudget:     200,
+	}
+
+	tests := []struct {
+		name        string
+		mutate      func(*Config)
+		errContains string
+	}{
+		{
+			name:        "MaxTurns zero",
+			mutate:      func(c *Config) { c.MaxTurns = 0 },
+			errContains: "max_turns must be > 0",
+		},
+		{
+			name:        "MaxTurns negative",
+			mutate:      func(c *Config) { c.MaxTurns = -1 },
+			errContains: "max_turns must be > 0",
+		},
+		{
+			name:        "MaxIterations zero",
+			mutate:      func(c *Config) { c.MaxIterations = 0 },
+			errContains: "max_iterations must be > 0",
+		},
+		{
+			name:        "MaxReviewIterations zero",
+			mutate:      func(c *Config) { c.MaxReviewIterations = 0 },
+			errContains: "max_review_iterations must be > 0",
+		},
+		{
+			name:        "ReviewMinSeverity invalid",
+			mutate:      func(c *Config) { c.ReviewMinSeverity = "CRITICAL" },
+			errContains: "review_min_severity must be HIGH, MEDIUM, LOW, or empty",
+		},
+		{
+			name:        "GatesCheckpoint negative",
+			mutate:      func(c *Config) { c.GatesCheckpoint = -1 },
+			errContains: "gates_checkpoint must be >= 0",
+		},
+		{
+			name:        "DistillCooldown negative",
+			mutate:      func(c *Config) { c.DistillCooldown = -1 },
+			errContains: "distill_cooldown must be >= 0",
+		},
+		{
+			name:        "DistillTimeout zero",
+			mutate:      func(c *Config) { c.DistillTimeout = 0 },
+			errContains: "distill_timeout must be > 0",
+		},
+		{
+			name:        "LearningsBudget zero",
+			mutate:      func(c *Config) { c.LearningsBudget = 0 },
+			errContains: "learnings_budget must be > 0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := valid // copy
+			tt.mutate(&cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate: expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "config: validate:") {
+				t.Errorf("error = %q, want containing %q", err.Error(), "config: validate:")
+			}
+			if !strings.Contains(err.Error(), tt.errContains) {
+				t.Errorf("error = %q, want containing %q", err.Error(), tt.errContains)
+			}
+		})
+	}
+}
+
+func TestConfig_Validate_EmptySeverity(t *testing.T) {
+	cfg := Config{
+		MaxTurns:            1,
+		MaxIterations:       1,
+		MaxReviewIterations: 1,
+		ReviewMinSeverity:   "",
+		GatesCheckpoint:     0,
+		DistillCooldown:     0,
+		DistillTimeout:      60,
+		LearningsBudget:     100,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: empty severity should be valid, got: %v", err)
 	}
 }

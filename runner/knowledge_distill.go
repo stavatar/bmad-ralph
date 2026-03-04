@@ -164,7 +164,10 @@ func BackupDistillationFiles(projectRoot string) error {
 	}
 
 	rulesDir := filepath.Join(projectRoot, ".ralph", "rules")
-	matches, _ := filepath.Glob(filepath.Join(rulesDir, "ralph-*.md"))
+	matches, globErr := filepath.Glob(filepath.Join(rulesDir, "ralph-*.md"))
+	if globErr != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: distill: backup: glob rules: %v\n", globErr)
+	}
 	for _, m := range matches {
 		if err := BackupFile(m); err != nil {
 			return fmt.Errorf("runner: distill: backup: %w", err)
@@ -194,7 +197,10 @@ func RestoreDistillationBackups(projectRoot string) error {
 
 	rulesDir := filepath.Join(projectRoot, ".ralph", "rules")
 	// Restore from .bak files (original names)
-	bakMatches, _ := filepath.Glob(filepath.Join(rulesDir, "ralph-*.md.bak"))
+	bakMatches, bakGlobErr := filepath.Glob(filepath.Join(rulesDir, "ralph-*.md.bak"))
+	if bakGlobErr != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: distill: restore: glob rules: %v\n", bakGlobErr)
+	}
 	for _, bak := range bakMatches {
 		target := strings.TrimSuffix(bak, ".bak")
 		if err := os.Rename(bak, target); err != nil {
@@ -304,14 +310,14 @@ func parseDistilledEntry(line string) DistilledEntry {
 // ValidateFreqMonotonicity checks that new freq values are >= old values for same entries.
 // Corrects Claude's arithmetic errors silently (M11).
 func ValidateFreqMonotonicity(output *DistillOutput, oldFreqs map[string]int) {
-	for cat, entries := range output.Categories {
-		for i := range entries {
-			key := cat + ":" + entryTopicKey(entries[i].Content)
-			if oldFreq, ok := oldFreqs[key]; ok && entries[i].Freq < oldFreq {
-				entries[i].Freq = oldFreq
+	for cat := range output.Categories {
+		for i := range output.Categories[cat] {
+			key := cat + ":" + entryTopicKey(output.Categories[cat][i].Content)
+			if oldFreq, ok := oldFreqs[key]; ok && output.Categories[cat][i].Freq < oldFreq {
+				output.Categories[cat][i].Freq = oldFreq
 				// Update content line with corrected freq
-				entries[i].Content = freqRegex.ReplaceAllString(entries[i].Content,
-					fmt.Sprintf("[freq:%d]", oldFreq))
+				output.Categories[cat][i].Content = freqRegex.ReplaceAllString(
+					output.Categories[cat][i].Content, fmt.Sprintf("[freq:%d]", oldFreq))
 			}
 		}
 	}
@@ -790,16 +796,16 @@ func ComputeDistillMetrics(oldContent string, output *DistillOutput) *DistillMet
 // Replaces the stub from Story 6.5a.
 // Pipeline: backup → read → scope → prompt → session → parse → validate → write → metrics → index.
 func AutoDistill(ctx context.Context, cfg *config.Config, state *DistillState) error {
-	// Step 1: Backup all distillation files
-	if err := BackupDistillationFiles(cfg.ProjectRoot); err != nil {
-		return err // already wrapped with "runner: distill: backup:" prefix
-	}
-
-	// Step 2: Read LEARNINGS.md content
+	// Step 1: Read LEARNINGS.md content (before backup moves the file)
 	learningsPath := filepath.Join(cfg.ProjectRoot, "LEARNINGS.md")
 	learningsContent, err := os.ReadFile(learningsPath)
 	if err != nil {
 		return fmt.Errorf("runner: distill: read learnings: %w", err)
+	}
+
+	// Step 2: Backup all distillation files (after reading, for rollback safety)
+	if err := BackupDistillationFiles(cfg.ProjectRoot); err != nil {
+		return err // already wrapped with "runner: distill: backup:" prefix
 	}
 
 	// Step 3: Read existing ralph-*.md content
@@ -811,11 +817,19 @@ func AutoDistill(ctx context.Context, cfg *config.Config, state *DistillState) e
 		scopeHints = "No language-specific patterns detected"
 	}
 
-	// Step 5: Assemble distillation prompt
-	prompt := distillTemplate
-	prompt = strings.ReplaceAll(prompt, "__LEARNINGS_CONTENT__", string(learningsContent))
-	prompt = strings.ReplaceAll(prompt, "__SCOPE_HINTS__", scopeHints)
-	prompt = strings.ReplaceAll(prompt, "__EXISTING_RULES__", existingRules)
+	// Step 5: Assemble distillation prompt (via AssemblePrompt for placeholder validation)
+	prompt, promptErr := config.AssemblePrompt(
+		distillTemplate,
+		config.TemplateData{},
+		map[string]string{
+			"__LEARNINGS_CONTENT__": string(learningsContent),
+			"__SCOPE_HINTS__":      scopeHints,
+			"__EXISTING_RULES__":   existingRules,
+		},
+	)
+	if promptErr != nil {
+		return fmt.Errorf("runner: distill: assemble prompt: %w", promptErr)
+	}
 
 	// Step 6: Execute with timeout (H8)
 	timeout := time.Duration(cfg.DistillTimeout) * time.Second
@@ -834,7 +848,7 @@ func AutoDistill(ctx context.Context, cfg *config.Config, state *DistillState) e
 	raw, execErr := session.Execute(timeoutCtx, opts)
 	if execErr != nil {
 		if errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) {
-			return fmt.Errorf("runner: distill: timeout after %ds: %w", cfg.DistillTimeout, execErr)
+			return fmt.Errorf("runner: distill: execute: timeout after %ds: %w", cfg.DistillTimeout, execErr)
 		}
 		return fmt.Errorf("runner: distill: execute: %w", execErr)
 	}

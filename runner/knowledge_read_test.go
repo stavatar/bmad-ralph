@@ -446,3 +446,28 @@ func TestValidateLearnings_NoCitation(t *testing.T) {
 		t.Errorf("stale should be empty (no stale entries), got %q", stale)
 	}
 }
+
+// --- Coverage: extractCitationFile no-comma path (knowledge_read.go:101-103) ---
+
+// TestValidateLearnings_CitationWithoutComma verifies extractCitationFile returns ""
+// when the citation text inside [...] has no comma (len(parts) < 2).
+// Header "## testing: topic [no-comma]" → citation="no-comma" → no file extracted
+// → section treated as valid (no file to stat). Covers lines 101-103.
+func TestValidateLearnings_CitationWithoutComma(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	// Header has [no-comma] — brackets present but no comma inside.
+	// extractCitationFile: citation="no-comma", parts=["no-comma"], len<2 → return ""
+	// ValidateLearnings treats no-file as valid.
+	content := "## testing: topic [no-comma]\nContent for the entry goes here."
+
+	valid, stale := ValidateLearnings(tmpDir, content)
+
+	if !strings.Contains(valid, "Content for the entry goes here.") {
+		t.Errorf("valid should contain entry, got %q", valid)
+	}
+	if stale != "" {
+		t.Errorf("stale = %q, want empty (no-comma citation treated as no-file)", stale)
+	}
+}

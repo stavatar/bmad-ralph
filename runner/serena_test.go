@@ -49,6 +49,11 @@ func TestSerenaMCPDetector_Available_SettingsJson(t *testing.T) {
 			json: `{"otherKey": true}`,
 			want: false,
 		},
+		{
+			name: "mcpServers is array not object",
+			json: `{"mcpServers": ["serena", "other"]}`,
+			want: false,
+		},
 	}
 
 	for _, tc := range cases {

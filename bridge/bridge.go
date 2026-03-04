@@ -101,6 +101,18 @@ func Run(ctx context.Context, cfg *config.Config, storyFiles []string) (int, int
 	elapsed := time.Since(start)
 
 	if execErr != nil {
+		var debugParts []string
+		if raw != nil {
+			if len(raw.Stderr) > 0 {
+				debugParts = append(debugParts, fmt.Sprintf("stderr: %s", raw.Stderr))
+			}
+			if len(raw.Stdout) > 0 {
+				debugParts = append(debugParts, fmt.Sprintf("stdout: %.500s", raw.Stdout))
+			}
+		}
+		if len(debugParts) > 0 {
+			return 0, promptLines, fmt.Errorf("bridge: execute: %w\n%s", execErr, strings.Join(debugParts, "\n"))
+		}
 		return 0, promptLines, fmt.Errorf("bridge: execute: %w", execErr)
 	}
 

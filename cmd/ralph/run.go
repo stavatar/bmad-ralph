@@ -2,11 +2,7 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"time"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"github.com/bmad-ralph/bmad-ralph/config"
@@ -36,10 +32,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load(flags)
 	if err != nil {
 		return fmt.Errorf("ralph: load config: %w", err)
-	}
-
-	if err := ensureLogDir(cfg); err != nil {
-		color.Yellow("Warning: could not create log directory: %v", err)
 	}
 
 	return runner.Run(cmd.Context(), cfg)
@@ -72,26 +64,4 @@ func buildCLIFlags(cmd *cobra.Command) config.CLIFlags {
 	}
 
 	return flags
-}
-
-// ensureLogDir creates the log directory and initial log file for run logs.
-func ensureLogDir(cfg *config.Config) error {
-	logDir := filepath.Join(cfg.ProjectRoot, cfg.LogDir)
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return fmt.Errorf("ralph: create log dir: %w", err)
-	}
-
-	ts := time.Now().Format("2006-01-02-150405")
-	logPath := filepath.Join(logDir, fmt.Sprintf("run-%s.log", ts))
-
-	f, err := os.Create(logPath)
-	if err != nil {
-		return fmt.Errorf("ralph: create log file: %w", err)
-	}
-	defer f.Close()
-
-	if _, err = fmt.Fprintf(f, "%s INFO ralph run started\n", time.Now().Format("2006-01-02T15:04:05")); err != nil {
-		return fmt.Errorf("ralph: write log entry: %w", err)
-	}
-	return nil
 }

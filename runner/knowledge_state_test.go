@@ -407,3 +407,44 @@ func TestRecoverDistillation_CleansUp(t *testing.T) {
 		t.Error("file1.pending should be deleted after cleanup")
 	}
 }
+
+// TestRecoverDistillation_DeleteIntentFails verifies the error path at
+// knowledge_state.go:120-122 when DeleteIntentFile fails after recovery.
+// Requires read-only .ralph/ directory to trigger os.Remove failure —
+// skipped on platforms where chmod 0555 does not restrict deletes.
+func TestRecoverDistillation_DeleteIntentFails(t *testing.T) {
+	dir := t.TempDir()
+
+	intent := &runner.DistillIntent{
+		Timestamp: "2026-03-01T10:00:00Z",
+		Files:     []string{},
+		Phase:     "backup",
+	}
+	if err := runner.WriteIntentFile(dir, intent); err != nil {
+		t.Fatalf("WriteIntentFile: %v", err)
+	}
+
+	ralphDir := filepath.Join(dir, ".ralph")
+
+	// Make .ralph/ read-only so os.Remove of intent file fails
+	if err := os.Chmod(ralphDir, 0555); err != nil {
+		t.Skipf("chmod 0555 failed: %v", err)
+	}
+	defer func() { _ = os.Chmod(ralphDir, 0755) }() // restore for cleanup
+
+	// Safety check: verify chmod actually restricts deletes on this platform
+	testFile := filepath.Join(ralphDir, "chmod-check")
+	if err := os.WriteFile(testFile, []byte("x"), 0644); err == nil {
+		// Could still write — chmod didn't work, skip
+		_ = os.Remove(testFile)
+		t.Skip("chmod 0555 did not restrict writes on this platform")
+	}
+
+	err := runner.RecoverDistillation(dir)
+	if err == nil {
+		t.Fatal("RecoverDistillation: want error when DeleteIntentFile fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: distill: recovery:") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "runner: distill: recovery:")
+	}
+}

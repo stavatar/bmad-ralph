@@ -560,6 +560,227 @@ This is a new entry in a newly created file with enough content for validation.
 	}
 }
 
+// --- Coverage: ValidateNewLessons uncovered paths ---
+
+// TestFileKnowledgeWriter_ValidateNewLessons_NoNewEntries verifies early return nil
+// at line 117-119 when snapshot equals current LEARNINGS.md content.
+// diffEntries returns empty → len(newEntries)==0 → return nil immediately.
+func TestFileKnowledgeWriter_ValidateNewLessons_NoNewEntries(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	learningsPath := filepath.Join(tmpDir, "LEARNINGS.md")
+
+	content := "## testing: topic [review, runner/runner.go:1]\nContent long enough for validation.\n"
+	if err := os.WriteFile(learningsPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	kw := runner.NewFileKnowledgeWriter(tmpDir)
+	// Snapshot = current content → diffEntries returns empty → early return nil
+	err := kw.ValidateNewLessons(context.Background(), runner.LessonsData{
+		Source:   "test",
+		Snapshot: content,
+	})
+	if err != nil {
+		t.Fatalf("ValidateNewLessons (no new entries): unexpected error: %v", err)
+	}
+
+	// File should be unchanged (no tagging since no new entries processed)
+	result, readErr := os.ReadFile(learningsPath)
+	if readErr != nil {
+		t.Fatalf("read: %v", readErr)
+	}
+	if string(result) != content {
+		t.Errorf("content changed unexpectedly:\ngot: %q\nwant: %q", string(result), content)
+	}
+}
+
+// TestFileKnowledgeWriter_ValidateNewLessons_BudgetGate verifies G4 (budget check) tags
+// entries when budgetLimit > 0 && totalLines >= budgetLimit. Covers line 243-245.
+func TestFileKnowledgeWriter_ValidateNewLessons_BudgetGate(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	learningsPath := filepath.Join(tmpDir, "LEARNINGS.md")
+
+	// Entry is valid format but totalLines (3) >= budgetLimit (2) → G4 triggers
+	content := "## testing: budget-gate [review, runner/runner.go:1]\nContent long enough.\n"
+	if err := os.WriteFile(learningsPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	kw := runner.NewFileKnowledgeWriter(tmpDir)
+	err := kw.ValidateNewLessons(context.Background(), runner.LessonsData{
+		Source:      "test",
+		BudgetLimit: 1, // totalLines (3) >= budgetLimit (1) → G4 triggered
+	})
+	if err != nil {
+		t.Fatalf("ValidateNewLessons (budget gate): unexpected error: %v", err)
+	}
+
+	result, readErr := os.ReadFile(learningsPath)
+	if readErr != nil {
+		t.Fatalf("read result: %v", readErr)
+	}
+	if !strings.Contains(string(result), "[needs-formatting]") {
+		t.Errorf("[needs-formatting] tag expected (G4:budget), got:\n%s", result)
+	}
+}
+
+// TestFileKnowledgeWriter_ValidateNewLessons_MergeDedupNoPrefixEntry verifies that
+// mergeDedup skips entries with empty categoryTopicPrefix (line 321-322 continue branch).
+// Header "##  [source, test.go:1]" (double space) produces empty prefix.
+func TestFileKnowledgeWriter_ValidateNewLessons_MergeDedupNoPrefixEntry(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	learningsPath := filepath.Join(tmpDir, "LEARNINGS.md")
+
+	// Second entry has double space after "##" → categoryTopicPrefix returns ""
+	// → mergeDedup hits `if newPrefix == "" { continue }` branch
+	content := "## testing: topic [review, runner/runner.go:1]\nContent long enough for validation.\n\n" +
+		"##  [source, test.go:1]\nAnother entry with double-space header and sufficient content length.\n"
+	if err := os.WriteFile(learningsPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	kw := runner.NewFileKnowledgeWriter(tmpDir)
+	err := kw.ValidateNewLessons(context.Background(), runner.LessonsData{Source: "test"})
+	if err != nil {
+		t.Fatalf("ValidateNewLessons (no-prefix entry): unexpected error: %v", err)
+	}
+}
+
+// TestFileKnowledgeWriter_ValidateNewLessons_MergedFullRevalidation verifies that
+// after mergeDedup finds a match (merged=true) the re-parse at lines 127-129 uses
+// allEntries (not diffEntries) when fullRevalidation=true.
+// Scenario: snapshot has more lines than current → fullRevalidation=true; both have
+// the same category:topic prefix → mergeDedup merges → line 127-129 executed.
+// Bonus: existing.endLine from snapshot > len(current lines) → line 343-345 clamped.
+func TestFileKnowledgeWriter_ValidateNewLessons_MergedFullRevalidation(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	learningsPath := filepath.Join(tmpDir, "LEARNINGS.md")
+
+	// Snapshot: 22 newlines (header + 20 content lines + trailing empty)
+	// strings.Count(snapshot, "\n") = 21
+	snapshot := "## testing: quality [review, old.go:1]\n" + strings.Repeat("content line\n", 20)
+
+	// Current: only 2 newlines — fewer than snapshot → fullRevalidation=true
+	current := "## testing: quality [review, new.go:2]\nNew content here sufficiently long for validation.\n"
+
+	if err := os.WriteFile(learningsPath, []byte(current), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	kw := runner.NewFileKnowledgeWriter(tmpDir)
+	err := kw.ValidateNewLessons(context.Background(), runner.LessonsData{
+		Source:      "test",
+		Snapshot:    snapshot,
+		BudgetLimit: 200,
+	})
+	if err != nil {
+		t.Fatalf("ValidateNewLessons (merged+fullRevalidation): unexpected error: %v", err)
+	}
+
+	result, readErr := os.ReadFile(learningsPath)
+	if readErr != nil {
+		t.Fatalf("read result: %v", readErr)
+	}
+	// Entry header prefix must still be present after merge
+	if !strings.Contains(string(result), "testing: quality") {
+		t.Errorf("entry prefix should survive merge, got:\n%s", result)
+	}
+}
+
+// TestFileKnowledgeWriter_ValidateNewLessons_MergeShiftedIndices verifies that
+// mergeDedup correctly handles entries when new entries shift line positions.
+// Scenario: snapshot has entry A at lines 0-2. Current has new entry B at lines 0-2
+// and entry A at lines 3-5 (shifted down). Merge must use fresh positions from
+// current content, not stale snapshot positions.
+func TestFileKnowledgeWriter_ValidateNewLessons_MergeShiftedIndices(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	learningsPath := filepath.Join(tmpDir, "LEARNINGS.md")
+
+	// Snapshot: entry A at top
+	snapshot := "## testing: topic-a [review, file.go:1]\nExisting content for topic A is long enough.\n"
+
+	// Current: new entry B added BEFORE existing entry A + duplicate A with new citation
+	current := "## errors: new-topic [review, other.go:5]\nBrand new content for error topic is long enough.\n\n" +
+		"## testing: topic-a [review, file.go:1]\nExisting content for topic A is long enough.\n\n" +
+		"## testing: topic-a [execute, file.go:99]\nAdditional content for topic A merged here is long enough.\n"
+
+	if err := os.WriteFile(learningsPath, []byte(current), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	kw := runner.NewFileKnowledgeWriter(tmpDir)
+	err := kw.ValidateNewLessons(context.Background(), runner.LessonsData{
+		Source:      "test",
+		Snapshot:    snapshot,
+		BudgetLimit: 200,
+	})
+	if err != nil {
+		t.Fatalf("ValidateNewLessons (shifted indices): unexpected error: %v", err)
+	}
+
+	result, readErr := os.ReadFile(learningsPath)
+	if readErr != nil {
+		t.Fatalf("read result: %v", readErr)
+	}
+	resultStr := string(result)
+
+	// After merge: topic-a entries should be merged (content combined under one header)
+	topicACount := strings.Count(resultStr, "testing: topic-a")
+	if topicACount != 1 {
+		t.Errorf("topic-a header count = %d, want 1 (merged), got:\n%s", topicACount, resultStr)
+	}
+
+	// New entry B should still be present
+	if !strings.Contains(resultStr, "errors: new-topic") {
+		t.Errorf("new entry B should survive merge, got:\n%s", resultStr)
+	}
+
+	// Merged entry should contain combined content
+	if !strings.Contains(resultStr, "Additional content for topic A") {
+		t.Errorf("merged content should include new entry's content, got:\n%s", resultStr)
+	}
+}
+
+// TestFileKnowledgeWriter_ValidateNewLessons_WriteError verifies the error path at
+// line 155-157 when os.WriteFile fails after tagging (modified=true).
+// Requires read-only file to trigger write failure — skipped on platforms where
+// chmod 0444 does not restrict writes.
+func TestFileKnowledgeWriter_ValidateNewLessons_WriteError(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	learningsPath := filepath.Join(tmpDir, "LEARNINGS.md")
+
+	// Bad header format triggers G1 → tagging → modified=true → WriteFile attempted
+	content := "## bad-header no citation\nContent long enough for validation purposes here.\n"
+	if err := os.WriteFile(learningsPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if err := os.Chmod(learningsPath, 0444); err != nil {
+		t.Skipf("chmod 0444 failed: %v", err)
+	}
+	defer func() { _ = os.Chmod(learningsPath, 0644) }() // restore for TempDir cleanup
+
+	// Safety check: verify chmod actually restricts writes on this platform
+	if writeErr := os.WriteFile(learningsPath, []byte(content), 0644); writeErr == nil {
+		t.Skip("chmod 0444 did not restrict writes on this platform")
+	}
+
+	kw := runner.NewFileKnowledgeWriter(tmpDir)
+	err := kw.ValidateNewLessons(context.Background(), runner.LessonsData{Source: "test"})
+	if err == nil {
+		t.Fatal("ValidateNewLessons: want error from read-only file, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: validate lessons: write:") {
+		t.Errorf("error should contain 'runner: validate lessons: write:', got %q", err.Error())
+	}
+}
+
 // --- Task 8.14: WriteProgress unchanged ---
 
 func TestFileKnowledgeWriter_WriteProgress_Unchanged(t *testing.T) {

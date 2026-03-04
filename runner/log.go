@@ -1,0 +1,144 @@
+package runner
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// LogLevel represents the severity of a log entry.
+type LogLevel string
+
+const (
+	// LogLevelInfo is used for normal operational events.
+	LogLevelInfo LogLevel = "INFO "
+	// LogLevelWarn is used for recoverable conditions that need attention.
+	LogLevelWarn LogLevel = "WARN "
+	// LogLevelError is used for unrecoverable errors and exhaustion conditions.
+	LogLevelError LogLevel = "ERROR"
+)
+
+// RunLogger writes structured log entries to a daily log file and to stderr.
+// Format: "2006-01-02T15:04:05 LEVEL [runner] message key=value key=value"
+// Thread safety: not goroutine-safe — ralph is single-threaded in Execute.
+type RunLogger struct {
+	file   io.WriteCloser
+	stderr io.Writer
+}
+
+// noopWriteCloser is a no-op writer for the NopLogger.
+type noopWriteCloser struct{}
+
+func (noopWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
+func (noopWriteCloser) Close() error                { return nil }
+
+// NopLogger returns a RunLogger that discards all output.
+// Used in tests that do not exercise logging.
+func NopLogger() *RunLogger {
+	return &RunLogger{
+		file:   noopWriteCloser{},
+		stderr: io.Discard,
+	}
+}
+
+// OpenRunLogger creates a RunLogger that writes to:
+//   - <projectRoot>/<logDir>/ralph-YYYY-MM-DD.log (appended)
+//   - os.Stderr (duplicated for live terminal visibility)
+//
+// The log directory is created if it does not exist.
+// Returns an error if the directory cannot be created or the file cannot be opened.
+func OpenRunLogger(projectRoot, logDir string) (*RunLogger, error) {
+	dir := filepath.Join(projectRoot, logDir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("runner: log: mkdir: %w", err)
+	}
+
+	date := time.Now().Format("2006-01-02")
+	logPath := filepath.Join(dir, fmt.Sprintf("ralph-%s.log", date))
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("runner: log: open: %w", err)
+	}
+
+	return &RunLogger{
+		file:   f,
+		stderr: os.Stderr,
+	}, nil
+}
+
+// Close flushes and closes the underlying log file.
+// After Close, the logger should not be used.
+func (l *RunLogger) Close() error {
+	if err := l.file.Close(); err != nil {
+		return fmt.Errorf("runner: log: close: %w", err)
+	}
+	return nil
+}
+
+// Info logs an INFO-level message with optional key=value pairs.
+func (l *RunLogger) Info(msg string, kvs ...string) {
+	l.write(LogLevelInfo, msg, kvs)
+}
+
+// Warn logs a WARN-level message with optional key=value pairs.
+func (l *RunLogger) Warn(msg string, kvs ...string) {
+	l.write(LogLevelWarn, msg, kvs)
+}
+
+// Error logs an ERROR-level message with optional key=value pairs.
+func (l *RunLogger) Error(msg string, kvs ...string) {
+	l.write(LogLevelError, msg, kvs)
+}
+
+// write formats and emits a log line to both file and stderr.
+// kvs must be an even-length slice of alternating key, value strings.
+// Odd-length kvs are silently truncated to the nearest pair.
+func (l *RunLogger) write(level LogLevel, msg string, kvs []string) {
+	ts := time.Now().Format("2006-01-02T15:04:05")
+
+	var sb strings.Builder
+	sb.WriteString(ts)
+	sb.WriteByte(' ')
+	sb.WriteString(string(level))
+	sb.WriteString(" [runner] ")
+	sb.WriteString(msg)
+
+	for i := 0; i+1 < len(kvs); i += 2 {
+		sb.WriteByte(' ')
+		sb.WriteString(kvs[i])
+		sb.WriteByte('=')
+		// Quote values that contain spaces or are empty.
+		val := kvs[i+1]
+		if val == "" || strings.ContainsAny(val, " \t\n") {
+			sb.WriteByte('"')
+			sb.WriteString(val)
+			sb.WriteByte('"')
+		} else {
+			sb.WriteString(val)
+		}
+	}
+
+	sb.WriteByte('\n')
+	line := sb.String()
+
+	_, _ = fmt.Fprint(l.file, line)
+	_, _ = fmt.Fprint(l.stderr, line)
+}
+
+// kv formats a key-value pair for use with RunLogger methods.
+func kv(key, value string) []string {
+	return []string{key, value}
+}
+
+// kvs merges multiple key-value pairs into a single slice for RunLogger methods.
+func kvs(pairs ...[]string) []string {
+	out := make([]string, 0, len(pairs)*2)
+	for _, p := range pairs {
+		out = append(out, p...)
+	}
+	return out
+}

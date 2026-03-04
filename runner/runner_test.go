@@ -1939,17 +1939,13 @@ func TestRunner_Execute_EmptySessionIDField(t *testing.T) {
 // Story 3.7: ResumeExtraction tests (AC1, AC3, AC6)
 // =============================================================================
 
-// TestResumeExtraction_Scenarios verifies ResumeExtraction behavior via table-driven tests.
-func TestResumeExtraction_Scenarios(t *testing.T) {
+// TestResumeExtraction_HappyPath verifies ResumeExtraction success cases:
+// valid session (args, data, counts), empty sessionID (no-op), and mutation asymmetry.
+func TestResumeExtraction_HappyPath(t *testing.T) {
 	tests := []struct {
 		name                     string
 		sessionID                string
 		scenarioSteps            []testutil.ScenarioStep
-		knowledgeErr             error
-		validateLessonsErr       error
-		wantErr                  bool
-		wantErrContains          string
-		wantErrContainsInner     string
 		wantWriteProgressCount   int
 		wantValidateLessonsCount int
 		wantSessionInvoked       bool
@@ -1962,7 +1958,6 @@ func TestResumeExtraction_Scenarios(t *testing.T) {
 			scenarioSteps: []testutil.ScenarioStep{
 				{Type: "execute", ExitCode: 0, SessionID: "resumed-001"},
 			},
-			wantErr:                  false,
 			wantWriteProgressCount:   1,
 			wantValidateLessonsCount: 1,
 			wantSessionInvoked:       true,
@@ -1970,7 +1965,6 @@ func TestResumeExtraction_Scenarios(t *testing.T) {
 				t.Helper()
 				assertArgsContainFlagValue(t, args, "--resume", "abc-123")
 				assertArgsContainFlag(t, args, "-p")
-				// Verify extraction prompt contains key instruction
 				promptValue := argValueAfterFlag(args, "-p")
 				if !strings.Contains(promptValue, "failure insights") {
 					t.Errorf("-p value should contain 'failure insights', got %q", promptValue)
@@ -1992,7 +1986,6 @@ func TestResumeExtraction_Scenarios(t *testing.T) {
 				if kw.writeProgressData[0].SessionID != "resumed-001" {
 					t.Errorf("ProgressData.SessionID = %q, want %q", kw.writeProgressData[0].SessionID, "resumed-001")
 				}
-				// Verify ValidateNewLessons called with correct source
 				if len(kw.validateLessonsData) != 1 {
 					t.Fatalf("validateLessonsData len = %d, want 1", len(kw.validateLessonsData))
 				}
@@ -2002,37 +1995,11 @@ func TestResumeExtraction_Scenarios(t *testing.T) {
 			},
 		},
 		{
-			name:                     "empty session ID",
+			name:                     "empty session ID is a no-op",
 			sessionID:                "",
-			wantErr:                  false,
 			wantWriteProgressCount:   0,
 			wantValidateLessonsCount: 0,
 			wantSessionInvoked:       false,
-		},
-		{
-			name:      "session execute error",
-			sessionID: "err-session",
-			// No scenario steps: use nonexistent binary to trigger exec error
-			wantErr:                  true,
-			wantErrContains:          "runner: resume extraction: execute:",
-			wantErrContainsInner:     "/nonexistent/binary",
-			wantWriteProgressCount:   0,
-			wantValidateLessonsCount: 0,
-			wantSessionInvoked:       false, // binary not found, no invocation logged
-		},
-		{
-			name:      "write progress error",
-			sessionID: "wp-err-session",
-			scenarioSteps: []testutil.ScenarioStep{
-				{Type: "execute", ExitCode: 0, SessionID: "wp-001"},
-			},
-			knowledgeErr:             errors.New("write failed"),
-			wantErr:                  true,
-			wantErrContains:          "runner: resume extraction: write progress:",
-			wantErrContainsInner:     "write failed",
-			wantWriteProgressCount:   1,
-			wantValidateLessonsCount: 0, // write progress fails before validate
-			wantSessionInvoked:       true,
 		},
 		{
 			name:      "mutation asymmetry preserved",
@@ -2040,21 +2007,6 @@ func TestResumeExtraction_Scenarios(t *testing.T) {
 			scenarioSteps: []testutil.ScenarioStep{
 				{Type: "execute", ExitCode: 0, SessionID: "mut-001"},
 			},
-			wantErr:                  false,
-			wantWriteProgressCount:   1,
-			wantValidateLessonsCount: 1,
-			wantSessionInvoked:       true,
-		},
-		{
-			name:      "validate lessons error",
-			sessionID: "vl-err-session",
-			scenarioSteps: []testutil.ScenarioStep{
-				{Type: "execute", ExitCode: 0, SessionID: "vl-001"},
-			},
-			validateLessonsErr:       errors.New("validation failed"),
-			wantErr:                  true,
-			wantErrContains:          "runner: resume extraction: validate lessons:",
-			wantErrContainsInner:     "validation failed",
 			wantWriteProgressCount:   1,
 			wantValidateLessonsCount: 1,
 			wantSessionInvoked:       true,
@@ -2064,8 +2016,6 @@ func TestResumeExtraction_Scenarios(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-
-			// Setup sprint-tasks.md for mutation asymmetry check
 			tasksPath := writeTasksFile(t, tmpDir, threeOpenTasks)
 			beforeContent, err := os.ReadFile(tasksPath)
 			if err != nil {
@@ -2078,35 +2028,16 @@ func TestResumeExtraction_Scenarios(t *testing.T) {
 
 			var stateDir string
 			if len(tc.scenarioSteps) > 0 {
-				scenario := testutil.Scenario{
+				_, stateDir = testutil.SetupMockClaude(t, testutil.Scenario{
 					Name:  "resume-" + tc.name,
 					Steps: tc.scenarioSteps,
-				}
-				_, stateDir = testutil.SetupMockClaude(t, scenario)
-			} else {
-				// No scenario: use nonexistent binary to trigger exec error
-				cfg.ClaudeCommand = "/nonexistent/binary"
+				})
 			}
 
-			kw := &trackingKnowledgeWriter{
-				writeProgressErr:   tc.knowledgeErr,
-				validateLessonsErr: tc.validateLessonsErr,
-			}
-
+			kw := &trackingKnowledgeWriter{}
 			err = runner.ResumeExtraction(context.Background(), cfg, kw, tc.sessionID)
-
-			if tc.wantErr && err == nil {
-				t.Fatal("want error, got nil")
-			}
-			if !tc.wantErr && err != nil {
-				t.Fatalf("want nil error, got %v", err)
-			}
-
-			if tc.wantErrContains != "" && !strings.Contains(err.Error(), tc.wantErrContains) {
-				t.Errorf("error: want containing %q, got %q", tc.wantErrContains, err.Error())
-			}
-			if tc.wantErrContainsInner != "" && !strings.Contains(err.Error(), tc.wantErrContainsInner) {
-				t.Errorf("inner error: want containing %q, got %q", tc.wantErrContainsInner, err.Error())
+			if err != nil {
+				t.Fatalf("ResumeExtraction: unexpected error: %v", err)
 			}
 
 			if kw.writeProgressCount != tc.wantWriteProgressCount {
@@ -2115,26 +2046,111 @@ func TestResumeExtraction_Scenarios(t *testing.T) {
 			if kw.validateLessonsCount != tc.wantValidateLessonsCount {
 				t.Errorf("ValidateNewLessons count = %d, want %d", kw.validateLessonsCount, tc.wantValidateLessonsCount)
 			}
-
 			if tc.wantSessionInvoked && stateDir != "" {
 				args := testutil.ReadInvocationArgs(t, stateDir, 0)
 				if tc.checkArgs != nil {
 					tc.checkArgs(t, args)
 				}
 			}
-
 			if tc.checkData != nil {
 				tc.checkData(t, kw)
 			}
 
-			// Mutation asymmetry: [x] count must be unchanged
 			afterContent, readErr := os.ReadFile(tasksPath)
 			if readErr != nil {
 				t.Fatalf("read tasks after: %v", readErr)
 			}
-			afterCheckCount := strings.Count(string(afterContent), "[x]")
-			if afterCheckCount != beforeCheckCount {
-				t.Errorf("[x] count changed: before=%d, after=%d — mutation asymmetry violated", beforeCheckCount, afterCheckCount)
+			if strings.Count(string(afterContent), "[x]") != beforeCheckCount {
+				t.Errorf("mutation asymmetry violated: [x] count changed after ResumeExtraction")
+			}
+		})
+	}
+}
+
+// TestResumeExtraction_ErrorPaths verifies ResumeExtraction error returns:
+// session exec failure, WriteProgress failure, and ValidateNewLessons failure.
+func TestResumeExtraction_ErrorPaths(t *testing.T) {
+	tests := []struct {
+		name                     string
+		sessionID                string
+		scenarioSteps            []testutil.ScenarioStep
+		knowledgeErr             error
+		validateLessonsErr       error
+		wantErrContains          string
+		wantErrContainsInner     string
+		wantWriteProgressCount   int
+		wantValidateLessonsCount int
+	}{
+		{
+			name:      "session execute error",
+			sessionID: "err-session",
+			// No scenario steps: nonexistent binary triggers exec error.
+			wantErrContains:          "runner: resume extraction: execute:",
+			wantErrContainsInner:     "/nonexistent/binary",
+			wantWriteProgressCount:   0,
+			wantValidateLessonsCount: 0,
+		},
+		{
+			name:      "write progress error",
+			sessionID: "wp-err-session",
+			scenarioSteps: []testutil.ScenarioStep{
+				{Type: "execute", ExitCode: 0, SessionID: "wp-001"},
+			},
+			knowledgeErr:             errors.New("write failed"),
+			wantErrContains:          "runner: resume extraction: write progress:",
+			wantErrContainsInner:     "write failed",
+			wantWriteProgressCount:   1,
+			wantValidateLessonsCount: 0, // fails before validate
+		},
+		{
+			name:      "validate lessons error",
+			sessionID: "vl-err-session",
+			scenarioSteps: []testutil.ScenarioStep{
+				{Type: "execute", ExitCode: 0, SessionID: "vl-001"},
+			},
+			validateLessonsErr:       errors.New("validation failed"),
+			wantErrContains:          "runner: resume extraction: validate lessons:",
+			wantErrContainsInner:     "validation failed",
+			wantWriteProgressCount:   1,
+			wantValidateLessonsCount: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			cfg := testConfig(tmpDir, 1)
+			cfg.ModelExecute = "opus"
+
+			if len(tc.scenarioSteps) > 0 {
+				testutil.SetupMockClaude(t, testutil.Scenario{
+					Name:  "resume-err-" + tc.name,
+					Steps: tc.scenarioSteps,
+				})
+			} else {
+				cfg.ClaudeCommand = "/nonexistent/binary"
+			}
+
+			kw := &trackingKnowledgeWriter{
+				writeProgressErr:   tc.knowledgeErr,
+				validateLessonsErr: tc.validateLessonsErr,
+			}
+
+			err := runner.ResumeExtraction(context.Background(), cfg, kw, tc.sessionID)
+			if err == nil {
+				t.Fatal("ResumeExtraction: want error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrContains) {
+				t.Errorf("error = %q, want containing %q", err.Error(), tc.wantErrContains)
+			}
+			if !strings.Contains(err.Error(), tc.wantErrContainsInner) {
+				t.Errorf("inner error = %q, want containing %q", err.Error(), tc.wantErrContainsInner)
+			}
+			if kw.writeProgressCount != tc.wantWriteProgressCount {
+				t.Errorf("WriteProgress count = %d, want %d", kw.writeProgressCount, tc.wantWriteProgressCount)
+			}
+			if kw.validateLessonsCount != tc.wantValidateLessonsCount {
+				t.Errorf("ValidateNewLessons count = %d, want %d", kw.validateLessonsCount, tc.wantValidateLessonsCount)
 			}
 		})
 	}
@@ -4867,6 +4883,149 @@ func TestRunner_Execute_DistillationRetry5(t *testing.T) {
 	}
 }
 
+// TestRunner_Execute_DistillationGateError verifies that when GatePromptFn itself
+// returns an error during distillation failure handling, execution continues (non-fatal).
+func TestRunner_Execute_DistillationGateError(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeLearningsFile(t, tmpDir, 160)
+	writeDistillState(t, tmpDir, 10, 0)
+
+	scenario := testutil.Scenario{
+		Name:  "distill-gate-error",
+		Steps: []testutil.ScenarioStep{{Type: "execute", ExitCode: 0, SessionID: "exec-001"}},
+	}
+	mock := &testutil.MockGitClient{HeadCommits: headCommitPairs([2]string{"aaa", "bbb"})}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	r.Cfg.GatesEnabled = true
+	r.DistillFn = (&trackingDistillFunc{errs: []error{errors.New("distill failed")}}).fn
+	r.GatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		return nil, errors.New("gate prompt error")
+	}
+	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v (gate error should be non-fatal)", err)
+	}
+}
+
+// TestRunner_Execute_DistillationGateQuit verifies that ActionQuit from the
+// distillation gate does not propagate as a fatal error — execution continues.
+func TestRunner_Execute_DistillationGateQuit(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeLearningsFile(t, tmpDir, 160)
+	writeDistillState(t, tmpDir, 10, 0)
+
+	scenario := testutil.Scenario{
+		Name:  "distill-gate-quit",
+		Steps: []testutil.ScenarioStep{{Type: "execute", ExitCode: 0, SessionID: "exec-001"}},
+	}
+	mock := &testutil.MockGitClient{HeadCommits: headCommitPairs([2]string{"aaa", "bbb"})}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	r.Cfg.GatesEnabled = true
+	r.DistillFn = (&trackingDistillFunc{errs: []error{errors.New("distill failed")}}).fn
+	r.GatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		return &config.GateDecision{Action: config.ActionQuit}, nil
+	}
+	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v (distillation quit should be non-fatal)", err)
+	}
+}
+
+// TestRunner_Execute_DistillationGateApprove verifies that ActionApprove from the
+// distillation gate (treated as skip — default branch) continues without retrying.
+func TestRunner_Execute_DistillationGateApprove(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeLearningsFile(t, tmpDir, 160)
+	writeDistillState(t, tmpDir, 10, 0)
+
+	scenario := testutil.Scenario{
+		Name:  "distill-gate-approve",
+		Steps: []testutil.ScenarioStep{{Type: "execute", ExitCode: 0, SessionID: "exec-001"}},
+	}
+	mock := &testutil.MockGitClient{HeadCommits: headCommitPairs([2]string{"aaa", "bbb"})}
+
+	td := &trackingDistillFunc{errs: []error{errors.New("distill failed")}}
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	r.Cfg.GatesEnabled = true
+	r.DistillFn = td.fn
+	r.GatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		return &config.GateDecision{Action: config.ActionApprove}, nil
+	}
+	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	// ActionApprove → default branch → no retry; DistillFn called only once (initial)
+	if td.count != 1 {
+		t.Errorf("DistillFn count = %d, want 1 (no retries on approve)", td.count)
+	}
+}
+
+// TestRunner_Execute_DistillationRetrySucceeds verifies that when DistillFn
+// fails on the first call but succeeds on the gate retry, state is persisted
+// and execution continues normally.
+func TestRunner_Execute_DistillationRetrySucceeds(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeLearningsFile(t, tmpDir, 160)
+	writeDistillState(t, tmpDir, 10, 0)
+
+	scenario := testutil.Scenario{
+		Name:  "distill-retry-succeeds",
+		Steps: []testutil.ScenarioStep{{Type: "execute", ExitCode: 0, SessionID: "exec-001"}},
+	}
+	mock := &testutil.MockGitClient{HeadCommits: headCommitPairs([2]string{"aaa", "bbb"})}
+
+	// First call fails, second (retry-1) succeeds.
+	td := &trackingDistillFunc{errs: []error{errors.New("first attempt failed")}}
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+	r.Cfg.GatesEnabled = true
+	r.DistillFn = td.fn
+	r.GatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		return &config.GateDecision{Action: config.ActionRetry, Feedback: ""}, nil
+	}
+	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	// 1 initial failure + 1 successful retry = 2 total calls
+	if td.count != 2 {
+		t.Errorf("DistillFn count = %d, want 2 (1 fail + 1 retry success)", td.count)
+	}
+
+	// State should be persisted with updated LastDistillTask
+	statePath := filepath.Join(tmpDir, ".ralph", "distill-state.json")
+	loaded, loadErr := runner.LoadDistillState(statePath)
+	if loadErr != nil {
+		t.Fatalf("LoadDistillState: %v", loadErr)
+	}
+	if loaded.LastDistillTask != loaded.MonotonicTaskCounter {
+		t.Errorf("LastDistillTask = %d, want == MonotonicTaskCounter (%d) after retry success",
+			loaded.LastDistillTask, loaded.MonotonicTaskCounter)
+	}
+}
+
 // TestRunner_Execute_DistillationFailureGatesDisabled verifies distillation failure
 // with gates disabled logs warning and continues (non-fatal). (AC: Scenario 4 edge case)
 func TestRunner_Execute_DistillationFailureGatesDisabled(t *testing.T) {
@@ -4901,4 +5060,336 @@ func TestRunner_Execute_DistillationFailureGatesDisabled(t *testing.T) {
 		t.Errorf("DistillFn count = %d, want 1", td.count)
 	}
 }
+
+func TestRunner_Execute_RecoverDistillationError(t *testing.T) {
+	t.Parallel()
+	// .ralph/distill-intent.json as a non-empty directory → os.ReadFile returns EISDIR
+	// → ReadIntentFile → RecoverDistillation returns error → Execute returns "runner: startup:".
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, threeOpenTasks)
+
+	ralphDir := filepath.Join(tmpDir, ".ralph")
+	// Create distill-intent.json as a non-empty directory (child prevents removal).
+	intentDir := filepath.Join(ralphDir, "distill-intent.json")
+	if err := os.MkdirAll(filepath.Join(intentDir, "child"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := testConfig(tmpDir, 1)
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             &testutil.MockGitClient{},
+		TasksFile:       tasksPath,
+		ReviewFn:        fatalReviewFn(t),
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error for RecoverDistillation failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: startup:") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "runner: startup:")
+	}
+	if !strings.Contains(err.Error(), "runner: distill: recovery:") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "runner: distill: recovery:")
+	}
+}
+
+func TestRunner_Execute_BuildKnowledgeError(t *testing.T) {
+	t.Parallel()
+	// LEARNINGS.md as directory → buildKnowledgeReplacements returns non-ErrNotExist error
+	// → Execute returns "runner: startup: runner: build knowledge: read learnings:".
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, threeOpenTasks)
+
+	// Create LEARNINGS.md as a directory so os.ReadFile returns EISDIR.
+	if err := os.MkdirAll(filepath.Join(tmpDir, "LEARNINGS.md"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := testConfig(tmpDir, 1)
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             &testutil.MockGitClient{},
+		TasksFile:       tasksPath,
+		ReviewFn:        fatalReviewFn(t),
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error for buildKnowledgeReplacements failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: startup:") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "runner: startup:")
+	}
+	if !strings.Contains(err.Error(), "runner: build knowledge: read learnings:") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "runner: build knowledge: read learnings:")
+	}
+}
+
+func TestRunner_Execute_DistillStateLoadError(t *testing.T) {
+	t.Parallel()
+	// Invalid distill-state.json → LoadDistillState json.Unmarshal fails
+	// → Execute returns "runner: startup: runner: distill state: load:".
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, threeOpenTasks)
+
+	ralphDir := filepath.Join(tmpDir, ".ralph")
+	if err := os.MkdirAll(ralphDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ralphDir, "distill-state.json"), []byte("{invalid json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := testConfig(tmpDir, 1)
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             &testutil.MockGitClient{},
+		TasksFile:       tasksPath,
+		ReviewFn:        fatalReviewFn(t),
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error for LoadDistillState failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: startup:") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "runner: startup:")
+	}
+	if !strings.Contains(err.Error(), "runner: distill state: load:") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "runner: distill state: load:")
+	}
+}
+
+func TestRunner_Execute_BudgetWarning(t *testing.T) {
+	t.Parallel()
+	// LEARNINGS.md with 5 lines, LearningsBudget=3 → OverBudget=true → warning printed.
+	// allDoneTasks → no open tasks → Execute returns nil after budget warning.
+	// Covers lines 478-484 (ratio calculation and fprintf).
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, allDoneTasks)
+
+	learnings := strings.Repeat("line\n", 5) // 5 newlines → lines=5 >= budget=3
+	if err := os.WriteFile(filepath.Join(tmpDir, "LEARNINGS.md"), []byte(learnings), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := testConfig(tmpDir, 1)
+	cfg.LearningsBudget = 3 // 5 lines >= 3 → OverBudget=true, Limit=3>0 → ratio=1
+
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             &testutil.MockGitClient{},
+		TasksFile:       tasksPath,
+		ReviewFn:        fatalReviewFn(t),
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+}
+
+func TestRunner_Execute_CodeIndexerPresent(t *testing.T) {
+	t.Parallel()
+	// r.CodeIndexer != nil → enters DetectSerena block (line 463-465).
+	// allDoneTasks → no open tasks → Execute returns nil.
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, allDoneTasks)
+
+	cfg := testConfig(tmpDir, 1)
+	r := &runner.Runner{
+		Cfg:             cfg,
+		Git:             &testutil.MockGitClient{},
+		TasksFile:       tasksPath,
+		ReviewFn:        fatalReviewFn(t),
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+		CodeIndexer:     &runner.NoOpCodeIndexerDetector{},
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+}
+
+// TestRunner_Execute_NilKnowledge_NoPanic verifies that Execute does not panic
+// when Knowledge is nil (no KnowledgeWriter injected).
+func TestRunner_Execute_NilKnowledge_NoPanic(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	scenario := testutil.Scenario{
+		Name: "nil-knowledge",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "nk-001"},
+		},
+	}
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Knowledge = nil // explicitly nil — must not panic
+	r.Cfg.MaxIterations = 1
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+}
+
+// TestRunner_Execute_SkippedTask_NoCounterIncrement verifies that emergency-skipped
+// tasks do not increment MonotonicTaskCounter (Bug #2 fix).
+func TestRunner_Execute_SkippedTask_NoCounterIncrement(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Pre-seed counter=5
+	writeDistillState(t, tmpDir, 5, 5)
+
+	scenario := testutil.Scenario{
+		Name: "skip-no-counter",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "skip-cnt-001"}, // task 1: no commit → emergency skip
+		},
+	}
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "aaa"}), // no commit → emergency
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.GatesEnabled = true
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+
+	r.EmergencyGatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		return &config.GateDecision{Action: config.ActionSkip}, nil
+	}
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	// Verify counter was NOT incremented (still 5, not 6)
+	statePath := filepath.Join(tmpDir, ".ralph", "distill-state.json")
+	loaded, loadErr := runner.LoadDistillState(statePath)
+	if loadErr != nil {
+		t.Fatalf("LoadDistillState: %v", loadErr)
+	}
+	if loaded.MonotonicTaskCounter != 5 {
+		t.Errorf("MonotonicTaskCounter = %d, want 5 (unchanged after skip)", loaded.MonotonicTaskCounter)
+	}
+}
+
+// TestRunner_Execute_SkippedTask_NoValidation verifies that emergency-skipped
+// tasks do not call ValidateNewLessons (Bug #1 fix — wasSkipped bypasses validation).
+func TestRunner_Execute_SkippedTask_NoValidation(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 2 tasks: task 1 fails and gets skipped, task 2 succeeds.
+	scenario := testutil.Scenario{
+		Name: "skip-no-validate",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "snv-001"}, // task 1: no commit → emergency skip
+			{Type: "execute", ExitCode: 0, SessionID: "snv-002"}, // task 2: commit → success
+		},
+	}
+
+	twoTasks := "# Sprint Tasks\n\n- [ ] Task one\n- [ ] Task two\n"
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs(
+			[2]string{"aaa", "aaa"}, // task 1: no commit → emergency
+			[2]string{"aaa", "bbb"}, // task 2: commit
+		),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, twoTasks, scenario, mock)
+	r.Cfg.MaxIterations = 2 // need 2 iterations: skip task 1 + process task 2
+	r.Cfg.GatesEnabled = true
+
+	kw := &trackingKnowledgeWriter{}
+	r.Knowledge = kw
+
+	r.EmergencyGatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		return &config.GateDecision{Action: config.ActionSkip}, nil
+	}
+
+	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	// ValidateNewLessons should be called only for task 2 (not skipped task 1)
+	if kw.validateLessonsCount != 1 {
+		t.Errorf("ValidateNewLessons count = %d, want 1 (only non-skipped task)", kw.validateLessonsCount)
+	}
+}
+
+// TestRunner_Execute_NormalTask_IncrementsCounter verifies that a normal (non-skipped)
+// task still increments MonotonicTaskCounter and calls ValidateNewLessons.
+func TestRunner_Execute_NormalTask_IncrementsCounter(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeDistillState(t, tmpDir, 5, 5)
+
+	scenario := testutil.Scenario{
+		Name: "normal-counter",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "nc-001"},
+		},
+	}
+
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, nonGateOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.DistillCooldown = 5
+	r.Cfg.LearningsBudget = 200
+
+	kw := &trackingKnowledgeWriter{}
+	r.Knowledge = kw
+
+	err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	// Counter should be incremented (5 → 6)
+	statePath := filepath.Join(tmpDir, ".ralph", "distill-state.json")
+	loaded, loadErr := runner.LoadDistillState(statePath)
+	if loadErr != nil {
+		t.Fatalf("LoadDistillState: %v", loadErr)
+	}
+	if loaded.MonotonicTaskCounter != 6 {
+		t.Errorf("MonotonicTaskCounter = %d, want 6 (5+1)", loaded.MonotonicTaskCounter)
+	}
+
+	// ValidateNewLessons should be called for the normal task
+	if kw.validateLessonsCount != 1 {
+		t.Errorf("ValidateNewLessons count = %d, want 1", kw.validateLessonsCount)
+	}
+}
+
+
 

@@ -141,9 +141,7 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 
 	prompt, err := config.AssemblePrompt(
 		reviewTemplate,
-		config.TemplateData{
-			SerenaEnabled: rc.SerenaHint != "",
-		},
+		buildTemplateData(rc.Cfg, rc.SerenaHint, false, false),
 		reviewReplacements,
 	)
 	if err != nil {
@@ -393,6 +391,17 @@ func SkipTask(tasksFile, taskDesc string) error {
 	return os.WriteFile(tasksFile, []byte(strings.Join(lines, "\n")), 0644)
 }
 
+// buildTemplateData creates config.TemplateData consistently across all call sites.
+// Centralizes field assignment so new template fields are added in one place.
+func buildTemplateData(cfg *config.Config, serenaHint string, hasFindings, hasLearnings bool) config.TemplateData {
+	return config.TemplateData{
+		GatesEnabled:  cfg.GatesEnabled,
+		SerenaEnabled: serenaHint != "",
+		HasFindings:   hasFindings,
+		HasLearnings:  hasLearnings,
+	}
+}
+
 // RunConfig passes dependencies to runner functions.
 type RunConfig struct {
 	Cfg        *config.Config
@@ -407,6 +416,7 @@ type RunConfig struct {
 // EmergencyGatePromptFn: called at execute/review exhaustion when gates enabled.
 // Uses same GatePromptFunc type as GatePromptFn but creates Gate{Emergency: true}.
 // DistillFn: called after clean review when budget check and cooldown pass (Story 6.5a).
+// Logger: structured log writer; nil falls back to NopLogger (no-op, no file I/O).
 type Runner struct {
 	Cfg                   *config.Config
 	Git                   GitClient
@@ -419,6 +429,17 @@ type Runner struct {
 	SleepFn               func(time.Duration) // injectable sleep for testable backoff
 	Knowledge             KnowledgeWriter     // records execution progress and validates lessons
 	CodeIndexer           CodeIndexerDetector // detects code indexing tools (Serena MCP)
+	Logger                *RunLogger          // structured log writer; nil = NopLogger
+}
+
+// logger returns the Runner's logger, falling back to NopLogger when Logger is nil.
+// All Execute internals call logger() rather than accessing Logger directly so that
+// tests that do not set Logger never see a nil-pointer panic.
+func (r *Runner) logger() *RunLogger {
+	if r.Logger == nil {
+		return NopLogger()
+	}
+	return r.Logger
 }
 
 // Execute runs the main task loop: startup recovery, then iterate over tasks.
@@ -446,16 +467,39 @@ type Runner struct {
 // and cooldown (counter - lastDistill >= DistillCooldown). If both pass, calls DistillFn.
 // Distillation failures are non-fatal: ErrBadFormat gets one free retry, then human gate.
 // Loops up to Cfg.MaxIterations task-processing cycles in the outer loop.
+// Structured progress is written to Logger (file + stderr) at every key decision point.
 // Returns nil when all tasks are complete. Returns error on any failure.
 func (r *Runner) Execute(ctx context.Context) error {
+	log := r.logger()
+	tasksBase := filepath.Base(r.TasksFile)
+	log.Info("run started", "tasks_file", tasksBase)
+
+	runErr := r.execute(ctx)
+	if runErr != nil {
+		log.Error("run finished", "status", "error", "error", runErr.Error())
+	} else {
+		log.Info("run finished", "status", "ok")
+	}
+	return runErr
+}
+
+// execute is the internal implementation of Execute.
+// Execute wraps this with run-level log lines; execute contains the actual loop.
+func (r *Runner) execute(ctx context.Context) error {
+	log := r.logger()
+
 	// M7: Recover interrupted distillation BEFORE git state recovery
 	if err := RecoverDistillation(r.Cfg.ProjectRoot); err != nil {
 		return fmt.Errorf("runner: startup: %w", err)
 	}
 
-	// recovered bool unused — no startup logging plumbing yet
-	if _, err := RecoverDirtyState(ctx, r.Git); err != nil {
+	recovered, err := RecoverDirtyState(ctx, r.Git)
+	if err != nil {
 		return fmt.Errorf("runner: startup: %w", err)
+	}
+	if recovered {
+		log.Warn("dirty state detected", "recovering", "true")
+		log.Info("dirty state recovered")
 	}
 
 	// Story 6.7: Serena MCP detection at startup
@@ -475,13 +519,19 @@ func (r *Runner) Execute(ctx context.Context) error {
 	if hasLearnings {
 		learningsPathForBudget := filepath.Join(r.Cfg.ProjectRoot, "LEARNINGS.md")
 		budgetStatus, budgetErr := BudgetCheck(ctx, learningsPathForBudget, r.Cfg.LearningsBudget)
-		if budgetErr == nil && budgetStatus.OverBudget {
-			ratio := 0
-			if budgetStatus.Limit > 0 {
-				ratio = budgetStatus.Lines / budgetStatus.Limit
+		if budgetErr == nil {
+			log.Info("learnings budget check",
+				"lines", fmt.Sprintf("%d/%d", budgetStatus.Lines, budgetStatus.Limit),
+				"near_limit", fmt.Sprintf("%v", budgetStatus.NearLimit),
+			)
+			if budgetStatus.OverBudget {
+				ratio := 0
+				if budgetStatus.Limit > 0 {
+					ratio = budgetStatus.Lines / budgetStatus.Limit
+				}
+				fmt.Fprintf(os.Stderr, "⚠ LEARNINGS.md: %d/%d lines (%dx budget). Run `ralph distill` to compress.\n",
+					budgetStatus.Lines, budgetStatus.Limit, ratio)
 			}
-			fmt.Fprintf(os.Stderr, "⚠ LEARNINGS.md: %d/%d lines (%dx budget). Run `ralph distill` to compress.\n",
-				budgetStatus.Lines, budgetStatus.Limit, ratio)
 		}
 	}
 
@@ -507,7 +557,10 @@ func (r *Runner) Execute(ctx context.Context) error {
 		return fmt.Errorf("runner: startup: %w", distillLoadErr)
 	}
 
-	completedTasks := 0 // Story 5.4: cumulative counter, persists across all iterations
+	// completedTasks: in-memory counter for gate checkpoint logic (resets each Execute call).
+	// Distinct from distillState.MonotonicTaskCounter which persists across runs for cooldown.
+	completedTasks := 0
+	taskStart := time.Now()
 	for i := 0; i < r.Cfg.MaxIterations; i++ {
 		content, err := os.ReadFile(r.TasksFile)
 		if err != nil {
@@ -519,8 +572,15 @@ func (r *Runner) Execute(ctx context.Context) error {
 			return scanErr // ScanTasks already wraps with "runner: scan tasks:" prefix
 		}
 		if !result.HasOpenTasks() {
-			return nil
+			return nil // Execute() wrapper logs "run finished" on return
 		}
+
+		taskText := result.OpenTasks[0].Text
+		taskStart = time.Now()
+		log.Info("task started",
+			"attempt", fmt.Sprintf("%d/%d", i+1, r.Cfg.MaxIterations),
+			"task", taskText,
+		)
 
 		// Review cycle loop: per-task counter, resets when clean (AC3, AC4)
 		reviewCycles := 0
@@ -548,12 +608,7 @@ func (r *Runner) Execute(ctx context.Context) error {
 
 			prompt, err := config.AssemblePrompt(
 				executeTemplate,
-				config.TemplateData{
-					GatesEnabled:  r.Cfg.GatesEnabled,
-					SerenaEnabled: serenaHint != "",
-					HasFindings:   len(strings.TrimSpace(findingsContent)) > 0,
-					HasLearnings:  hasLearnings,
-				},
+				buildTemplateData(r.Cfg, serenaHint, len(strings.TrimSpace(findingsContent)) > 0, hasLearnings),
 				executeReplacements,
 			)
 			if err != nil {
@@ -579,6 +634,12 @@ func (r *Runner) Execute(ctx context.Context) error {
 					return fmt.Errorf("runner: head commit before: %w", err)
 				}
 
+				log.Info("execute session started",
+					"task", taskText,
+					"review_cycle", fmt.Sprintf("%d", reviewCycles+1),
+					"execute_attempt", fmt.Sprintf("%d", executeAttempts+1),
+				)
+
 				start := time.Now()
 				raw, execErr := session.Execute(ctx, opts)
 				elapsed := time.Since(start)
@@ -590,6 +651,10 @@ func (r *Runner) Execute(ctx context.Context) error {
 					// Distinguish retryable (exit error) from fatal (binary not found, ctx cancel)
 					var exitErr *exec.ExitError
 					if errors.As(execErr, &exitErr) {
+						log.Info("execute session finished",
+							"duration", fmt.Sprintf("%ds", int(elapsed.Seconds())),
+							"exit", fmt.Sprintf("%d", exitErr.ExitCode()),
+						)
 						needsRetry = true // AC6: non-zero exit triggers retry
 						// Try to parse for sessionID despite error
 						if sr, parseErr := session.ParseResult(raw, elapsed); parseErr == nil {
@@ -599,6 +664,11 @@ func (r *Runner) Execute(ctx context.Context) error {
 						return fmt.Errorf("runner: execute: %w", execErr)
 					}
 				} else {
+					log.Info("execute session finished",
+						"duration", fmt.Sprintf("%ds", int(elapsed.Seconds())),
+						"exit", "0",
+					)
+
 					sr, parseErr := session.ParseResult(raw, elapsed)
 					if parseErr != nil {
 						return fmt.Errorf("runner: parse result: %w", parseErr)
@@ -611,13 +681,29 @@ func (r *Runner) Execute(ctx context.Context) error {
 					}
 
 					if headBefore == headAfter {
+						log.Info("commit check",
+							"before", headBefore,
+							"after", headAfter,
+							"changed", "false",
+							"reason", "retry",
+						)
 						needsRetry = true // AC1: no commit
+					} else {
+						log.Info("commit check",
+							"before", headBefore,
+							"after", headAfter,
+							"changed", "true",
+						)
 					}
 				}
 
 				if needsRetry {
 					executeAttempts++ // AC2: increment counter
 					if executeAttempts >= r.Cfg.MaxIterations {
+						log.Error("execute attempts exhausted",
+							"task", taskText,
+							"attempts", fmt.Sprintf("%d", executeAttempts),
+						)
 						if r.Cfg.GatesEnabled && r.EmergencyGatePromptFn != nil {
 							emergencyText := fmt.Sprintf("execute attempts exhausted (%d/%d) for %q",
 								executeAttempts, r.Cfg.MaxIterations, result.OpenTasks[0].Text)
@@ -652,6 +738,21 @@ func (r *Runner) Execute(ctx context.Context) error {
 								executeAttempts, r.Cfg.MaxIterations, result.OpenTasks[0].Text, config.ErrMaxRetries)
 						}
 					}
+					// Exponential backoff (NFR12): 1s, 2s, 4s...
+					backoff := time.Duration(1<<uint(executeAttempts-1)) * time.Second
+
+					var retryReason string
+					if execErr != nil {
+						retryReason = "exit_error"
+					} else {
+						retryReason = "no_commit"
+					}
+					log.Info("retry scheduled",
+						"attempt", fmt.Sprintf("%d/%d", executeAttempts+1, r.Cfg.MaxIterations),
+						"backoff", fmt.Sprintf("%ds", int(backoff.Seconds())),
+						"reason", retryReason,
+					)
+
 					// Resume-extraction: capture WIP state before retry
 					if reErr := r.ResumeExtractFn(ctx, rc, sessionID); reErr != nil {
 						return fmt.Errorf("runner: retry: resume extract: %w", reErr)
@@ -660,11 +761,9 @@ func (r *Runner) Execute(ctx context.Context) error {
 					if _, recErr := RecoverDirtyState(ctx, r.Git); recErr != nil {
 						return fmt.Errorf("runner: retry: recover: %w", recErr)
 					}
-					// Exponential backoff (NFR12): 1s, 2s, 4s...
 					if ctx.Err() != nil {
 						return fmt.Errorf("runner: retry: %w", ctx.Err())
 					}
-					backoff := time.Duration(1<<uint(executeAttempts-1)) * time.Second
 					r.SleepFn(backoff)
 					continue
 				}
@@ -678,15 +777,31 @@ func (r *Runner) Execute(ctx context.Context) error {
 				break
 			}
 
+			log.Info("review session started", "task", taskText)
+			reviewStart := time.Now()
 			rr, err := r.ReviewFn(ctx, rc)
+			reviewElapsed := time.Since(reviewStart)
 			if err != nil {
 				return fmt.Errorf("runner: review: %w", err)
 			}
 			if rr.Clean {
+				log.Info("review session finished",
+					"duration", fmt.Sprintf("%ds", int(reviewElapsed.Seconds())),
+					"clean", "true",
+				)
 				break // AC4: clean review exits review cycle loop
 			}
+			log.Info("review session finished",
+				"duration", fmt.Sprintf("%ds", int(reviewElapsed.Seconds())),
+				"clean", "false",
+				"findings", "true",
+			)
 			reviewCycles++
 			if reviewCycles >= r.Cfg.MaxReviewIterations {
+				log.Error("review cycles exhausted",
+					"task", taskText,
+					"cycles", fmt.Sprintf("%d", reviewCycles),
+				)
 				if r.Cfg.GatesEnabled && r.EmergencyGatePromptFn != nil {
 					emergencyText := fmt.Sprintf("review cycles exhausted (%d/%d) for %q",
 						reviewCycles, r.Cfg.MaxReviewIterations, result.OpenTasks[0].Text)
@@ -722,26 +837,33 @@ func (r *Runner) Execute(ctx context.Context) error {
 			}
 		}
 
+		// Story 5.5: emergency skip bypasses validation, completion counter, and gate check
+		if wasSkipped {
+			continue
+		}
+
 		// Story 6.1: post-validate LEARNINGS.md entries after session ends
-		if err := r.Knowledge.ValidateNewLessons(ctx, LessonsData{
-			Source:      "execute",
-			Snapshot:    learningsSnapshot,
-			BudgetLimit: r.Cfg.LearningsBudget,
-		}); err != nil {
-			return fmt.Errorf("runner: post-validate lessons: %w", err)
+		if r.Knowledge != nil {
+			if err := r.Knowledge.ValidateNewLessons(ctx, LessonsData{
+				Source:      "execute",
+				Snapshot:    learningsSnapshot,
+				BudgetLimit: r.Cfg.LearningsBudget,
+			}); err != nil {
+				return fmt.Errorf("runner: post-validate lessons: %w", err)
+			}
 		}
 		// Update snapshot for next task iteration
 		if snapshotData, snapErr := os.ReadFile(learningsPath); snapErr == nil {
 			learningsSnapshot = string(snapshotData)
 		}
 
-		// Story 5.5: emergency skip bypasses completion counter and gate check
-		if wasSkipped {
-			continue
-		}
-
 		// Story 5.4: increment completion counter after clean review, before gate check.
 		completedTasks++
+		log.Info("task completed",
+			"task", taskText,
+			"iterations", fmt.Sprintf("%d", reviewCycles+1),
+			"duration", fmt.Sprintf("%ds", int(time.Since(taskStart).Seconds())),
+		)
 
 		// Gate check: after clean review, before outer loop continues to next task.
 		// Story 5.2: [GATE] tag trigger. Story 5.4: checkpoint trigger (every N tasks).
@@ -782,6 +904,7 @@ func (r *Runner) Execute(ctx context.Context) error {
 		// Increment monotonic counter (persists across runs, unlike completedTasks).
 		distillState.MonotonicTaskCounter++
 		if saveErr := SaveDistillState(distillStatePath, distillState); saveErr != nil {
+			distillState.MonotonicTaskCounter-- // rollback on save failure
 			fmt.Fprintf(os.Stderr, "WARNING: save distill state: %v\n", saveErr)
 		}
 
@@ -790,6 +913,10 @@ func (r *Runner) Execute(ctx context.Context) error {
 			if budgetErr == nil && budgetStatus.NearLimit {
 				cooldownMet := distillState.MonotonicTaskCounter-distillState.LastDistillTask >= r.Cfg.DistillCooldown
 				if cooldownMet {
+					log.Info("distillation triggered",
+						"counter", fmt.Sprintf("%d", distillState.MonotonicTaskCounter),
+						"cooldown", fmt.Sprintf("%d", r.Cfg.DistillCooldown),
+					)
 					r.runDistillation(ctx, distillState, distillStatePath, budgetStatus)
 				}
 			}
@@ -916,10 +1043,7 @@ func RunOnce(ctx context.Context, rc RunConfig) error {
 
 	prompt, err := config.AssemblePrompt(
 		executeTemplate,
-		config.TemplateData{
-			GatesEnabled: rc.Cfg.GatesEnabled,
-			HasLearnings: onceHasLearnings,
-		},
+		buildTemplateData(rc.Cfg, "", false, onceHasLearnings),
 		onceReplacements,
 	)
 	if err != nil {
@@ -976,10 +1100,21 @@ func RecoverDirtyState(ctx context.Context, git GitClient) (bool, error) {
 // It creates a Runner with production defaults and delegates to Runner.Execute.
 // When cfg.GatesEnabled is true, wires GatePromptFn to gates.Prompt with os.Stdin/os.Stdout.
 // When cfg.SerenaEnabled is true, wires CodeIndexer to SerenaMCPDetector for detection.
+// Opens a RunLogger writing to <ProjectRoot>/<LogDir>/ralph-YYYY-MM-DD.log (appended)
+// and duplicating to stderr. Logger failure is non-fatal: falls back to NopLogger.
 func Run(ctx context.Context, cfg *config.Config) error {
 	var indexer CodeIndexerDetector = &NoOpCodeIndexerDetector{}
 	if cfg.SerenaEnabled {
 		indexer = &SerenaMCPDetector{}
+	}
+
+	var runLog *RunLogger
+	if l, err := OpenRunLogger(cfg.ProjectRoot, cfg.LogDir); err == nil {
+		runLog = l
+		defer l.Close() //nolint:errcheck
+	} else {
+		fmt.Fprintf(os.Stderr, "WARNING: could not open run log: %v\n", err)
+		runLog = NopLogger()
 	}
 
 	r := &Runner{
@@ -990,6 +1125,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		SleepFn:     time.Sleep,
 		Knowledge:   &FileKnowledgeWriter{projectRoot: cfg.ProjectRoot},
 		CodeIndexer: indexer,
+		Logger:      runLog,
 	}
 	if cfg.GatesEnabled {
 		r.GatePromptFn = func(ctx context.Context, taskText string) (*config.GateDecision, error) {
@@ -1016,7 +1152,10 @@ func RunReview(ctx context.Context, rc RunConfig) error {
 		reviewTemplate,
 		config.TemplateData{},
 		map[string]string{
-			"__TASK_CONTENT__": "review stub",
+			"__TASK_CONTENT__":      "review stub",
+			"__RALPH_KNOWLEDGE__":   "",
+			"__LEARNINGS_CONTENT__": "",
+			"__SERENA_HINT__":       "",
 		},
 	)
 	if err != nil {

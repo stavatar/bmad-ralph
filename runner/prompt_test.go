@@ -12,6 +12,29 @@ import (
 
 var update = flag.Bool("update", false, "update golden files")
 
+// executeReplacements returns a base replacements map with all execute template
+// placeholders set to empty. Callers override specific keys as needed.
+func executeReplacements() map[string]string {
+	return map[string]string{
+		"__FORMAT_CONTRACT__":  "",
+		"__RALPH_KNOWLEDGE__":  "",
+		"__LEARNINGS_CONTENT__": "",
+		"__FINDINGS_CONTENT__": "",
+		"__SERENA_HINT__":      "",
+	}
+}
+
+// reviewReplacements returns a base replacements map with all review template
+// placeholders set to empty. Callers override specific keys as needed.
+func reviewReplacements() map[string]string {
+	return map[string]string{
+		"__TASK_CONTENT__":      "",
+		"__RALPH_KNOWLEDGE__":   "",
+		"__LEARNINGS_CONTENT__": "",
+		"__SERENA_HINT__":       "",
+	}
+}
+
 // goldenTest compares got against a golden file, updating it if -update flag is set.
 func goldenTest(t *testing.T, name, got string) {
 	t.Helper()
@@ -39,10 +62,9 @@ func TestPrompt_Execute_WithFindings(t *testing.T) {
 	data := config.TemplateData{
 		HasFindings: true,
 	}
-	replacements := map[string]string{
-		"__FORMAT_CONTRACT__":  config.SprintTasksFormat(),
-		"__FINDINGS_CONTENT__": findingsText,
-	}
+	replacements := executeReplacements()
+	replacements["__FORMAT_CONTRACT__"] = config.SprintTasksFormat()
+	replacements["__FINDINGS_CONTENT__"] = findingsText
 
 	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
 	if err != nil {
@@ -61,6 +83,8 @@ func TestPrompt_Execute_WithFindings(t *testing.T) {
 		{"zero-skip policy", "Zero-Skip Policy", true},
 		{"red-green cycle", "Red-Green Cycle", true},
 		{"self-directing instruction", "sprint-tasks.md", true},
+		{"source story context instruction", "source:` field, open the referenced file", true},
+		{"source fallback on missing file", "file is missing, proceed with the task description", true},
 		{"mutation asymmetry", "Mutation Asymmetry", true},
 		{"commit on green only", "Commit ONLY when ALL tests pass", true},
 		// Format contract injection (AC #1 item 8)
@@ -113,9 +137,8 @@ func TestPrompt_Execute_WithoutFindings(t *testing.T) {
 	data := config.TemplateData{
 		HasFindings: false,
 	}
-	replacements := map[string]string{
-		"__FORMAT_CONTRACT__": config.SprintTasksFormat(),
-	}
+	replacements := executeReplacements()
+	replacements["__FORMAT_CONTRACT__"] = config.SprintTasksFormat()
 
 	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
 	if err != nil {
@@ -133,6 +156,8 @@ func TestPrompt_Execute_WithoutFindings(t *testing.T) {
 		{"zero-skip policy", "Zero-Skip Policy", true},
 		{"red-green cycle", "Red-Green Cycle", true},
 		{"self-directing instruction", "sprint-tasks.md", true},
+		{"source story context instruction", "source:` field, open the referenced file", true},
+		{"source fallback on missing file", "file is missing, proceed with the task description", true},
 		{"mutation asymmetry", "Mutation Asymmetry", true},
 		{"commit on green only", "Commit ONLY when ALL tests pass", true},
 		{"format contract title", "Sprint Tasks Format Specification", true},
@@ -164,9 +189,8 @@ func TestPrompt_Execute_WithoutFindings(t *testing.T) {
 
 func TestPrompt_Execute_FormatContract(t *testing.T) {
 	data := config.TemplateData{}
-	replacements := map[string]string{
-		"__FORMAT_CONTRACT__": config.SprintTasksFormat(),
-	}
+	replacements := executeReplacements()
+	replacements["__FORMAT_CONTRACT__"] = config.SprintTasksFormat()
 
 	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
 	if err != nil {
@@ -201,9 +225,8 @@ func TestPrompt_Execute_WithGates(t *testing.T) {
 	data := config.TemplateData{
 		GatesEnabled: true,
 	}
-	replacements := map[string]string{
-		"__FORMAT_CONTRACT__": config.SprintTasksFormat(),
-	}
+	replacements := executeReplacements()
+	replacements["__FORMAT_CONTRACT__"] = config.SprintTasksFormat()
 
 	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
 	if err != nil {
@@ -244,10 +267,9 @@ func TestPrompt_Execute_Injection(t *testing.T) {
 	data := config.TemplateData{
 		HasFindings: true,
 	}
-	replacements := map[string]string{
-		"__FORMAT_CONTRACT__":  dangerousContent,
-		"__FINDINGS_CONTENT__": "finding with {{.Exploit}} attempt",
-	}
+	replacements := executeReplacements()
+	replacements["__FORMAT_CONTRACT__"] = dangerousContent
+	replacements["__FINDINGS_CONTENT__"] = "finding with {{.Exploit}} attempt"
 
 	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
 	if err != nil {
@@ -271,9 +293,8 @@ func TestPrompt_Execute_Injection(t *testing.T) {
 func TestPrompt_Review(t *testing.T) {
 	taskContent := "Implement user authentication for login endpoint"
 	data := config.TemplateData{}
-	replacements := map[string]string{
-		"__TASK_CONTENT__": taskContent,
-	}
+	replacements := reviewReplacements()
+	replacements["__TASK_CONTENT__"] = taskContent
 
 	got, err := config.AssemblePrompt(reviewTemplate, data, replacements)
 	if err != nil {

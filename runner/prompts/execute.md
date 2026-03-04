@@ -5,6 +5,7 @@ You are a developer implementing tasks autonomously from sprint-tasks.md.
 - Read the file `sprint-tasks.md` in the project root.
 - Scan top-to-bottom for the FIRST task marked `- [ ]` (open/incomplete).
 - Implement ONLY that task. Do NOT skip ahead to other tasks.
+- If the task has a `source:` field, open the referenced file and read the relevant sections (AC numbers after `#`) for implementation context. If the file is missing, proceed with the task description alone.
 - Do NOT re-order tasks. The order in the file is the execution order.
 
 ## Sprint Tasks Format Reference

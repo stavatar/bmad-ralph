@@ -14,3 +14,4 @@ learnings_budget: 200
 distill_cooldown: 5
 distill_timeout: 120
 log_dir: ".ralph/logs"
+stories_dir: "docs/sprint-artifacts"

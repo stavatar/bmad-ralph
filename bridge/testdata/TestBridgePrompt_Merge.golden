@@ -157,18 +157,62 @@ User can pay with credit card.
 ## Conversion Instructions
 
 - Read ALL acceptance criteria (AC) in the story.
-- For each AC, create one or more tasks that satisfy it.
-- Preserve AC numbering in source fields: `source: stories/<filename>.md#AC-<N>`.
+- Classify each AC (see AC Classification below).
+- Group related ACs into tasks by **unit of work** — one task per logical code change, NOT one task per AC.
+- Each task = one Claude Code session. Minimize task count while maintaining full AC coverage.
 - Group tasks under epic headers (`## Epic Name`) based on story context.
 - Every task line MUST start with exactly `- [ ]` (open/incomplete).
 - Every task MUST have an indented `source:` field on the next line.
+- The `source:` field references the PRIMARY AC. If a task covers multiple ACs, list them: `#AC-1,AC-2,AC-3`.
 
-## Test Derivation (Red-Green Principle)
+## AC Classification
 
-For each objective, testable AC:
-- Create a TEST task BEFORE the implementation task (red-green order).
-- The test task describes what to verify; the implementation task makes it pass.
-- Subjective or review-only AC: do NOT generate a test task; mark for human review instead.
+Before creating tasks, classify each AC into one of four types:
+
+**Implementation AC** — requires writing or modifying code. Creates a task.
+Example: "Add GET /api/students/:id endpoint returning full student data"
+
+**Behavioral AC** — a test case or expected behavior of an implementation AC. Does NOT create a separate task — merge into the implementation task as verification criteria.
+Example: "Verify PATCH with approvalMode=AUTO_SAVE returns 200 OK" ← this is a test assertion within the implementation task, not a separate session.
+
+**Verification AC** — confirms existing behavior works, zero code changes needed. The story says "already implemented", "no changes needed", or "confirm with existing test". Does NOT create a task — mention as a verification step within a related task, or skip entirely.
+Example: "Verify POST /api/assignments with prLink returns 201 Created (already implemented)"
+
+**Manual AC** — requires actions Claude cannot perform (browser testing, Docker, SSH to VPS, manual UI checks). Does NOT create a Claude task — note as `[MANUAL]` in the output or skip.
+Example: "Verify hot reload works — changes auto-recompile via volume mount"
+
+## Task Granularity Rule
+
+**CRITICAL:** Group ACs into tasks by **unit of work**, not by AC count.
+
+A "unit of work" is a set of changes that:
+- Touch the same file or closely related files (e.g., one DTO + its test file)
+- Implement one logical feature (e.g., "add validation to a DTO" even if 6 fields)
+- Cannot be meaningfully split (e.g., frontend type change + backend response change)
+
+### Correct (unit-of-work level):
+
+Story has 6 ACs adding decorators to fields in RunsQueryDto → **1 task:**
+`- [ ] Add class-validator decorators (@IsOptional, @IsIn, @IsNumberString) to all filter fields in RunsQueryDto, with unit tests for individual and combined filtering`
+
+Story has 5 ACs where 4 say "already implemented — confirm" → **1 task (the real work):**
+`- [ ] Add GET /api/assignments/:id endpoint with tests; verify existing prLink behavior as part of test suite`
+
+Story has 7 ACs for enum validation, 5 of which are "verify value X returns 200" → **1 task:**
+`- [ ] Create UpdateAiTaskDto with @IsEnum validation for approvalMode and trigger, wire into controller, with unit tests for all valid/invalid enum values`
+
+### WRONG (over-decomposed):
+
+- 6 tasks for 6 decorators in one file ← should be 1 task
+- 4 [VERIFY] tasks confirming existing behavior ← should be 0 tasks (or verification steps)
+- Separate tasks for "test invalid value" and "implement validation" ← should be 1 task
+- 5 tasks for 5 manual Docker/VPS checks ← should be 0-1 tasks
+
+## Testing Within Tasks
+
+Tests are part of the task description, not separate entries:
+- Include "with unit tests" or "with integration test" in the task description.
+- List key test scenarios inline: "...with tests for valid input, invalid enum, and 404 not-found cases".
 
 ## Gate Marking
 
@@ -203,52 +247,31 @@ Look for keywords like "deploy", "release", "production", "staging", "visible to
 
 ## Service Tasks
 
-Generate service tasks with appropriate prefixes:
-- `[SETUP]` — framework dependencies, environment setup, tooling installation.
-- `[VERIFY]` — integration checks, contract validation, smoke tests.
-- `[E2E]` — end-to-end workflow tests covering critical user flows.
+Generate service tasks SPARINGLY — only when they represent real work that cannot be folded into implementation tasks.
 
-If the project has a test framework configured, generate test tasks directly.
-If no test framework is detected, include a `[SETUP]` task for test framework installation before any test tasks.
+Prefixes:
+- `[SETUP]` — NEW framework dependencies, environment setup, tooling installation. Only when the project does not yet have the dependency.
+- `[E2E]` — end-to-end workflow tests spanning multiple components. Only when the story describes a cross-component flow.
 
-### `[SETUP]` Detection and Ordering
+**Do NOT generate `[VERIFY]` tasks** for confirming existing behavior. If a story says "already works — confirm", fold that into an implementation task's test suite or skip it.
 
-Detect story dependencies on NEW frameworks, libraries, or infrastructure not yet in the project. Generate `[SETUP]` tasks BEFORE any implementation tasks that depend on them.
+### `[SETUP]` — only for NEW dependencies
 
-Examples of `[SETUP]` tasks:
-- Install and configure a testing framework.
-- Set up database migrations or schema.
-- Initialize project tooling or build pipeline.
-- Configure environment variables or secrets management.
+Generate `[SETUP]` only when the project needs something it doesn't have yet (new test framework, new database, new tooling). Do NOT generate `[SETUP]` for "verify prerequisites are merged" — that is a process step, not a Claude task.
 
-### `[VERIFY]` Detection and Ordering
+### `[E2E]` — only for real cross-component flows
 
-Detect stories that span multiple components or integration points. Generate `[VERIFY]` tasks after related implementation tasks they verify.
-
-Examples of `[VERIFY]` tasks:
-- Verify API and frontend integration works end-to-end.
-- Validate contract compliance between services.
-- Check cross-service data flow correctness.
-- Confirm backwards compatibility with existing consumers.
-
-### `[E2E]` Detection and Ordering
-
-Detect critical user flows or multi-step workflows in the story. Generate `[E2E]` tasks at the end of the epic section covering the complete flow.
-
-Examples of `[E2E]` tasks:
-- End-to-end user registration and login flow.
-- Full checkout pipeline from cart to payment confirmation.
-- Complete CI/CD pipeline validation.
+Generate `[E2E]` only when there is a multi-step user flow to test across components. Do NOT generate `[E2E]` for running a single curl command or verifying one endpoint.
 
 ### Ordering Rule
 
 Service tasks follow this order within an epic section:
-`[SETUP]` → implementation tasks → `[VERIFY]` → `[E2E]`
+`[SETUP]` → implementation tasks → `[E2E]`
 
 ## Source Traceability
 
 Every task MUST have an indented `source:` field on the line immediately following it.
-Format: `source: stories/<filename>.md#AC-<N>` or `#SETUP`, `#VERIFY`, `#E2E` for service tasks.
+Format: `source: stories/<filename>.md#AC-<N>` (or `#AC-1,AC-2,AC-3` for multi-AC tasks), `#SETUP` or `#E2E` for service tasks.
 
 ### Scoping Rules
 
@@ -263,15 +286,13 @@ Format: `source: stories/<filename>.md#AC-<N>` or `#SETUP`, `#VERIFY`, `#E2E` fo
   source: stories/<filename>.md#AC-<N>
 ```
 
-Where `<N>` is the AC number. If a task satisfies multiple ACs, use the PRIMARY AC number.
+Where `<N>` is the AC number. If a task covers multiple ACs, list them comma-separated: `#AC-1,AC-2,AC-3`.
 
 ### Format for Service Tasks
 
 ```
 - [ ] [SETUP] Install testing framework
   source: stories/<filename>.md#SETUP
-- [ ] [VERIFY] Verify API integration
-  source: stories/<filename>.md#VERIFY
 - [ ] [E2E] End-to-end login flow
   source: stories/<filename>.md#E2E
 ```
