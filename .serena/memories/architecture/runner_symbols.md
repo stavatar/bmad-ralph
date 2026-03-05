@@ -38,5 +38,26 @@
 - `DetectSerena(projectRoot) CodeIndexerDetector`
 - `SerenaMCPDetector` — checks .mcp.json for serena config
 
+## runner/metrics.go — Observability
+- `DiffStats` struct: FilesChanged, Insertions, Deletions, Packages
+- `ReviewFinding` struct: parsed review finding (severity, description)
+- `LatencyBreakdown` struct: timing per phase (session, git, gate, review, distill)
+- `GateStats` struct: gate analytics (prompts, approvals, rejections, skips, wait time)
+- `ErrorStats` struct: error categorization (timeout, parse, git, session, config, unknown)
+- `TaskMetrics` struct: per-task metrics (tokens, cost, diff, findings, latency, gate, errors)
+- `RunMetrics` struct: aggregate run metrics (JSON-serializable)
+- `MetricsCollector` struct: nil-safe injectable collector
+  - `NewMetricsCollector(runID, pricing)` → constructor
+  - `StartTask/FinishTask` → lifecycle pair (MUST be matched on all code paths)
+  - `RecordSession/RecordDiff/RecordFindings/RecordGate/RecordError` → incremental recording
+  - `Finish() → RunMetrics` → aggregation (call ONCE)
+- `PrintRunSummary(w, metrics)` — colored terminal summary
+
+## runner/similarity.go — Duplicate Detection
+- `SimilarityDetector` struct: window, warnAt, hardAt, history
+- `NewSimilarityDetector(window, warn, hard)` → constructor
+- `Check(prompt) (score, action)` — Jaccard similarity check
+- `jaccardSimilarity(a, b)` — set intersection / union on whitespace tokens
+
 ## runner/log.go — Structured Logging
 - `RunLogger` — file + stderr writer with Info/Warn/Error levels

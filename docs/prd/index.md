@@ -13,3 +13,4 @@
   - [Функциональные требования](#functional-requirements)
   - [Non-Functional Requirements](#non-functional-requirements)
   - [Observability & Metrics](observability-metrics.md) — Epic 7: token/cost tracking, review enrichment, run summary, problem detection
+  - [Serena Memory Sync](serena-memory-sync.md) — Epic 8: автоматическая синхронизация Serena memories после ralph run

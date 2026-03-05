@@ -17,14 +17,18 @@ It manages iterative AI-driven development cycles with code review, human gates,
 - CRLF auto-fixed by PostToolUse hook (`.claude/hooks/fix-crlf.sh`)
 - `.gitattributes` enforces LF on git add
 
+## Project Status
+All 7 epics complete (FR1-FR56): Foundation, Bridge, Core Loop, Code Review, Human Gates, Knowledge Management, Observability & Metrics.
+Total: 62 stories, ~350+ acceptance criteria, ~137 testing/code quality patterns.
+
 ## Package Structure (dependency direction: top-down, cycles forbidden)
 ```
-cmd/ralph/     → CLI entry point, exit codes, cobra commands
-runner/        → Core execution loop, prompts, git, scanning, knowledge mgmt
+cmd/ralph/     → CLI entry point, exit codes, cobra commands (run, bridge, distill)
+runner/        → Core execution loop, prompts, git, scanning, knowledge mgmt, metrics, similarity
 bridge/        → Bridge mode (single-shot sessions)
 session/       → Claude session management, result parsing
 gates/         → Human gate prompts and decisions
-config/        → Configuration (leaf package, depends on nothing)
+config/        → Configuration (leaf package, depends on nothing), pricing
 internal/testutil/ → Test infrastructure, mock Claude, mock git, scenarios
 ```
 
@@ -34,3 +38,4 @@ internal/testutil/ → Test infrastructure, mock Claude, mock git, scenarios
 - `session` and `gates` do NOT depend on each other
 - Exit codes ONLY in `cmd/ralph/`. Packages return errors, never `os.Exit`
 - `config.Config` parsed once, passed by pointer, NEVER mutated at runtime
+- `MetricsCollector` nil-safe injectable: nil receiver = no-op, no nil checks in callers

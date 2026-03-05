@@ -29,9 +29,12 @@
 - `runner/runner_review_integration_test.go` — review cycle integration
 - `runner/runner_gates_integration_test.go` — gate prompt integration
 - `runner/runner_final_integration_test.go` — end-to-end scenarios
+- `runner/metrics_test.go` — MetricsCollector unit tests (lifecycle, nil-safe, aggregation)
+- `runner/similarity_test.go` — SimilarityDetector tests (Jaccard, window, thresholds)
 - `runner/prompt_test.go` — template rendering + content assertions
 - `runner/testmain_test.go` — TestMain with mock Claude dispatch
 - `gates/gates_test.go` + `gates/gates_integration_test.go`
+- `config/pricing_test.go` — Pricing tests (merge, most expensive, cost calculation)
 
 ## Testing Patterns
 - Table-driven by default, Go stdlib assertions (no testify)

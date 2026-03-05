@@ -1,7 +1,13 @@
 # Config, Session, Bridge, Gates — Symbol Map
 
+## config/pricing.go
+- `Pricing` struct: InputPer1M, OutputPer1M, CachePer1M (float64)
+- `DefaultPricing` — map[string]Pricing with built-in model prices
+- `MergePricing(base, override)` — user prices override defaults
+- `MostExpensiveModel(pricing)` — conservative estimate for unknown models
+
 ## config/config.go
-- `Config` struct: 18 fields (ClaudeCommand, MaxTurns, MaxIterations, GatesEnabled, etc.)
+- `Config` struct: 25+ fields (ClaudeCommand, MaxTurns, MaxIterations, GatesEnabled, StuckThreshold, SimilarityWindow, SimilarityWarn, SimilarityHard, BudgetMaxUSD, BudgetWarnPct, StoriesDir, etc.)
 - `CLIFlags` struct: CLI override fields
 - `Load(path) (*Config, error)` — YAML loading with defaults + validation
 - `Config.Validate() error` — field validation

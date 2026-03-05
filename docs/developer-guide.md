@@ -69,6 +69,9 @@ bmad-ralph/
 │   ├── git.go          # GitClient interface + реализация
 │   ├── scan.go         # Парсинг sprint-tasks.md
 │   ├── prompt.go       # Сборка промптов
+│   ├── metrics.go      # MetricsCollector, RunMetrics, TaskMetrics
+│   ├── similarity.go   # SimilarityDetector (Jaccard)
+│   ├── log.go          # RunLogger (runID, файловый лог)
 │   ├── knowledge*.go   # Управление LEARNINGS.md
 │   ├── knowledge_distill.go  # Дистилляция знаний
 │   ├── serena.go       # Детект Serena MCP
@@ -90,6 +93,7 @@ bmad-ralph/
 │   ├── constants.go    # Строковые константы и regex
 │   ├── defaults.yaml   # Встроенные умолчания (embed)
 │   ├── errors.go       # Sentinel errors, ExitCodeError
+│   ├── pricing.go      # Pricing struct, DefaultPricing, MergePricing
 │   └── prompt.go       # Шаблонизатор промптов
 │
 └── internal/
@@ -137,6 +141,66 @@ flowchart TD
 
 **Интерфейсы в пакете-потребителе.** `GitClient` определён в `runner/`, а не в отдельном `git/` пакете.
 
+### Observability (MetricsCollector)
+
+`MetricsCollector` — nil-safe injectable struct в `runner/metrics.go`. Инжектируется через поле `Runner.Metrics`. Если `nil` — все методы работают как no-op (ни одна проверка `if mc != nil` не нужна в вызывающем коде).
+
+**Жизненный цикл:**
+
+```
+NewMetricsCollector(runID, pricing)
+  → StartTask(name)
+    → RecordSession(result)    // токены, стоимость, latency
+    → RecordDiff(stats)        // git diff --stat
+    → RecordFindings(findings) // review findings
+    → RecordGate(decision)     // gate analytics
+    → RecordError(category)    // классификация ошибок
+  → FinishTask(status, commitSHA)
+→ Finish() → RunMetrics
+```
+
+Правило: `StartTask` всегда имеет парный `FinishTask` на всех code paths (включая error paths).
+
+**Ключевые типы:**
+
+| Тип | Файл | Назначение |
+|-----|-------|-----------|
+| `MetricsCollector` | `runner/metrics.go` | Сборщик метрик (nil-safe) |
+| `RunMetrics` | `runner/metrics.go` | Итоговые метрики запуска (JSON-сериализуемые) |
+| `TaskMetrics` | `runner/metrics.go` | Метрики одной задачи |
+| `DiffStats` | `runner/metrics.go` | Статистика git diff (файлы, строки, пакеты) |
+| `SimilarityDetector` | `runner/similarity.go` | Jaccard similarity с скользящим окном |
+| `Pricing` | `config/pricing.go` | Цены моделей (input/output/cache per 1M) |
+
+**SimilarityDetector** (`runner/similarity.go`) хранит скользящее окно промптов и вычисляет Jaccard similarity между текущим и предыдущими. Два порога: `warnAt` (предупреждение) и `hardAt` (аварийный пропуск). Инжектируется через `Runner.Similarity`.
+
+**Pricing** (`config/pricing.go`) — таблица цен моделей. `DefaultPricing` содержит встроенные цены. `MergePricing` позволяет перекрыть пользовательскими ценами. `MostExpensiveModel` используется для conservative estimate при неизвестной модели.
+
+### Инъекция зависимостей (Runner struct)
+
+`Runner` использует function injection для тестируемости. Все зависимости — public поля:
+
+```go
+type Runner struct {
+    Cfg                  *config.Config
+    Git                  GitClient              // interface
+    TasksFile            string
+    ReviewFn             ReviewFunc             // func(ctx, cfg, ...) error
+    GatePromptFn         GatePromptFunc         // func(ctx, gate) GateDecision
+    EmergencyGatePromptFn GatePromptFunc
+    ResumeExtractFn      ResumeExtractFunc
+    DistillFn            DistillFunc
+    SleepFn              func(time.Duration)
+    Knowledge            KnowledgeWriter        // interface
+    CodeIndexer          CodeIndexer            // interface (Serena MCP)
+    Logger               *RunLogger
+    Metrics              *MetricsCollector      // nil = no-op
+    Similarity           *SimilarityDetector    // nil = отключён
+}
+```
+
+В тестах подставляются mock-функции/структуры. В продакшене — реальные реализации из `cmd/ralph/run.go`.
+
 ### Поток выполнения `ralph run`
 
 ```mermaid
@@ -145,13 +209,20 @@ sequenceDiagram
     participant Runner as runner
     participant Session as session
     participant Gates as gates
+    participant MC as MetricsCollector
 
     CLI->>Runner: Run(ctx, cfg)
+    CLI->>MC: NewMetricsCollector(runID, pricing)
     loop Для каждой задачи
+        MC->>MC: StartTask(name)
         Runner->>Session: Execute(ctx, opts) [execute]
         Session-->>Runner: result
+        MC->>MC: RecordSession(result)
+        Runner->>Runner: git diff → DiffStats
+        MC->>MC: RecordDiff(stats)
         Runner->>Session: Execute(ctx, opts) [review]
         Session-->>Runner: result
+        MC->>MC: RecordFindings(findings)
         alt Есть замечания
             Runner->>Runner: повтор (до max_iterations)
         else Нет замечаний
@@ -160,8 +231,11 @@ sequenceDiagram
         opt Gates включены
             Runner->>Gates: Prompt(ctx, gate)
             Gates-->>Runner: GateDecision
+            MC->>MC: RecordGate(decision)
         end
+        MC->>MC: FinishTask(status, sha)
     end
+    MC->>MC: Finish() → RunMetrics
     Runner-->>CLI: error | nil
 ```
 
