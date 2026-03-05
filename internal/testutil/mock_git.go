@@ -12,14 +12,17 @@ var _ runner.GitClient = (*MockGitClient)(nil)
 // MockGitClient implements runner.GitClient with sequence-based responses
 // and call tracking for unit tests. Zero value returns healthy/empty/nil.
 type MockGitClient struct {
-	HealthCheckErrors []error  // sequence of errors to return; returns nil beyond slice length
-	HeadCommits       []string // sequence of SHAs to return
-	HeadCommitErrors  []error  // sequence of errors for HeadCommit (parallel to HeadCommits)
-	RestoreCleanError error    // single error value for RestoreClean
+	HealthCheckErrors []error             // sequence of errors to return; returns nil beyond slice length
+	HeadCommits       []string            // sequence of SHAs to return
+	HeadCommitErrors  []error             // sequence of errors for HeadCommit (parallel to HeadCommits)
+	RestoreCleanError error               // single error value for RestoreClean
+	DiffStatsResults  []*runner.DiffStats // sequence of DiffStats to return (indexed)
+	DiffStatsErrors   []error             // sequence of errors for DiffStats (indexed)
 
 	HealthCheckCount  int // tracks HealthCheck calls
 	HeadCommitCount   int // tracks HeadCommit calls
 	RestoreCleanCount int // tracks RestoreClean calls
+	DiffStatsCount    int // tracks DiffStats calls
 }
 
 // HealthCheck returns the next error from HealthCheckErrors sequence.
@@ -55,4 +58,21 @@ func (m *MockGitClient) HeadCommit(_ context.Context) (string, error) {
 func (m *MockGitClient) RestoreClean(_ context.Context) error {
 	m.RestoreCleanCount++
 	return m.RestoreCleanError
+}
+
+// DiffStats returns the next result from DiffStatsResults/DiffStatsErrors sequence.
+// If index exceeds slice length, returns the last element (same pattern as HeadCommit).
+func (m *MockGitClient) DiffStats(_ context.Context, _, _ string) (*runner.DiffStats, error) {
+	idx := m.DiffStatsCount
+	m.DiffStatsCount++
+	if idx < len(m.DiffStatsErrors) && m.DiffStatsErrors[idx] != nil {
+		return nil, m.DiffStatsErrors[idx]
+	}
+	if len(m.DiffStatsResults) == 0 {
+		return &runner.DiffStats{}, nil
+	}
+	if idx < len(m.DiffStatsResults) {
+		return m.DiffStatsResults[idx], nil
+	}
+	return m.DiffStatsResults[len(m.DiffStatsResults)-1], nil
 }

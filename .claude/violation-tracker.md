@@ -2,7 +2,7 @@
 
 # Scope: updated after each epic retrospective — tracks violation frequency and enforcement escalation
 
-## Violation Frequency (Epics 2-6, 42 stories, 232 findings)
+## Violation Frequency (Epics 2-7, 48 stories, 264 findings)
 
 | Category | E2 (7s) | E3 (11s) | E4 (8s) | E5 (6s) | E6 (3s) | Aggregate | Enforcement Tier |
 |----------|---------|----------|---------|---------|---------|-----------|-----------------|
@@ -56,6 +56,15 @@
 - Epic 6 Story 6.5c: 3 findings (0C/0H/1M/2L) — Distillation validation + state, patterns: dead variable with misleading comment (M1), log timing before action (L1), error path test coverage for recovery (L2)
 - Epic 6 Story 6.6: 4 findings (0C/0H/2M/2L) — Distillation CLI ralph distill, patterns: missing exported doc comment (M1), silent os.Stat non-NotExist error (M2), undocumented error discard (L1×2), misleading log on no-op (L2 noted/no-fix)
 - Epic 6 Story 6.8: 2 findings (0C/0H/1M/1L) — Final integration test, patterns: missing table case per AC (M1: empty project), undocumented error discard in test (L1). +1 coverage gap noted: CrashRecovery stderr not asserted (Task 10.6)
+- Epic 7 Story 7.1: 7 findings (0C/0H/4M/3L) — Metrics foundation, 2 new patterns (metrics lifecycle completeness, metrics recording on error paths), 5 instances of existing patterns (return value handling, doc accuracy, assertion quality)
+- Epic 7 Story 7.2: 5 findings (0C/0H/3M/2L) — Git Diff Stats, 0 new patterns, all match existing: return value handling (M1: fmt.Sscanf discarded), stub method body empty (M2: RecordGitDiff), test coverage gap (M3: binary file path untested), assertion completeness (L1: Packages field), missing integration test (L2)
+- Epic 7 Story 7.4: 5 findings (0C/0H/3M/2L) — Review Enrichment, 0 new patterns, all match existing: standalone duplicate test (M1: BackwardCompat=CleanNoFindings), table missing new struct field assertion (M2: Scenarios wantFindingsNil), incomplete mock data verification (M3: RecordReview Findings[1] skipped), same gap in MultipleReviewCycles (L1), defensive ToUpper untested/YAGNI (L2)
+- Epic 7 Story 7.3: 5 findings (0C/1H/3M/1L) — Cost Tracking, 0 new patterns, all fixed, all match existing: AC code path coverage (H1: review session cost untracked→fixed via ReviewResult.SessionMetrics), test coverage gap (M1: no ModelPricing yaml test), symmetric negative check (M2: gate cost absent with nil Metrics), test coverage scope (M3: only 1/4 gate sites tested→documented), doc comment accuracy (L1: RecordSession edge cases)
+- Epic 7 Story 7.5: 5 findings (0C/0H/4M/1L) — Stuck Detection, 0 new patterns, all fixed, all match existing: doc comment accuracy (M1: Execute doc missing stuck detection, L1: consecutiveNoCommit undocumented), error path test coverage (M2: InjectFeedback failure in stuck — documented coverage gap), assertion quality (M3: RecordRetry positive path untested→fixed), incomplete Dev Agent Record (M4: empty File List/notes→filled)
+- Epic 7 Story 7.8: 6 findings (1C/0H/3M/2L) — Similarity Detection, 0 new patterns, all fixed, all match existing: dead feature in production (C1: Run() missing SimilarityDetector init), doc comment accuracy (M1: "consecutive" misleading, L2: constructor doc claim without validation), error path test coverage (M2: hard+no-gates untested), assertion quality (M3: enriched text incomplete), test naming (L1: misleading boundary test name)
+- Epic 7 Story 7.9: 5 findings (0C/1H/3M/1L) — Error Categorization + Latency, 2 new patterns (incremental metrics recording, double Finish()), all fixed: double Finish() on MetricsCollector (H1: tests called Finish() after Execute() already finished), stale doc comment on RecordSession (M1), partial latency lost on error returns (M2→refactored to incremental), story doc count mismatch (M3), dead RecordError message parameter (L1)
+- Epic 7 Story 7.7: 5 findings (0C/0H/4M/1L) — Budget Alerts, 0 new patterns, all fixed, all match existing: error format inconsistency %f→%.2f (M1), missing dollar amount assertions in hard error test (M2), missing inner error assertion in gate quit test (M3), imprecise gate count assertion (M4), AC5 doc lists distill but no distill RecordSession (L1)
+- Epic 7 Story 7.10: 4 findings (0C/0H/2M/2L) — Run Summary Report, 1 new pattern (enum switch completeness), all fixed: missing nil guard test+false test count claim (M1: assertion quality+doc accuracy), enum switch ignores "error" status in aggregates (M2: new pattern), false completion note about var restoration (L1: doc accuracy), test naming convention violation (L2: test naming)
 
 ## Update Process
 

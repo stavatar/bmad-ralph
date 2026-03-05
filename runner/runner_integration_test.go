@@ -322,7 +322,7 @@ func TestRunner_Execute_Integration_HappyPath(t *testing.T) {
 		return runner.ReviewResult{Clean: true}, nil
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestRunner_Execute_Integration_RetryWithResume(t *testing.T) {
 	r.SleepFn = sleep.fn
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestRunner_Execute_Integration_MaxRetriesEmergencyStop(t *testing.T) {
 	r.ResumeExtractFn = resume.fn
 	r.SleepFn = sleep.fn
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: expected error, got nil")
 	}
@@ -463,7 +463,7 @@ func TestRunner_Execute_Integration_ResumeAfterPartialCompletion(t *testing.T) {
 	r, stateDir := setupRunnerIntegration(t, tmpDir, twoCompletedOneOpen, scenario, git)
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -499,7 +499,7 @@ func TestRunner_Execute_Integration_DirtyTreeRecovery(t *testing.T) {
 	r, _ := setupRunnerIntegration(t, tmpDir, threeOpenTasks, scenario, git)
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -541,7 +541,7 @@ func TestRunner_Execute_Integration_ResumeFailureRecovery(t *testing.T) {
 	r.SleepFn = sleep.fn
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -589,7 +589,7 @@ func TestRunner_Execute_Integration_BridgeGoldenFileContract(t *testing.T) {
 
 	r, _ := setupRunnerIntegration(t, tmpDir, string(goldenData), scenario, git)
 
-	err = r.Execute(context.Background())
+	_, err = r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -597,5 +597,148 @@ func TestRunner_Execute_Integration_BridgeGoldenFileContract(t *testing.T) {
 	// 3 sessions launched despite source: annotations and ## Epic: headers in golden file
 	if git.HeadCommitCount != 6 {
 		t.Errorf("HeadCommitCount = %d, want 6 (3 sessions)", git.HeadCommitCount)
+	}
+}
+
+// TestRunner_Execute_Integration_WithMetricsCollector verifies that Execute returns
+// non-nil RunMetrics when MetricsCollector is configured, and that session metrics
+// from mock Claude output are accumulated in the result. (AC3, AC7)
+func TestRunner_Execute_Integration_WithMetricsCollector(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "integration-metrics",
+		Steps: []testutil.ScenarioStep{
+			{
+				Type: "execute", ExitCode: 0, SessionID: "m-1",
+				Model: "claude-sonnet-4-20250514",
+				Usage: map[string]int{"input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 10},
+			},
+			{
+				Type: "execute", ExitCode: 0, SessionID: "m-2",
+				Model: "claude-sonnet-4-20250514",
+				Usage: map[string]int{"input_tokens": 200, "output_tokens": 80, "cache_read_tokens": 20},
+			},
+		},
+	}
+	// HeadCommit call sequence per iteration: before(1), after(2), FinishTask(3).
+	// 2 iterations × 3 calls = 6 values needed.
+	git := &testutil.MockGitClient{
+		HeadCommits: []string{
+			"aaa", "bbb", "bbb", // iter 0: before=aaa, after=bbb (changed), finish=bbb
+			"bbb", "ccc", "ccc", // iter 1: before=bbb, after=ccc (changed), finish=ccc
+		},
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, twoOpenTasks, scenario, git)
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		return runner.ReviewResult{Clean: true}, nil
+	}
+	r.Cfg.MaxIterations = 2
+	r.Cfg.RunID = "test-run-id"
+	r.Metrics = runner.NewMetricsCollector("test-run-id", nil)
+
+	rm, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if rm == nil {
+		t.Fatal("Execute: RunMetrics is nil, want non-nil when MetricsCollector configured")
+	}
+	if rm.RunID != "test-run-id" {
+		t.Errorf("RunMetrics.RunID = %q, want %q", rm.RunID, "test-run-id")
+	}
+	if len(rm.Tasks) != 2 {
+		t.Fatalf("RunMetrics.Tasks len = %d, want 2", len(rm.Tasks))
+	}
+
+	// Verify task-level fields for task 0
+	t0 := rm.Tasks[0]
+	if t0.Name != "Task one" {
+		t.Errorf("Tasks[0].Name = %q, want %q", t0.Name, "Task one")
+	}
+	if t0.Status != "done" {
+		t.Errorf("Tasks[0].Status = %q, want %q", t0.Status, "done")
+	}
+	if t0.CommitSHA != "bbb" {
+		t.Errorf("Tasks[0].CommitSHA = %q, want %q", t0.CommitSHA, "bbb")
+	}
+	if t0.InputTokens != 100 {
+		t.Errorf("Tasks[0].InputTokens = %d, want 100", t0.InputTokens)
+	}
+	if t0.OutputTokens != 50 {
+		t.Errorf("Tasks[0].OutputTokens = %d, want 50", t0.OutputTokens)
+	}
+	if t0.CacheTokens != 10 {
+		t.Errorf("Tasks[0].CacheTokens = %d, want 10", t0.CacheTokens)
+	}
+	if t0.Sessions != 1 {
+		t.Errorf("Tasks[0].Sessions = %d, want 1", t0.Sessions)
+	}
+
+	// Verify task-level fields for task 1
+	t1 := rm.Tasks[1]
+	if t1.Name != "Task two" {
+		t.Errorf("Tasks[1].Name = %q, want %q", t1.Name, "Task two")
+	}
+	if t1.Status != "done" {
+		t.Errorf("Tasks[1].Status = %q, want %q", t1.Status, "done")
+	}
+	if t1.CommitSHA != "ccc" {
+		t.Errorf("Tasks[1].CommitSHA = %q, want %q", t1.CommitSHA, "ccc")
+	}
+	if t1.InputTokens != 200 {
+		t.Errorf("Tasks[1].InputTokens = %d, want 200", t1.InputTokens)
+	}
+	if t1.OutputTokens != 80 {
+		t.Errorf("Tasks[1].OutputTokens = %d, want 80", t1.OutputTokens)
+	}
+	if t1.CacheTokens != 20 {
+		t.Errorf("Tasks[1].CacheTokens = %d, want 20", t1.CacheTokens)
+	}
+	if t1.Sessions != 1 {
+		t.Errorf("Tasks[1].Sessions = %d, want 1", t1.Sessions)
+	}
+
+	// Verify run-level totals
+	if rm.InputTokens != 300 {
+		t.Errorf("RunMetrics.InputTokens = %d, want 300", rm.InputTokens)
+	}
+	if rm.OutputTokens != 130 {
+		t.Errorf("RunMetrics.OutputTokens = %d, want 130", rm.OutputTokens)
+	}
+	if rm.TotalSessions != 2 {
+		t.Errorf("RunMetrics.TotalSessions = %d, want 2", rm.TotalSessions)
+	}
+}
+
+// TestRunner_Execute_Integration_WithoutMetricsCollector verifies that Execute
+// works correctly with nil MetricsCollector (returns nil RunMetrics). (AC4)
+func TestRunner_Execute_Integration_WithoutMetricsCollector(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "integration-no-metrics",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "nm-1"},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs(
+			[2]string{"aaa", "bbb"},
+		),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		return runner.ReviewResult{Clean: true}, nil
+	}
+	r.Cfg.MaxIterations = 1
+	// r.Metrics intentionally left nil
+
+	rm, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if rm != nil {
+		t.Errorf("Execute: RunMetrics = %+v, want nil when MetricsCollector not configured", rm)
 	}
 }

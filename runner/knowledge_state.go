@@ -37,11 +37,11 @@ type DistillMetrics struct {
 // DistillState tracks distillation timing across runs.
 // Persisted as JSON at {projectRoot}/.ralph/distill-state.json.
 type DistillState struct {
-	Version              int              `json:"version"`
-	MonotonicTaskCounter int              `json:"monotonic_task_counter"`
-	LastDistillTask      int              `json:"last_distill_task"`
-	Categories           []string         `json:"categories,omitempty"`
-	Metrics              *DistillMetrics  `json:"metrics,omitempty"`
+	Version              int             `json:"version"`
+	MonotonicTaskCounter int             `json:"monotonic_task_counter"`
+	LastDistillTask      int             `json:"last_distill_task"`
+	Categories           []string        `json:"categories,omitempty"`
+	Metrics              *DistillMetrics `json:"metrics,omitempty"`
 }
 
 // LoadDistillState reads DistillState from path.
@@ -123,4 +123,3 @@ func RecoverDistillation(projectRoot string) error {
 
 	return nil
 }
-

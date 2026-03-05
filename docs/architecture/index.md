@@ -10,3 +10,4 @@
   - [Project Structure & Boundaries](#project-structure-boundaries)
   - [Architecture Validation Results](#architecture-validation-results)
   - [Architecture Completion Summary](#architecture-completion-summary)
+  - [Observability & Metrics](observability-metrics.md) — Epic 7: metrics types, MetricsCollector, data flow, package mapping

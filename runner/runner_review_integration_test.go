@@ -54,7 +54,7 @@ func TestRunner_Execute_ReviewIntegration_CleanReview(t *testing.T) {
 
 	r, stateDir := setupReviewIntegration(t, tmpDir, oneTask, scenario, mock)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestRunner_Execute_ReviewIntegration_FindingsFixClean(t *testing.T) {
 
 	r, stateDir := setupReviewIntegration(t, tmpDir, oneTask, scenario, mock)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestRunner_Execute_ReviewIntegration_MaxReviewCycles(t *testing.T) {
 	r, _ := setupReviewIntegration(t, tmpDir, oneTask, scenario, mock)
 	r.Cfg.MaxReviewIterations = 3
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 
 	// AC3: ErrMaxReviewCycles
 	if !errors.Is(err, config.ErrMaxReviewCycles) {
@@ -277,7 +277,7 @@ func TestRunner_Execute_ReviewIntegration_MultiTaskMixed(t *testing.T) {
 
 	r, _ := setupReviewIntegration(t, tmpDir, threeTasks, scenario, mock)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestRunner_Execute_ReviewIntegration_BridgeGoldenFile(t *testing.T) {
 
 	r, _ := setupReviewIntegration(t, tmpDir, goldenContent, scenario, mock)
 
-	execErr := r.Execute(context.Background())
+	_, execErr := r.Execute(context.Background())
 	if execErr != nil {
 		t.Fatalf("Execute: unexpected error: %v", execErr)
 	}

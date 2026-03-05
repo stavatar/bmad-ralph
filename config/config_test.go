@@ -45,6 +45,14 @@ review_min_severity: "HIGH"
 always_extract: true
 serena_enabled: false
 learnings_budget: 500
+stuck_threshold: 5
+budget_max_usd: 25.0
+budget_warn_pct: 70
+model_pricing:
+  custom-model:
+    input_per_1m: 5.0
+    output_per_1m: 25.0
+    cache_per_1m: 0.50
 log_dir: "/tmp/ralph-logs"
 `
 	writeConfigYAML(t, dir, yaml)
@@ -93,6 +101,31 @@ log_dir: "/tmp/ralph-logs"
 	}
 	if cfg.LearningsBudget != 500 {
 		t.Errorf("LearningsBudget = %d, want 500", cfg.LearningsBudget)
+	}
+	if cfg.StuckThreshold != 5 {
+		t.Errorf("StuckThreshold = %d, want 5", cfg.StuckThreshold)
+	}
+	if cfg.BudgetMaxUSD != 25.0 {
+		t.Errorf("BudgetMaxUSD = %f, want 25.0", cfg.BudgetMaxUSD)
+	}
+	if cfg.BudgetWarnPct != 70 {
+		t.Errorf("BudgetWarnPct = %d, want 70", cfg.BudgetWarnPct)
+	}
+	if len(cfg.ModelPricing) != 1 {
+		t.Fatalf("ModelPricing len = %d, want 1", len(cfg.ModelPricing))
+	}
+	if p, ok := cfg.ModelPricing["custom-model"]; !ok {
+		t.Error("ModelPricing missing key \"custom-model\"")
+	} else {
+		if p.InputPer1M != 5.0 {
+			t.Errorf("ModelPricing[custom-model].InputPer1M = %f, want 5.0", p.InputPer1M)
+		}
+		if p.OutputPer1M != 25.0 {
+			t.Errorf("ModelPricing[custom-model].OutputPer1M = %f, want 25.0", p.OutputPer1M)
+		}
+		if p.CachePer1M != 0.50 {
+			t.Errorf("ModelPricing[custom-model].CachePer1M = %f, want 0.50", p.CachePer1M)
+		}
 	}
 	if cfg.LogDir != "/tmp/ralph-logs" {
 		t.Errorf("LogDir = %q, want %q", cfg.LogDir, "/tmp/ralph-logs")
@@ -337,6 +370,27 @@ func TestConfig_Load_DefaultsComplete(t *testing.T) {
 	}
 	if cfg.DistillTimeout != 120 {
 		t.Errorf("DistillTimeout = %d, want 120", cfg.DistillTimeout)
+	}
+	if cfg.StuckThreshold != 2 {
+		t.Errorf("StuckThreshold = %d, want 2", cfg.StuckThreshold)
+	}
+	if cfg.SimilarityWindow != 0 {
+		t.Errorf("SimilarityWindow = %d, want 0", cfg.SimilarityWindow)
+	}
+	if cfg.SimilarityWarn != 0.85 {
+		t.Errorf("SimilarityWarn = %f, want 0.85", cfg.SimilarityWarn)
+	}
+	if cfg.SimilarityHard != 0.95 {
+		t.Errorf("SimilarityHard = %f, want 0.95", cfg.SimilarityHard)
+	}
+	if cfg.BudgetMaxUSD != 0 {
+		t.Errorf("BudgetMaxUSD = %f, want 0", cfg.BudgetMaxUSD)
+	}
+	if cfg.BudgetWarnPct != 80 {
+		t.Errorf("BudgetWarnPct = %d, want 80", cfg.BudgetWarnPct)
+	}
+	if cfg.ModelPricing != nil {
+		t.Errorf("ModelPricing = %v, want nil (no default)", cfg.ModelPricing)
 	}
 	if cfg.LogDir != ".ralph/logs" {
 		t.Errorf("LogDir = %q, want %q", cfg.LogDir, ".ralph/logs")
@@ -1061,6 +1115,91 @@ func TestConfig_Validate_Errors(t *testing.T) {
 			mutate:      func(c *Config) { c.LearningsBudget = 0 },
 			errContains: "learnings_budget must be > 0",
 		},
+		{
+			name:        "StuckThreshold negative",
+			mutate:      func(c *Config) { c.StuckThreshold = -1 },
+			errContains: "stuck_threshold must be >= 0",
+		},
+		{
+			name:        "SimilarityWindow negative",
+			mutate:      func(c *Config) { c.SimilarityWindow = -1 },
+			errContains: "similarity_window must be >= 0",
+		},
+		{
+			name: "SimilarityWarn zero when enabled",
+			mutate: func(c *Config) {
+				c.SimilarityWindow = 3
+				c.SimilarityWarn = 0.0
+				c.SimilarityHard = 0.95
+			},
+			errContains: "similarity_warn must be in (0.0, 1.0)",
+		},
+		{
+			name: "SimilarityWarn one when enabled",
+			mutate: func(c *Config) {
+				c.SimilarityWindow = 3
+				c.SimilarityWarn = 1.0
+				c.SimilarityHard = 0.95
+			},
+			errContains: "similarity_warn must be in (0.0, 1.0)",
+		},
+		{
+			name: "SimilarityHard zero when enabled",
+			mutate: func(c *Config) {
+				c.SimilarityWindow = 3
+				c.SimilarityWarn = 0.5
+				c.SimilarityHard = 0.0
+			},
+			errContains: "similarity_hard must be in (0.0, 1.0)",
+		},
+		{
+			name: "SimilarityHard one when enabled",
+			mutate: func(c *Config) {
+				c.SimilarityWindow = 3
+				c.SimilarityWarn = 0.5
+				c.SimilarityHard = 1.0
+			},
+			errContains: "similarity_hard must be in (0.0, 1.0)",
+		},
+		{
+			name: "SimilarityWarn >= SimilarityHard",
+			mutate: func(c *Config) {
+				c.SimilarityWindow = 3
+				c.SimilarityWarn = 0.95
+				c.SimilarityHard = 0.85
+			},
+			errContains: "similarity_warn must be less than similarity_hard",
+		},
+		{
+			name: "SimilarityWarn == SimilarityHard",
+			mutate: func(c *Config) {
+				c.SimilarityWindow = 3
+				c.SimilarityWarn = 0.85
+				c.SimilarityHard = 0.85
+			},
+			errContains: "similarity_warn must be less than similarity_hard",
+		},
+		{
+			name:        "BudgetMaxUSD negative",
+			mutate:      func(c *Config) { c.BudgetMaxUSD = -1.0 },
+			errContains: "budget_max_usd must be >= 0",
+		},
+		{
+			name: "BudgetWarnPct zero when budget enabled",
+			mutate: func(c *Config) {
+				c.BudgetMaxUSD = 10.0
+				c.BudgetWarnPct = 0
+			},
+			errContains: "budget_warn_pct must be 1-99",
+		},
+		{
+			name: "BudgetWarnPct 100 when budget enabled",
+			mutate: func(c *Config) {
+				c.BudgetMaxUSD = 10.0
+				c.BudgetWarnPct = 100
+			},
+			errContains: "budget_warn_pct must be 1-99",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1078,6 +1217,38 @@ func TestConfig_Validate_Errors(t *testing.T) {
 				t.Errorf("error = %q, want containing %q", err.Error(), tt.errContains)
 			}
 		})
+	}
+}
+
+func TestConfig_Validate_SimilarityDisabledSkipsThresholdValidation(t *testing.T) {
+	cfg := Config{
+		MaxTurns:            1,
+		MaxIterations:       1,
+		MaxReviewIterations: 1,
+		DistillTimeout:      60,
+		LearningsBudget:     100,
+		SimilarityWindow:    0,    // disabled
+		SimilarityWarn:      0.0,  // would be invalid if enabled
+		SimilarityHard:      -1.0, // would be invalid if enabled
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: similarity disabled should skip threshold validation, got: %v", err)
+	}
+}
+
+func TestConfig_Validate_SimilarityEnabledValid(t *testing.T) {
+	cfg := Config{
+		MaxTurns:            1,
+		MaxIterations:       1,
+		MaxReviewIterations: 1,
+		DistillTimeout:      60,
+		LearningsBudget:     100,
+		SimilarityWindow:    3,
+		SimilarityWarn:      0.85,
+		SimilarityHard:      0.95,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: valid similarity config should pass, got: %v", err)
 	}
 }
 

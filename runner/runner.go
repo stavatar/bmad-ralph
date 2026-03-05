@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -15,6 +16,10 @@ import (
 	"github.com/bmad-ralph/bmad-ralph/gates"
 	"github.com/bmad-ralph/bmad-ralph/session"
 )
+
+// errBudgetSkip is a sentinel for budget emergency gate skip action.
+// Callers use errors.Is to detect and set wasSkipped flag.
+var errBudgetSkip = errors.New("budget skip")
 
 //go:embed prompts/execute.md
 var executeTemplate string
@@ -57,9 +62,15 @@ Do NOT remove existing entries — only append new ones at the end of the file.`
 // Retained as exported sentinel for potential errors.Is detection in future stories.
 var ErrNoCommit = errors.New("no commit detected")
 
+// findingSeverityRe parses review findings with severity headers: ### [SEVERITY] Description
+var findingSeverityRe = regexp.MustCompile(`(?m)^###\s*\[(\w+)\]\s*(.+)$`)
+
 // ReviewResult holds the outcome of a review step.
 type ReviewResult struct {
-	Clean bool // true when review found no actionable findings
+	Clean          bool                    // true when review found no actionable findings
+	Findings       []ReviewFinding         // parsed severity findings from review-findings.md
+	SessionMetrics *session.SessionMetrics // token usage from review session (nil if parse failed or ExitError)
+	Model          string                  // model used for review session (for cost tracking)
 }
 
 // ReviewFunc is the signature for the review step called after each successful execute.
@@ -82,7 +93,8 @@ type ResumeExtractFunc func(ctx context.Context, rc RunConfig, sessionID string)
 // RealReview runs a review session and determines the outcome from file state.
 // It reads the current task, assembles the review prompt, launches a fresh Claude
 // session with ModelReview, then checks sprint-tasks.md and review-findings.md
-// to compute ReviewResult.
+// to compute ReviewResult. On success, populates SessionMetrics and Model for
+// cost tracking (AC5). On ExitError or parse failure, these fields are nil/empty.
 // Story 6.4: on non-clean review, post-validates LEARNINGS.md via snapshot-diff
 // (rc.Knowledge.ValidateNewLessons). Clean review skips knowledge validation.
 // Exported for integration testing (Story 4.8). Production wiring via Run().
@@ -172,6 +184,8 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 	raw, execErr := session.Execute(ctx, opts)
 	elapsed := time.Since(start)
 
+	var reviewMetrics *session.SessionMetrics
+	var reviewModel string
 	if execErr != nil {
 		var exitErr *exec.ExitError
 		if !errors.As(execErr, &exitErr) {
@@ -179,16 +193,21 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 		}
 		// ExitError: proceed to file-state check — review may have partially written
 	} else {
-		// Parse for session_id extraction (logging deferred to future stories).
+		// Parse for session metrics + model (cost tracking, AC5).
 		// Error intentionally ignored: review outcome is determined by file state,
-		// not by session output parsing. Integration tests (Story 4.8) will cover.
-		_, _ = session.ParseResult(raw, elapsed)
+		// not by session output parsing.
+		if sr, parseErr := session.ParseResult(raw, elapsed); parseErr == nil {
+			reviewMetrics = sr.Metrics
+			reviewModel = sr.Model
+		}
 	}
 
 	outcome, outcomeErr := DetermineReviewOutcome(rc.TasksFile, currentTaskText, rc.Cfg.ProjectRoot)
 	if outcomeErr != nil {
 		return ReviewResult{}, outcomeErr
 	}
+	outcome.SessionMetrics = reviewMetrics
+	outcome.Model = reviewModel
 
 	// Story 6.4: post-validate lessons on non-clean review (FR28a)
 	// Clean review = no findings = no lessons to validate.
@@ -206,12 +225,16 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 }
 
 // DetermineReviewOutcome computes ReviewResult from file state after a review session.
-// It checks two conditions:
+// It checks two conditions for Clean:
 //  1. Current task marked [x] in sprint-tasks.md (re-read after review)
 //  2. review-findings.md absent or empty (whitespace-only counts as empty)
 //
 // Clean = taskMarkedDone AND (findingsAbsent OR findingsEmpty).
 // If task not marked done but no findings: NOT clean (review session may have failed).
+//
+// When findings file has content, parses severity headers via findingSeverityRe
+// (### [SEVERITY] Description) into ReviewResult.Findings. Returns nil Findings
+// when clean or when content has no parseable severity headers.
 func DetermineReviewOutcome(tasksFile, currentTaskText, projectRoot string) (ReviewResult, error) {
 	content, err := os.ReadFile(tasksFile)
 	if err != nil {
@@ -236,7 +259,20 @@ func DetermineReviewOutcome(tasksFile, currentTaskText, projectRoot string) (Rev
 	findingsNonEmpty := findingsErr == nil && len(strings.TrimSpace(string(findingsData))) > 0
 
 	clean := taskMarkedDone && !findingsNonEmpty
-	return ReviewResult{Clean: clean}, nil
+
+	// Parse severity findings when findings file has content and review is not clean.
+	var findings []ReviewFinding
+	if findingsNonEmpty {
+		matches := findingSeverityRe.FindAllStringSubmatch(string(findingsData), -1)
+		for _, m := range matches {
+			findings = append(findings, ReviewFinding{
+				Severity:    m[1],
+				Description: strings.TrimSpace(m[2]),
+			})
+		}
+	}
+
+	return ReviewResult{Clean: clean, Findings: findings}, nil
 }
 
 // taskDescription extracts the description from a task line, stripping the
@@ -247,6 +283,92 @@ func taskDescription(taskLine string) string {
 		return strings.TrimSpace(trimmed[idx+2:])
 	}
 	return trimmed
+}
+
+// checkBudget checks cumulative cost against BudgetMaxUSD after each RecordSession.
+// Returns nil if budget is disabled, under threshold, or user chose to continue (retry).
+// Returns errBudgetSkip if user chose to skip (SkipTask already called).
+// Returns other error for quit, gate errors, or hard stop (no gates).
+// budgetWarned is a per-task flag; when set, warning is not repeated.
+func (r *Runner) checkBudget(ctx context.Context, taskText string, budgetWarned *bool) error {
+	if r.Cfg.BudgetMaxUSD <= 0 || r.Metrics == nil {
+		return nil
+	}
+	log := r.logger()
+	cumCost := r.Metrics.CumulativeCost()
+	budgetMax := r.Cfg.BudgetMaxUSD
+	warnAt := budgetMax * float64(r.Cfg.BudgetWarnPct) / 100
+
+	if cumCost >= budgetMax {
+		log.Error("budget exceeded",
+			"cost", fmt.Sprintf("%.2f", cumCost),
+			"budget", fmt.Sprintf("%.2f", budgetMax),
+		)
+		if r.Cfg.GatesEnabled && r.EmergencyGatePromptFn != nil {
+			emergencyText := fmt.Sprintf("budget exceeded ($%.2f/$%.2f) for %q", cumCost, budgetMax, taskText)
+			decision, gateErr := r.EmergencyGatePromptFn(ctx, emergencyText)
+			if gateErr != nil {
+				return fmt.Errorf("runner: budget gate: %w", gateErr)
+			}
+			if decision.Action == config.ActionQuit {
+				return fmt.Errorf("runner: budget exceeded ($%.2f/$%.2f): %w", cumCost, budgetMax, decision)
+			}
+			if decision.Action == config.ActionSkip {
+				taskDesc := taskDescription(taskText)
+				if err := SkipTask(r.TasksFile, taskDesc); err != nil {
+					return err
+				}
+				return errBudgetSkip
+			}
+			// retry: continue execution despite exceeded budget
+			return nil
+		}
+		return fmt.Errorf("runner: budget exceeded ($%.2f/$%.2f): cost limit reached", cumCost, budgetMax)
+	}
+
+	if cumCost >= warnAt && !*budgetWarned {
+		*budgetWarned = true
+		log.Warn("budget warning",
+			"cost", fmt.Sprintf("%.2f", cumCost),
+			"warn_at", fmt.Sprintf("%.2f", warnAt),
+			"budget", fmt.Sprintf("%.2f", budgetMax),
+		)
+		taskDesc := taskDescription(taskText)
+		msg := fmt.Sprintf("Budget warning: $%.2f of $%.2f (%.0f%%). Consider wrapping up.", cumCost, budgetMax, cumCost/budgetMax*100)
+		if err := InjectFeedback(r.TasksFile, taskDesc, msg); err != nil {
+			log.Warn("budget feedback injection failed", "error", err.Error())
+		}
+	}
+	return nil
+}
+
+// recordGateDecision logs a structured "gate decision" event and records GateStats
+// in the MetricsCollector. Called from all 4 gate locations (execute emergency,
+// review emergency, normal gate, distillation gate).
+func (r *Runner) recordGateDecision(action string, waitMs int64, taskText string) {
+	log := r.logger()
+	log.Info("gate decision",
+		"step_type", "gate",
+		"action", action,
+		"wait_ms", fmt.Sprintf("%d", waitMs),
+		"task", taskText,
+	)
+	if r.Metrics != nil {
+		stats := GateStats{
+			TotalPrompts: 1,
+			TotalWaitMs:  waitMs,
+			LastAction:   action,
+		}
+		switch action {
+		case config.ActionApprove:
+			stats.Approvals = 1
+		case config.ActionQuit:
+			stats.Rejections = 1
+		case config.ActionSkip:
+			stats.Skips = 1
+		}
+		r.Metrics.RecordGate(stats)
+	}
 }
 
 // ResumeExtraction invokes claude --resume with -p extraction prompt to capture
@@ -430,6 +552,8 @@ type Runner struct {
 	Knowledge             KnowledgeWriter     // records execution progress and validates lessons
 	CodeIndexer           CodeIndexerDetector // detects code indexing tools (Serena MCP)
 	Logger                *RunLogger          // structured log writer; nil = NopLogger
+	Metrics               *MetricsCollector   // accumulates session metrics; nil = no collection
+	Similarity            *SimilarityDetector // detects repeating diff patterns; nil = disabled (Story 7.8)
 }
 
 // logger returns the Runner's logger, falling back to NopLogger when Logger is nil.
@@ -451,6 +575,10 @@ func (r *Runner) logger() *RunLogger {
 // gets fresh findings content from review-findings.md.
 // Execute retry: session.Execute → check commit → retry on no-commit or non-zero
 // exit up to Cfg.MaxIterations per review cycle.
+// Stuck detection (Story 7.5): tracks consecutive no-commit attempts across tasks.
+// When consecutiveNoCommit >= StuckThreshold (and threshold > 0), injects feedback
+// via InjectFeedback and logs warning. Counter resets to 0 on successful commit.
+// StuckThreshold == 0 disables detection. Stuck does NOT terminate the loop.
 // At exhaustion points (execute attempts or review cycles), when GatesEnabled and
 // EmergencyGatePromptFn is set, shows emergency gate instead of returning error.
 // Emergency gate: quit returns wrapped GateDecision (exit code 2), skip marks task
@@ -468,8 +596,9 @@ func (r *Runner) logger() *RunLogger {
 // Distillation failures are non-fatal: ErrBadFormat gets one free retry, then human gate.
 // Loops up to Cfg.MaxIterations task-processing cycles in the outer loop.
 // Structured progress is written to Logger (file + stderr) at every key decision point.
-// Returns nil when all tasks are complete. Returns error on any failure.
-func (r *Runner) Execute(ctx context.Context) error {
+// Returns RunMetrics (nil on early error before collection starts) and error.
+// Returns nil error when all tasks are complete. Returns error on any failure.
+func (r *Runner) Execute(ctx context.Context) (*RunMetrics, error) {
 	log := r.logger()
 	tasksBase := filepath.Base(r.TasksFile)
 	log.Info("run started", "tasks_file", tasksBase)
@@ -480,7 +609,12 @@ func (r *Runner) Execute(ctx context.Context) error {
 	} else {
 		log.Info("run finished", "status", "ok")
 	}
-	return runErr
+
+	if r.Metrics != nil {
+		rm := r.Metrics.Finish()
+		return &rm, runErr
+	}
+	return nil, runErr
 }
 
 // execute is the internal implementation of Execute.
@@ -560,6 +694,9 @@ func (r *Runner) execute(ctx context.Context) error {
 	// completedTasks: in-memory counter for gate checkpoint logic (resets each Execute call).
 	// Distinct from distillState.MonotonicTaskCounter which persists across runs for cooldown.
 	completedTasks := 0
+	// consecutiveNoCommit: cross-task counter for stuck detection (Story 7.5).
+	// Increments on no-commit, resets to 0 ONLY on successful commit. Not reset between tasks.
+	consecutiveNoCommit := 0
 	taskStart := time.Now()
 	for i := 0; i < r.Cfg.MaxIterations; i++ {
 		content, err := os.ReadFile(r.TasksFile)
@@ -577,6 +714,10 @@ func (r *Runner) execute(ctx context.Context) error {
 
 		taskText := result.OpenTasks[0].Text
 		taskStart = time.Now()
+		budgetWarned := false // Story 7.7: budget warning logged once per task
+		if r.Metrics != nil {
+			r.Metrics.StartTask(taskText)
+		}
 		log.Info("task started",
 			"attempt", fmt.Sprintf("%d/%d", i+1, r.Cfg.MaxIterations),
 			"task", taskText,
@@ -629,8 +770,15 @@ func (r *Runner) execute(ctx context.Context) error {
 			executeAttempts := 0
 			skipTask := false // Story 5.5: set by emergency gate skip to break out of review cycle loop
 			for {
+				gitT0 := time.Now()
 				headBefore, err := r.Git.HeadCommit(ctx)
+				if r.Metrics != nil {
+					r.Metrics.RecordLatency(LatencyBreakdown{GitMs: time.Since(gitT0).Milliseconds()})
+				}
 				if err != nil {
+					if r.Metrics != nil {
+						r.Metrics.RecordError(CategorizeError(err), err.Error())
+					}
 					return fmt.Errorf("runner: head commit before: %w", err)
 				}
 
@@ -643,11 +791,17 @@ func (r *Runner) execute(ctx context.Context) error {
 				start := time.Now()
 				raw, execErr := session.Execute(ctx, opts)
 				elapsed := time.Since(start)
+				if r.Metrics != nil {
+					r.Metrics.RecordLatency(LatencyBreakdown{SessionMs: elapsed.Milliseconds()})
+				}
 
 				needsRetry := false
 				var sessionID string
 
 				if execErr != nil {
+					if r.Metrics != nil {
+						r.Metrics.RecordError(CategorizeError(execErr), execErr.Error())
+					}
 					// Distinguish retryable (exit error) from fatal (binary not found, ctx cancel)
 					var exitErr *exec.ExitError
 					if errors.As(execErr, &exitErr) {
@@ -656,9 +810,24 @@ func (r *Runner) execute(ctx context.Context) error {
 							"exit", fmt.Sprintf("%d", exitErr.ExitCode()),
 						)
 						needsRetry = true // AC6: non-zero exit triggers retry
-						// Try to parse for sessionID despite error
+						// Try to parse for sessionID and metrics despite error
 						if sr, parseErr := session.ParseResult(raw, elapsed); parseErr == nil {
 							sessionID = sr.SessionID
+							if r.Metrics != nil {
+								resolved := r.Metrics.RecordSession(sr.Metrics, sr.Model, "execute", elapsed.Milliseconds())
+								if resolved != sr.Model {
+									log.Warn("unknown model pricing", "model", sr.Model, "fallback", resolved)
+								}
+							}
+						}
+						// Story 7.7: budget check after execute session (error path)
+						if budgetErr := r.checkBudget(ctx, taskText, &budgetWarned); budgetErr != nil {
+							if errors.Is(budgetErr, errBudgetSkip) {
+								skipTask = true
+								wasSkipped = true
+								break
+							}
+							return budgetErr
 						}
 					} else {
 						return fmt.Errorf("runner: execute: %w", execErr)
@@ -674,9 +843,31 @@ func (r *Runner) execute(ctx context.Context) error {
 						return fmt.Errorf("runner: parse result: %w", parseErr)
 					}
 					sessionID = sr.SessionID
+					if r.Metrics != nil {
+						resolved := r.Metrics.RecordSession(sr.Metrics, sr.Model, "execute", elapsed.Milliseconds())
+						if resolved != sr.Model {
+							log.Warn("unknown model pricing", "model", sr.Model, "fallback", resolved)
+						}
+					}
+					// Story 7.7: budget check after execute session (success path)
+					if budgetErr := r.checkBudget(ctx, taskText, &budgetWarned); budgetErr != nil {
+						if errors.Is(budgetErr, errBudgetSkip) {
+							skipTask = true
+							wasSkipped = true
+							break
+						}
+						return budgetErr
+					}
 
+					gitT1 := time.Now()
 					headAfter, err := r.Git.HeadCommit(ctx)
+					if r.Metrics != nil {
+						r.Metrics.RecordLatency(LatencyBreakdown{GitMs: time.Since(gitT1).Milliseconds()})
+					}
 					if err != nil {
+						if r.Metrics != nil {
+							r.Metrics.RecordError(CategorizeError(err), err.Error())
+						}
 						return fmt.Errorf("runner: head commit after: %w", err)
 					}
 
@@ -687,13 +878,73 @@ func (r *Runner) execute(ctx context.Context) error {
 							"changed", "false",
 							"reason", "retry",
 						)
+						consecutiveNoCommit++
+						if r.Cfg.StuckThreshold > 0 && consecutiveNoCommit >= r.Cfg.StuckThreshold {
+							stuckMsg := fmt.Sprintf("No commit in last %d attempts. Consider a different approach.", consecutiveNoCommit)
+							log.Warn("stuck detected", "task", taskText, "no_commit_count", fmt.Sprintf("%d", consecutiveNoCommit))
+							// Non-fatal: feedback injection failure is logged but does not abort the loop.
+							// InjectFeedback error paths covered by TestInjectFeedback_Scenarios.
+							if err := InjectFeedback(r.TasksFile, taskDescription(taskText), stuckMsg); err != nil {
+								log.Warn("stuck feedback injection failed", "error", err.Error())
+							}
+							if r.Metrics != nil {
+								r.Metrics.RecordRetry("stuck")
+							}
+						}
 						needsRetry = true // AC1: no commit
 					} else {
+						consecutiveNoCommit = 0
 						log.Info("commit check",
 							"before", headBefore,
 							"after", headAfter,
 							"changed", "true",
 						)
+						// Story 7.2: collect git diff stats after commit detection (NFR24 best-effort)
+						diffStats, diffErr := r.Git.DiffStats(ctx, headBefore, headAfter)
+						if diffErr != nil {
+							log.Warn("diff stats failed", "error", diffErr.Error())
+						} else {
+							log.Info("commit stats",
+								"files", fmt.Sprintf("%d", diffStats.FilesChanged),
+								"insertions", fmt.Sprintf("%d", diffStats.Insertions),
+								"deletions", fmt.Sprintf("%d", diffStats.Deletions),
+								"packages", strings.Join(diffStats.Packages, ","),
+							)
+							if r.Metrics != nil {
+								r.Metrics.RecordGitDiff(*diffStats)
+							}
+							// Story 7.8: similarity detection using Packages from DiffStats
+							if r.Similarity != nil {
+								r.Similarity.Push(diffStats.Packages)
+								simLevel, simScore := r.Similarity.Check()
+								switch simLevel {
+								case "hard":
+									log.Error("similarity loop detected",
+										"score", fmt.Sprintf("%.2f", simScore),
+										"threshold", fmt.Sprintf("%.2f", r.Cfg.SimilarityHard),
+									)
+									if r.Cfg.GatesEnabled && r.EmergencyGatePromptFn != nil {
+										emergencyText := fmt.Sprintf("%s\nSimilarity loop detected (score: %.2f). Diffs are repeating.",
+											taskText, simScore)
+										decision, gateErr := r.EmergencyGatePromptFn(ctx, emergencyText)
+										if gateErr != nil {
+											return fmt.Errorf("runner: similarity gate: %w", gateErr)
+										}
+										if decision.Action == config.ActionQuit {
+											return fmt.Errorf("runner: similarity gate: %w", decision)
+										}
+									}
+								case "warn":
+									log.Warn("similarity warning",
+										"score", fmt.Sprintf("%.2f", simScore),
+										"threshold", fmt.Sprintf("%.2f", r.Cfg.SimilarityWarn),
+									)
+									if feedbackErr := InjectFeedback(r.TasksFile, taskText, "Recent changes are very similar. Try a fundamentally different approach."); feedbackErr != nil {
+										log.Warn("similarity feedback injection failed", "error", feedbackErr.Error())
+									}
+								}
+							}
+						}
 					}
 				}
 
@@ -707,10 +958,22 @@ func (r *Runner) execute(ctx context.Context) error {
 						if r.Cfg.GatesEnabled && r.EmergencyGatePromptFn != nil {
 							emergencyText := fmt.Sprintf("execute attempts exhausted (%d/%d) for %q",
 								executeAttempts, r.Cfg.MaxIterations, result.OpenTasks[0].Text)
+							if r.Metrics != nil {
+								emergencyText += fmt.Sprintf("\nCost so far: $%.2f", r.Metrics.CumulativeCost())
+							}
+							gateT0 := time.Now()
 							decision, gateErr := r.EmergencyGatePromptFn(ctx, emergencyText)
+							gateElapsed := time.Since(gateT0)
+							if r.Metrics != nil {
+								r.Metrics.RecordLatency(LatencyBreakdown{GateMs: gateElapsed.Milliseconds()})
+							}
 							if gateErr != nil {
+								if r.Metrics != nil {
+									r.Metrics.RecordError(CategorizeError(gateErr), gateErr.Error())
+								}
 								return fmt.Errorf("runner: emergency gate: %w", gateErr)
 							}
+							r.recordGateDecision(decision.Action, gateElapsed.Milliseconds(), taskText)
 							if decision.Action == config.ActionQuit {
 								return fmt.Errorf("runner: emergency gate: %w", decision)
 							}
@@ -781,8 +1044,29 @@ func (r *Runner) execute(ctx context.Context) error {
 			reviewStart := time.Now()
 			rr, err := r.ReviewFn(ctx, rc)
 			reviewElapsed := time.Since(reviewStart)
+			if r.Metrics != nil {
+				r.Metrics.RecordLatency(LatencyBreakdown{ReviewMs: reviewElapsed.Milliseconds()})
+			}
 			if err != nil {
+				if r.Metrics != nil {
+					r.Metrics.RecordError(CategorizeError(err), err.Error())
+				}
 				return fmt.Errorf("runner: review: %w", err)
+			}
+			// AC5: record review session cost (tokens + model from RealReview)
+			if r.Metrics != nil && rr.SessionMetrics != nil {
+				resolved := r.Metrics.RecordSession(rr.SessionMetrics, rr.Model, "review", reviewElapsed.Milliseconds())
+				if resolved != rr.Model {
+					log.Warn("unknown model pricing", "model", rr.Model, "fallback", resolved)
+				}
+			}
+			// Story 7.7: budget check after review session
+			if budgetErr := r.checkBudget(ctx, taskText, &budgetWarned); budgetErr != nil {
+				if errors.Is(budgetErr, errBudgetSkip) {
+					wasSkipped = true
+					break
+				}
+				return budgetErr
 			}
 			if rr.Clean {
 				log.Info("review session finished",
@@ -796,6 +1080,34 @@ func (r *Runner) execute(ctx context.Context) error {
 				"clean", "false",
 				"findings", "true",
 			)
+
+			// Story 7.4: log severity breakdown and record findings in metrics.
+			if len(rr.Findings) > 0 {
+				var critical, high, medium, low int
+				for _, f := range rr.Findings {
+					switch f.Severity {
+					case "CRITICAL":
+						critical++
+					case "HIGH":
+						high++
+					case "MEDIUM":
+						medium++
+					case "LOW":
+						low++
+					}
+				}
+				log.Info("review findings",
+					"total", fmt.Sprintf("%d", len(rr.Findings)),
+					"critical", fmt.Sprintf("%d", critical),
+					"high", fmt.Sprintf("%d", high),
+					"medium", fmt.Sprintf("%d", medium),
+					"low", fmt.Sprintf("%d", low),
+				)
+				if r.Metrics != nil {
+					r.Metrics.RecordReview(rr.Findings)
+				}
+			}
+
 			reviewCycles++
 			if reviewCycles >= r.Cfg.MaxReviewIterations {
 				log.Error("review cycles exhausted",
@@ -805,10 +1117,22 @@ func (r *Runner) execute(ctx context.Context) error {
 				if r.Cfg.GatesEnabled && r.EmergencyGatePromptFn != nil {
 					emergencyText := fmt.Sprintf("review cycles exhausted (%d/%d) for %q",
 						reviewCycles, r.Cfg.MaxReviewIterations, result.OpenTasks[0].Text)
+					if r.Metrics != nil {
+						emergencyText += fmt.Sprintf("\nCost so far: $%.2f", r.Metrics.CumulativeCost())
+					}
+					gateT0 := time.Now()
 					decision, gateErr := r.EmergencyGatePromptFn(ctx, emergencyText)
+					gateElapsed := time.Since(gateT0)
+					if r.Metrics != nil {
+						r.Metrics.RecordLatency(LatencyBreakdown{GateMs: gateElapsed.Milliseconds()})
+					}
 					if gateErr != nil {
+						if r.Metrics != nil {
+							r.Metrics.RecordError(CategorizeError(gateErr), gateErr.Error())
+						}
 						return fmt.Errorf("runner: emergency gate: %w", gateErr)
 					}
+					r.recordGateDecision(decision.Action, gateElapsed.Milliseconds(), taskText)
 					if decision.Action == config.ActionQuit {
 						return fmt.Errorf("runner: emergency gate: %w", decision)
 					}
@@ -839,6 +1163,9 @@ func (r *Runner) execute(ctx context.Context) error {
 
 		// Story 5.5: emergency skip bypasses validation, completion counter, and gate check
 		if wasSkipped {
+			if r.Metrics != nil {
+				r.Metrics.FinishTask("skipped", "")
+			}
 			continue
 		}
 
@@ -876,11 +1203,23 @@ func (r *Runner) execute(ctx context.Context) error {
 			if isCheckpoint {
 				gateText += fmt.Sprintf(" (checkpoint every %d)", r.Cfg.GatesCheckpoint)
 			}
+			if r.Metrics != nil {
+				gateText += fmt.Sprintf("\nCost so far: $%.2f", r.Metrics.CumulativeCost())
+			}
 
+			gateT0 := time.Now()
 			decision, gateErr := r.GatePromptFn(ctx, gateText)
+			gateElapsed := time.Since(gateT0)
+			if r.Metrics != nil {
+				r.Metrics.RecordLatency(LatencyBreakdown{GateMs: gateElapsed.Milliseconds()})
+			}
 			if gateErr != nil {
+				if r.Metrics != nil {
+					r.Metrics.RecordError(CategorizeError(gateErr), gateErr.Error())
+				}
 				return fmt.Errorf("runner: gate: %w", gateErr)
 			}
+			r.recordGateDecision(decision.Action, gateElapsed.Milliseconds(), taskText)
 			if decision.Action == config.ActionQuit {
 				return fmt.Errorf("runner: gate: %w", decision)
 			}
@@ -917,9 +1256,19 @@ func (r *Runner) execute(ctx context.Context) error {
 						"counter", fmt.Sprintf("%d", distillState.MonotonicTaskCounter),
 						"cooldown", fmt.Sprintf("%d", r.Cfg.DistillCooldown),
 					)
+					distillT0 := time.Now()
 					r.runDistillation(ctx, distillState, distillStatePath, budgetStatus)
+					if r.Metrics != nil {
+						r.Metrics.RecordLatency(LatencyBreakdown{DistillMs: time.Since(distillT0).Milliseconds()})
+					}
 				}
 			}
+		}
+
+		// Finalize task metrics after all phases (latency already recorded incrementally).
+		if r.Metrics != nil {
+			headSHA, _ := r.Git.HeadCommit(ctx) // best-effort: SHA is optional for metrics
+			r.Metrics.FinishTask("done", headSHA)
 		}
 	}
 
@@ -962,12 +1311,18 @@ func (r *Runner) handleDistillFailure(ctx context.Context, distillErr error, sta
 
 	gateText := fmt.Sprintf("distillation failed: %v. LEARNINGS.md: %d/%d lines",
 		distillErr, budget.Lines, budget.Limit)
+	if r.Metrics != nil {
+		gateText += fmt.Sprintf("\nCost so far: $%.2f", r.Metrics.CumulativeCost())
+	}
 
+	gateT0 := time.Now()
 	decision, gateErr := r.GatePromptFn(ctx, gateText)
+	gateElapsed := time.Since(gateT0)
 	if gateErr != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: distillation gate error: %v\n", gateErr)
 		return
 	}
+	r.recordGateDecision(decision.Action, gateElapsed.Milliseconds(), gateText)
 	if decision.Action == config.ActionQuit {
 		// Quit is the only fatal path — but distillation is inside the loop,
 		// so we log and return (non-fatal). Caller continues to next iteration.
@@ -1098,23 +1453,31 @@ func RecoverDirtyState(ctx context.Context, git GitClient) (bool, error) {
 
 // Run is the main entry point for the execute-review loop.
 // It creates a Runner with production defaults and delegates to Runner.Execute.
+// Returns RunMetrics (nil on early error) and error.
 // When cfg.GatesEnabled is true, wires GatePromptFn to gates.Prompt with os.Stdin/os.Stdout.
+// When cfg.SimilarityWindow > 0, creates SimilarityDetector for diff loop detection.
 // When cfg.SerenaEnabled is true, wires CodeIndexer to SerenaMCPDetector for detection.
 // Opens a RunLogger writing to <ProjectRoot>/<LogDir>/ralph-YYYY-MM-DD.log (appended)
 // and duplicating to stderr. Logger failure is non-fatal: falls back to NopLogger.
-func Run(ctx context.Context, cfg *config.Config) error {
+func Run(ctx context.Context, cfg *config.Config) (*RunMetrics, error) {
 	var indexer CodeIndexerDetector = &NoOpCodeIndexerDetector{}
 	if cfg.SerenaEnabled {
 		indexer = &SerenaMCPDetector{}
 	}
 
 	var runLog *RunLogger
-	if l, err := OpenRunLogger(cfg.ProjectRoot, cfg.LogDir); err == nil {
+	if l, err := OpenRunLogger(cfg.ProjectRoot, cfg.LogDir, cfg.RunID); err == nil {
 		runLog = l
 		defer l.Close() //nolint:errcheck
 	} else {
 		fmt.Fprintf(os.Stderr, "WARNING: could not open run log: %v\n", err)
 		runLog = NopLogger()
+	}
+
+	var mc *MetricsCollector
+	if cfg.RunID != "" {
+		pricing := config.MergePricing(config.DefaultPricing, cfg.ModelPricing)
+		mc = NewMetricsCollector(cfg.RunID, pricing)
 	}
 
 	r := &Runner{
@@ -1126,6 +1489,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		Knowledge:   &FileKnowledgeWriter{projectRoot: cfg.ProjectRoot},
 		CodeIndexer: indexer,
 		Logger:      runLog,
+		Metrics:     mc,
+	}
+	if cfg.SimilarityWindow > 0 {
+		r.Similarity = NewSimilarityDetector(cfg.SimilarityWindow, cfg.SimilarityWarn, cfg.SimilarityHard)
 	}
 	if cfg.GatesEnabled {
 		r.GatePromptFn = func(ctx context.Context, taskText string) (*config.GateDecision, error) {

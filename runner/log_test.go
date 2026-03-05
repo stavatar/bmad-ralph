@@ -16,7 +16,7 @@ func TestOpenRunLogger_CreatesFileAndDir(t *testing.T) {
 	dir := t.TempDir()
 	logDir := ".ralph/logs"
 
-	l, err := runner.OpenRunLogger(dir, logDir)
+	l, err := runner.OpenRunLogger(dir, logDir, "")
 	if err != nil {
 		t.Fatalf("OpenRunLogger: unexpected error: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestOpenRunLogger_MkdirError(t *testing.T) {
 		t.Fatalf("setup: write block file: %v", err)
 	}
 
-	_, err := runner.OpenRunLogger(dir, ".ralph/logs")
+	_, err := runner.OpenRunLogger(dir, ".ralph/logs", "")
 	if err == nil {
 		t.Fatal("OpenRunLogger: expected error, got nil")
 	}
@@ -56,7 +56,7 @@ func TestOpenRunLogger_MkdirError(t *testing.T) {
 // formatted log line with timestamp, level, component tag, message, and key=value pairs.
 func TestRunLogger_Info_WritesFormattedLine(t *testing.T) {
 	dir := t.TempDir()
-	l, err := runner.OpenRunLogger(dir, "logs")
+	l, err := runner.OpenRunLogger(dir, "logs", "")
 	if err != nil {
 		t.Fatalf("OpenRunLogger: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestRunLogger_Info_WritesFormattedLine(t *testing.T) {
 // TestRunLogger_Warn_WritesFormattedLine verifies that Warn writes WARN level.
 func TestRunLogger_Warn_WritesFormattedLine(t *testing.T) {
 	dir := t.TempDir()
-	l, err := runner.OpenRunLogger(dir, "logs")
+	l, err := runner.OpenRunLogger(dir, "logs", "")
 	if err != nil {
 		t.Fatalf("OpenRunLogger: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestRunLogger_Warn_WritesFormattedLine(t *testing.T) {
 // TestRunLogger_Error_WritesFormattedLine verifies that Error writes ERROR level.
 func TestRunLogger_Error_WritesFormattedLine(t *testing.T) {
 	dir := t.TempDir()
-	l, err := runner.OpenRunLogger(dir, "logs")
+	l, err := runner.OpenRunLogger(dir, "logs", "")
 	if err != nil {
 		t.Fatalf("OpenRunLogger: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestRunLogger_Error_WritesFormattedLine(t *testing.T) {
 // TestRunLogger_SpacedValue_Quoted verifies that values containing spaces are quoted.
 func TestRunLogger_SpacedValue_Quoted(t *testing.T) {
 	dir := t.TempDir()
-	l, err := runner.OpenRunLogger(dir, "logs")
+	l, err := runner.OpenRunLogger(dir, "logs", "")
 	if err != nil {
 		t.Fatalf("OpenRunLogger: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestRunLogger_AppendMode(t *testing.T) {
 	dir := t.TempDir()
 	logDir := "logs"
 
-	l1, err := runner.OpenRunLogger(dir, logDir)
+	l1, err := runner.OpenRunLogger(dir, logDir, "")
 	if err != nil {
 		t.Fatalf("first OpenRunLogger: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestRunLogger_AppendMode(t *testing.T) {
 		t.Fatalf("first Close: %v", err)
 	}
 
-	l2, err := runner.OpenRunLogger(dir, logDir)
+	l2, err := runner.OpenRunLogger(dir, logDir, "")
 	if err != nil {
 		t.Fatalf("second OpenRunLogger: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestRunLogger_AppendMode(t *testing.T) {
 // TestRunLogger_TimestampFormat verifies that the timestamp matches the expected format.
 func TestRunLogger_TimestampFormat(t *testing.T) {
 	dir := t.TempDir()
-	l, err := runner.OpenRunLogger(dir, "logs")
+	l, err := runner.OpenRunLogger(dir, "logs", "")
 	if err != nil {
 		t.Fatalf("OpenRunLogger: %v", err)
 	}
@@ -238,6 +238,66 @@ func TestRunLogger_TimestampFormat(t *testing.T) {
 	}
 }
 
+// TestRunLogger_RunID_IncludedInOutput verifies that run_id appears as first kv pair
+// when runID is set, and is absent when runID is empty.
+func TestRunLogger_RunID_IncludedInOutput(t *testing.T) {
+	tests := []struct {
+		name      string
+		runID     string
+		wantRunID bool
+	}{
+		{
+			name:      "with runID",
+			runID:     "abc-def-123",
+			wantRunID: true,
+		},
+		{
+			name:      "empty runID",
+			runID:     "",
+			wantRunID: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			l, err := runner.OpenRunLogger(dir, "logs", tc.runID)
+			if err != nil {
+				t.Fatalf("OpenRunLogger: %v", err)
+			}
+			defer l.Close() //nolint:errcheck
+
+			l.Info("test msg", "key", "val")
+
+			date := time.Now().Format("2006-01-02")
+			logPath := filepath.Join(dir, "logs", "ralph-"+date+".log")
+			data, readErr := os.ReadFile(logPath)
+			if readErr != nil {
+				t.Fatalf("read log file: %v", readErr)
+			}
+
+			content := string(data)
+			hasRunID := strings.Contains(content, "run_id=abc-def-123")
+
+			if tc.wantRunID && !hasRunID {
+				t.Errorf("log line missing run_id=abc-def-123\ngot: %s", content)
+			}
+			if !tc.wantRunID && strings.Contains(content, "run_id=") {
+				t.Errorf("log line should not contain run_id\ngot: %s", content)
+			}
+
+			// Verify run_id appears before other kv pairs
+			if tc.wantRunID {
+				runIDIdx := strings.Index(content, "run_id=")
+				keyIdx := strings.Index(content, "key=val")
+				if runIDIdx >= keyIdx {
+					t.Errorf("run_id should appear before key=val\ngot: %s", content)
+				}
+			}
+		})
+	}
+}
+
 // TestNopLogger_NoOutput verifies that NopLogger does not panic and discards all output.
 func TestNopLogger_NoOutput(t *testing.T) {
 	l := runner.NopLogger()
@@ -249,6 +309,3 @@ func TestNopLogger_NoOutput(t *testing.T) {
 		t.Errorf("NopLogger.Close: unexpected error: %v", err)
 	}
 }
-
-
-

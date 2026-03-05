@@ -110,3 +110,16 @@ development_status:
   6-7-serena-integration: done
   6-8-final-integration-test: done
   epic-6-retrospective: optional
+
+  # Epic 7: Observability & Metrics (10 stories, FR42-FR56)
+  epic-7: done
+  7-1-metrics-foundation: done
+  7-2-git-diff-stats: done
+  7-3-cost-tracking: done
+  7-4-review-enrichment: done
+  7-5-stuck-detection: done
+  7-6-gate-analytics: done
+  7-7-budget-alerts: done
+  7-8-similarity-detection: done
+  7-9-error-categorization-latency: done
+  7-10-run-summary-report: done

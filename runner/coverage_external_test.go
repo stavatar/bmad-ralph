@@ -680,4 +680,3 @@ func TestRealReview_BuildKnowledgeError(t *testing.T) {
 		t.Errorf("RealReview inner error = %q, want containing %q", err.Error(), "runner: build knowledge: read learnings:")
 	}
 }
-

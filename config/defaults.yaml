@@ -13,5 +13,11 @@ serena_enabled: true
 learnings_budget: 200
 distill_cooldown: 5
 distill_timeout: 120
+stuck_threshold: 2
 log_dir: ".ralph/logs"
+similarity_window: 0
+similarity_warn: 0.85
+similarity_hard: 0.95
+budget_max_usd: 0
+budget_warn_pct: 80
 stories_dir: "docs/sprint-artifacts"

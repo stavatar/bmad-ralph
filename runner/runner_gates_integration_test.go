@@ -53,7 +53,7 @@ func TestRunner_Execute_GateIntegration_Approve(t *testing.T) {
 	r.EmergencyGatePromptFn = emergencyGP.fn
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestRunner_Execute_GateIntegration_Quit(t *testing.T) {
 	r.GatePromptFn = gp.fn
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 
 	// AC2: error wraps GateDecision
 	if err == nil {
@@ -190,7 +190,7 @@ func TestRunner_Execute_GateIntegration_RetryWithFeedback(t *testing.T) {
 		return runner.ReviewResult{Clean: true}, nil
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestRunner_Execute_GateIntegration_Skip(t *testing.T) {
 	r.EmergencyGatePromptFn = emergencyGP.fn
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestRunner_Execute_GateIntegration_CombinedGateCheckpoint(t *testing.T) {
 	r.EmergencyGatePromptFn = emergencyGP.fn
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestRunner_Execute_GateIntegration_CheckpointEveryN(t *testing.T) {
 	r.EmergencyGatePromptFn = emergencyGP.fn
 	r.ReviewFn = progressiveReviewFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -430,7 +430,7 @@ func TestRunner_Execute_GateIntegration_EmergencyExecuteSkip(t *testing.T) {
 	r.GatePromptFn = normalGP.fn
 	r.EmergencyGatePromptFn = emergencyGP.fn
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	// AC6: no ErrMaxRetries — emergency gate handles it
 	if err != nil {
 		t.Fatalf("Execute: unexpected error (want nil for skip): %v", err)
@@ -501,7 +501,7 @@ func TestRunner_Execute_GateIntegration_EmergencyReviewSkip(t *testing.T) {
 	r.GatePromptFn = normalGP.fn
 	r.EmergencyGatePromptFn = emergencyGP.fn
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	// AC6: no ErrMaxReviewCycles — emergency gate handles it
 	if err != nil {
 		t.Fatalf("Execute: unexpected error (want nil for skip): %v", err)
@@ -570,7 +570,7 @@ func TestRunner_Execute_GateIntegration_GatesDisabled(t *testing.T) {
 	r.GatePromptFn = normalGP.fn
 	r.EmergencyGatePromptFn = emergencyGP.fn
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	// AC7: returns ErrMaxRetries (original behavior, no emergency gate)
 	if !errors.Is(err, config.ErrMaxRetries) {
 		t.Fatalf("errors.Is(err, ErrMaxRetries): want true, got false; err = %v", err)
@@ -629,7 +629,7 @@ func TestRunner_Execute_GateIntegration_MultiTaskScenario(t *testing.T) {
 	r.EmergencyGatePromptFn = emergencyGP.fn
 	r.ReviewFn = progressiveReviewFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}

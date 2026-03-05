@@ -116,7 +116,7 @@ func TestRun_NoTasksFile(t *testing.T) {
 		ClaudeCommand: "/nonexistent/command",
 	}
 
-	err := Run(context.Background(), cfg)
+	_, err := Run(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("Run() expected error when sprint-tasks.md missing, got nil")
 	}
@@ -138,7 +138,7 @@ func TestRun_SerenaEnabled(t *testing.T) {
 		ClaudeCommand: "/nonexistent/command",
 	}
 
-	err := Run(context.Background(), cfg)
+	_, err := Run(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("Run() SerenaEnabled expected error when sprint-tasks.md missing, got nil")
 	}
@@ -160,7 +160,7 @@ func TestRun_GatesEnabled(t *testing.T) {
 		ClaudeCommand: "/nonexistent/command",
 	}
 
-	err := Run(context.Background(), cfg)
+	_, err := Run(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("Run() GatesEnabled expected error when sprint-tasks.md missing, got nil")
 	}

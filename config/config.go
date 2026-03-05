@@ -15,6 +15,7 @@ var defaultsYAML []byte
 
 // Config holds all ralph configuration parameters.
 // Parsed once at startup, passed by pointer, NEVER mutated at runtime.
+// Exception: RunID is set once by cmd/ralph before entering the runner (pre-run initialization).
 type Config struct {
 	ClaudeCommand       string `yaml:"claude_command"`
 	MaxTurns            int    `yaml:"max_turns"`
@@ -31,9 +32,17 @@ type Config struct {
 	LearningsBudget int  `yaml:"learnings_budget"`
 	DistillCooldown int  `yaml:"distill_cooldown"`
 	DistillTimeout  int  `yaml:"distill_timeout"`
-	LogDir              string `yaml:"log_dir"`
-	StoriesDir          string `yaml:"stories_dir"`
-	ProjectRoot         string `yaml:"-"`
+	StuckThreshold    int     `yaml:"stuck_threshold"`
+	SimilarityWindow  int     `yaml:"similarity_window"`
+	SimilarityWarn    float64 `yaml:"similarity_warn"`
+	SimilarityHard    float64 `yaml:"similarity_hard"`
+	BudgetMaxUSD      float64 `yaml:"budget_max_usd"`
+	BudgetWarnPct     int     `yaml:"budget_warn_pct"`
+	ModelPricing        map[string]Pricing `yaml:"model_pricing"`
+	LogDir              string             `yaml:"log_dir"`
+	StoriesDir          string             `yaml:"stories_dir"`
+	ProjectRoot         string             `yaml:"-"`
+	RunID               string             `yaml:"-"` // Runtime-only: UUID v4 set by cmd/ralph, not from config file
 }
 
 // CLIFlags holds command-line flag values for the three-level cascade:
@@ -173,8 +182,31 @@ func (c *Config) Validate() error {
 	if c.DistillTimeout <= 0 {
 		return fmt.Errorf("config: validate: distill_timeout must be > 0, got %d", c.DistillTimeout)
 	}
+	if c.StuckThreshold < 0 {
+		return fmt.Errorf("config: validate: stuck_threshold must be >= 0, got %d", c.StuckThreshold)
+	}
 	if c.LearningsBudget <= 0 {
 		return fmt.Errorf("config: validate: learnings_budget must be > 0, got %d", c.LearningsBudget)
+	}
+	if c.BudgetMaxUSD < 0 {
+		return fmt.Errorf("config: validate: budget_max_usd must be >= 0, got %.2f", c.BudgetMaxUSD)
+	}
+	if c.BudgetMaxUSD > 0 && (c.BudgetWarnPct < 1 || c.BudgetWarnPct > 99) {
+		return fmt.Errorf("config: validate: budget_warn_pct must be 1-99, got %d", c.BudgetWarnPct)
+	}
+	if c.SimilarityWindow < 0 {
+		return fmt.Errorf("config: validate: similarity_window must be >= 0, got %d", c.SimilarityWindow)
+	}
+	if c.SimilarityWindow > 0 {
+		if c.SimilarityWarn <= 0.0 || c.SimilarityWarn >= 1.0 {
+			return fmt.Errorf("config: validate: similarity_warn must be in (0.0, 1.0), got %f", c.SimilarityWarn)
+		}
+		if c.SimilarityHard <= 0.0 || c.SimilarityHard >= 1.0 {
+			return fmt.Errorf("config: validate: similarity_hard must be in (0.0, 1.0), got %f", c.SimilarityHard)
+		}
+		if c.SimilarityWarn >= c.SimilarityHard {
+			return fmt.Errorf("config: validate: similarity_warn must be less than similarity_hard")
+		}
 	}
 	return nil
 }

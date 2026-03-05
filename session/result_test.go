@@ -416,4 +416,134 @@ func TestSessionResult_ZeroValue(t *testing.T) {
 	if r.Duration != 0 {
 		t.Errorf("zero Duration = %v, want 0", r.Duration)
 	}
+	if r.Metrics != nil {
+		t.Errorf("zero Metrics = %+v, want nil", r.Metrics)
+	}
+	if r.Model != "" {
+		t.Errorf("zero Model = %q, want empty", r.Model)
+	}
+}
+
+func TestParseResult_UsageMetrics(t *testing.T) {
+	tests := []struct {
+		name            string
+		json            string
+		wantMetrics     bool
+		wantInput       int
+		wantOutput      int
+		wantCacheRead   int
+		wantNumTurns    int
+		wantCostUSD     float64
+		wantModel       string
+	}{
+		{
+			name: "with usage data",
+			json: `{"type":"result","session_id":"s1","result":"ok","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_tokens":200},"model":"claude-sonnet-4-20250514","num_turns":3}`,
+			wantMetrics:   true,
+			wantInput:     1000,
+			wantOutput:    500,
+			wantCacheRead: 200,
+			wantNumTurns:  3,
+			wantCostUSD:   0.0,
+			wantModel:     "claude-sonnet-4-20250514",
+		},
+		{
+			name:        "without usage data graceful degradation",
+			json:        `{"type":"result","session_id":"s2","result":"ok"}`,
+			wantMetrics: false,
+			wantModel:   "",
+		},
+		{
+			name: "usage with zero tokens",
+			json: `{"type":"result","session_id":"s3","result":"ok","usage":{"input_tokens":0,"output_tokens":0,"cache_read_tokens":0},"model":"claude-sonnet-4-20250514","num_turns":0}`,
+			wantMetrics:   true,
+			wantInput:     0,
+			wantOutput:    0,
+			wantCacheRead: 0,
+			wantNumTurns:  0,
+			wantCostUSD:   0.0,
+			wantModel:     "claude-sonnet-4-20250514",
+		},
+		{
+			name: "model without usage",
+			json: `{"type":"result","session_id":"s4","result":"ok","model":"claude-sonnet-4-20250514"}`,
+			wantMetrics: false,
+			wantModel:   "claude-sonnet-4-20250514",
+		},
+		{
+			name: "array format with usage",
+			json: `[{"type":"result","session_id":"s5","result":"ok","usage":{"input_tokens":2000,"output_tokens":800,"cache_read_tokens":100},"model":"claude-opus-4-20250514","num_turns":5}]`,
+			wantMetrics:   true,
+			wantInput:     2000,
+			wantOutput:    800,
+			wantCacheRead: 100,
+			wantNumTurns:  5,
+			wantCostUSD:   0.0,
+			wantModel:     "claude-opus-4-20250514",
+		},
+		{
+			name:        "array format without usage",
+			json:        `[{"type":"result","session_id":"s6","result":"ok"}]`,
+			wantMetrics: false,
+			wantModel:   "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := &RawResult{Stdout: []byte(tc.json), ExitCode: 0}
+			result, err := ParseResult(raw, time.Second)
+			if err != nil {
+				t.Fatalf("ParseResult() error = %v, want nil", err)
+			}
+
+			if tc.wantModel != result.Model {
+				t.Errorf("Model = %q, want %q", result.Model, tc.wantModel)
+			}
+
+			if tc.wantMetrics {
+				if result.Metrics == nil {
+					t.Fatalf("Metrics = nil, want non-nil")
+				}
+				if result.Metrics.InputTokens != tc.wantInput {
+					t.Errorf("InputTokens = %d, want %d", result.Metrics.InputTokens, tc.wantInput)
+				}
+				if result.Metrics.OutputTokens != tc.wantOutput {
+					t.Errorf("OutputTokens = %d, want %d", result.Metrics.OutputTokens, tc.wantOutput)
+				}
+				if result.Metrics.CacheReadTokens != tc.wantCacheRead {
+					t.Errorf("CacheReadTokens = %d, want %d", result.Metrics.CacheReadTokens, tc.wantCacheRead)
+				}
+				if result.Metrics.NumTurns != tc.wantNumTurns {
+					t.Errorf("NumTurns = %d, want %d", result.Metrics.NumTurns, tc.wantNumTurns)
+				}
+				if result.Metrics.CostUSD != tc.wantCostUSD {
+					t.Errorf("CostUSD = %f, want %f", result.Metrics.CostUSD, tc.wantCostUSD)
+				}
+			} else {
+				if result.Metrics != nil {
+					t.Errorf("Metrics = %+v, want nil", result.Metrics)
+				}
+			}
+		})
+	}
+}
+
+func TestSessionMetrics_ZeroValue(t *testing.T) {
+	var m SessionMetrics
+	if m.InputTokens != 0 {
+		t.Errorf("zero InputTokens = %d, want 0", m.InputTokens)
+	}
+	if m.OutputTokens != 0 {
+		t.Errorf("zero OutputTokens = %d, want 0", m.OutputTokens)
+	}
+	if m.CacheReadTokens != 0 {
+		t.Errorf("zero CacheReadTokens = %d, want 0", m.CacheReadTokens)
+	}
+	if m.CostUSD != 0 {
+		t.Errorf("zero CostUSD = %f, want 0", m.CostUSD)
+	}
+	if m.NumTurns != 0 {
+		t.Errorf("zero NumTurns = %d, want 0", m.NumTurns)
+	}
 }

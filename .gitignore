@@ -30,6 +30,9 @@ vendor/
 .DS_Store
 Thumbs.db
 
+# MCP config (contains absolute paths, user-specific)
+/.mcp.json
+
 # Claude Code (user-specific files ignored, project config tracked)
 .claude/*
 !.claude/settings.json

@@ -74,7 +74,7 @@ func TestRunner_Execute_FinalIntegration_FullFlowWithKnowledge(t *testing.T) {
 	r.CodeIndexer = &mockCodeIndexer{available: true, hint: "If Serena MCP is available, use code indexing"}
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	// 2.12: success
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
@@ -178,7 +178,7 @@ func TestRunner_Execute_FinalIntegration_GatesKnowledgeEmergency(t *testing.T) {
 	r.ReviewFn = progressiveReviewFn(r.TasksFile, nil)
 	r.DistillFn = noopDistillFn
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	// 3.8: all tasks processed
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
@@ -230,7 +230,7 @@ func TestRunner_Execute_FinalIntegration_AutoDistillation(t *testing.T) {
 	r.DistillFn = td.fn
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestRunner_Execute_FinalIntegration_DistillFailureGate(t *testing.T) {
 	r.GatePromptFn = gateGP.fn
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err = r.Execute(context.Background())
+	_, err = r.Execute(context.Background())
 	// 5.6: runner continues normally
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
@@ -369,7 +369,7 @@ Valid entry 5 about error handling.
 	r.DistillFn = noopDistillFn
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -437,7 +437,7 @@ func TestRunner_Execute_FinalIntegration_ResumeKnowledge(t *testing.T) {
 	r.DistillFn = noopDistillFn
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	// 7.7: retry succeeds
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
@@ -483,7 +483,7 @@ func TestRunner_Execute_FinalIntegration_SerenaFallback(t *testing.T) {
 	r.DistillFn = noopDistillFn
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	// 8.4: no errors
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
@@ -542,7 +542,7 @@ func TestRunner_Execute_FinalIntegration_NeedsFormattingCycle(t *testing.T) {
 	r.DistillFn = td.fn
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -607,7 +607,7 @@ func TestRunner_Execute_FinalIntegration_CrashRecovery(t *testing.T) {
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
 	// 10.4: Execute Runner → RecoverDistillation runs at startup
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	// 10.7: runner proceeds normally
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)

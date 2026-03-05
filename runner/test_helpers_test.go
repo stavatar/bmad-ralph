@@ -25,6 +25,21 @@ const threeOpenTasks = `# Sprint Tasks
 - [ ] Task three
 `
 
+const oneOpenTask = `# Sprint Tasks
+
+## Epic 1: Foundation
+
+- [ ] Task one
+`
+
+const twoOpenTasks = `# Sprint Tasks
+
+## Epic 1: Foundation
+
+- [ ] Task one
+- [ ] Task two
+`
+
 const allDoneTasks = `# Sprint Tasks
 
 - [x] Done one

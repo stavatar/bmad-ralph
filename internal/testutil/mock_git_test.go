@@ -3,6 +3,8 @@ package testutil
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/bmad-ralph/bmad-ralph/runner"
@@ -154,5 +156,74 @@ func TestMockGitClient_ZeroValue(t *testing.T) {
 	}
 	if mock.RestoreCleanCount != 1 {
 		t.Errorf("RestoreCleanCount: got %d, want 1", mock.RestoreCleanCount)
+	}
+}
+
+// TestMockGitClient_DiffStats_Sequence verifies indexed return and beyond-length behavior.
+func TestMockGitClient_DiffStats_Sequence(t *testing.T) {
+	stats1 := &runner.DiffStats{FilesChanged: 3, Insertions: 10, Deletions: 2}
+	stats2 := &runner.DiffStats{FilesChanged: 1, Insertions: 5, Deletions: 0}
+	m := &MockGitClient{
+		DiffStatsResults: []*runner.DiffStats{stats1, stats2},
+	}
+	ctx := context.Background()
+
+	// First call returns stats1
+	got, err := m.DiffStats(ctx, "a", "b")
+	if err != nil {
+		t.Fatalf("call 1: %v", err)
+	}
+	if got.FilesChanged != 3 {
+		t.Errorf("call 1: FilesChanged = %d, want 3", got.FilesChanged)
+	}
+
+	// Second call returns stats2
+	got, err = m.DiffStats(ctx, "b", "c")
+	if err != nil {
+		t.Fatalf("call 2: %v", err)
+	}
+	if got.FilesChanged != 1 {
+		t.Errorf("call 2: FilesChanged = %d, want 1", got.FilesChanged)
+	}
+
+	// Beyond-length: returns last element
+	got, err = m.DiffStats(ctx, "c", "d")
+	if err != nil {
+		t.Fatalf("call 3 (beyond): %v", err)
+	}
+	if got.FilesChanged != 1 {
+		t.Errorf("call 3 (beyond): FilesChanged = %d, want 1 (last element)", got.FilesChanged)
+	}
+	if m.DiffStatsCount != 3 {
+		t.Errorf("DiffStatsCount = %d, want 3", m.DiffStatsCount)
+	}
+}
+
+// TestMockGitClient_DiffStats_Error verifies error return from indexed errors.
+func TestMockGitClient_DiffStats_Error(t *testing.T) {
+	m := &MockGitClient{
+		DiffStatsErrors: []error{nil, fmt.Errorf("mock diff error")},
+		DiffStatsResults: []*runner.DiffStats{
+			{FilesChanged: 1},
+		},
+	}
+	ctx := context.Background()
+
+	// First call: no error
+	got, err := m.DiffStats(ctx, "a", "b")
+	if err != nil {
+		t.Fatalf("call 1: unexpected error: %v", err)
+	}
+	if got.FilesChanged != 1 {
+		t.Errorf("call 1: FilesChanged = %d, want 1", got.FilesChanged)
+	}
+
+	// Second call: error
+	_, err = m.DiffStats(ctx, "b", "c")
+	if err == nil {
+		t.Fatal("call 2: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "mock diff error") {
+		t.Errorf("call 2: error = %q, want containing %q", err.Error(), "mock diff error")
 	}
 }

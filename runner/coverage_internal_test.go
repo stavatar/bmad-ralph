@@ -147,7 +147,6 @@ func TestExtractFrontmatterGlobs_WithGlobs(t *testing.T) {
 	}
 }
 
-
 // --- WriteIntentFile error path ---
 
 func TestWriteIntentFile_MkdirAllError(t *testing.T) {
@@ -965,9 +964,12 @@ func TestRealReview_ScanTasksError(t *testing.T) {
 // Used by tests that require Git.HealthCheck to pass but do not exercise git behaviour.
 type nopGitClient struct{}
 
-func (nopGitClient) HealthCheck(_ context.Context) error           { return nil }
+func (nopGitClient) HealthCheck(_ context.Context) error          { return nil }
 func (nopGitClient) HeadCommit(_ context.Context) (string, error) { return "abc123", nil }
-func (nopGitClient) RestoreClean(_ context.Context) error          { return nil }
+func (nopGitClient) RestoreClean(_ context.Context) error         { return nil }
+func (nopGitClient) DiffStats(_ context.Context, _, _ string) (*DiffStats, error) {
+	return &DiffStats{}, nil
+}
 
 // --- RunOnce ScanTasks error ---
 

@@ -352,3 +352,216 @@ func TestExecGitClient_HeadCommit_EmptyRepo(t *testing.T) {
 		t.Errorf("error prefix: want 'runner: git head commit:', got %q", err.Error())
 	}
 }
+
+// TestExecGitClient_DiffStats_HappyPath verifies diff stats for a commit with known changes.
+func TestExecGitClient_DiffStats_HappyPath(t *testing.T) {
+	dir := initGitRepo(t)
+	client := &ExecGitClient{Dir: dir}
+	ctx := context.Background()
+
+	// Get SHA before changes
+	before, err := client.HeadCommit(ctx)
+	if err != nil {
+		t.Fatalf("HeadCommit before: %v", err)
+	}
+
+	// Create files in two directories
+	subDir := filepath.Join(dir, "pkg")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "lib.go"), []byte("package pkg\n"), 0644); err != nil {
+		t.Fatalf("write lib.go: %v", err)
+	}
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "add files")
+
+	after, err := client.HeadCommit(ctx)
+	if err != nil {
+		t.Fatalf("HeadCommit after: %v", err)
+	}
+
+	stats, err := client.DiffStats(ctx, before, after)
+	if err != nil {
+		t.Fatalf("DiffStats: %v", err)
+	}
+	if stats.FilesChanged != 2 {
+		t.Errorf("FilesChanged = %d, want 2", stats.FilesChanged)
+	}
+	if stats.Insertions < 3 {
+		t.Errorf("Insertions = %d, want >= 3", stats.Insertions)
+	}
+	if stats.Deletions != 0 {
+		t.Errorf("Deletions = %d, want 0", stats.Deletions)
+	}
+	if len(stats.Packages) != 2 {
+		t.Fatalf("Packages len = %d, want 2", len(stats.Packages))
+	}
+	// Packages should be sorted: "." and "pkg"
+	if stats.Packages[0] != "." {
+		t.Errorf("Packages[0] = %q, want %q", stats.Packages[0], ".")
+	}
+	if stats.Packages[1] != "pkg" {
+		t.Errorf("Packages[1] = %q, want %q", stats.Packages[1], "pkg")
+	}
+}
+
+// TestExecGitClient_DiffStats_IdenticalSHAs verifies early return for same before/after (AC3).
+func TestExecGitClient_DiffStats_IdenticalSHAs(t *testing.T) {
+	dir := initGitRepo(t)
+	client := &ExecGitClient{Dir: dir}
+	ctx := context.Background()
+
+	sha, err := client.HeadCommit(ctx)
+	if err != nil {
+		t.Fatalf("HeadCommit: %v", err)
+	}
+
+	stats, err := client.DiffStats(ctx, sha, sha)
+	if err != nil {
+		t.Fatalf("DiffStats identical: %v", err)
+	}
+	if stats.FilesChanged != 0 {
+		t.Errorf("FilesChanged = %d, want 0", stats.FilesChanged)
+	}
+	if stats.Insertions != 0 {
+		t.Errorf("Insertions = %d, want 0", stats.Insertions)
+	}
+	if stats.Deletions != 0 {
+		t.Errorf("Deletions = %d, want 0", stats.Deletions)
+	}
+	if len(stats.Packages) != 0 {
+		t.Errorf("Packages = %v, want empty", stats.Packages)
+	}
+}
+
+// TestExecGitClient_DiffStats_EmptyParams verifies error for empty before/after (AC4).
+func TestExecGitClient_DiffStats_EmptyParams(t *testing.T) {
+	dir := initGitRepo(t)
+	client := &ExecGitClient{Dir: dir}
+	ctx := context.Background()
+
+	cases := []struct {
+		name          string
+		before, after string
+	}{
+		{"empty before", "", "abc123"},
+		{"empty after", "abc123", ""},
+		{"both empty", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := client.DiffStats(ctx, tc.before, tc.after)
+			if err == nil {
+				t.Fatal("DiffStats: expected error for empty params, got nil")
+			}
+			if !strings.Contains(err.Error(), "runner: diff stats:") {
+				t.Errorf("error = %q, want containing %q", err.Error(), "runner: diff stats:")
+			}
+			if !strings.Contains(err.Error(), "non-empty") {
+				t.Errorf("error = %q, want containing %q", err.Error(), "non-empty")
+			}
+		})
+	}
+}
+
+// TestExecGitClient_DiffStats_InvalidSHA verifies error wrapping for invalid SHA (AC4).
+func TestExecGitClient_DiffStats_InvalidSHA(t *testing.T) {
+	dir := initGitRepo(t)
+	client := &ExecGitClient{Dir: dir}
+	ctx := context.Background()
+
+	_, err := client.DiffStats(ctx, "invalid_sha_1", "invalid_sha_2")
+	if err == nil {
+		t.Fatal("DiffStats: expected error for invalid SHA, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: diff stats:") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "runner: diff stats:")
+	}
+}
+
+// TestExecGitClient_DiffStats_DeletionsAndModifications verifies stats for modified/deleted files.
+func TestExecGitClient_DiffStats_DeletionsAndModifications(t *testing.T) {
+	dir := initGitRepo(t)
+	client := &ExecGitClient{Dir: dir}
+	ctx := context.Background()
+
+	before, err := client.HeadCommit(ctx)
+	if err != nil {
+		t.Fatalf("HeadCommit before: %v", err)
+	}
+
+	// Modify README.md (1 deletion, 1 insertion for the change)
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("updated\nline two\n"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "modify readme")
+
+	after, err := client.HeadCommit(ctx)
+	if err != nil {
+		t.Fatalf("HeadCommit after: %v", err)
+	}
+
+	stats, err := client.DiffStats(ctx, before, after)
+	if err != nil {
+		t.Fatalf("DiffStats: %v", err)
+	}
+	if stats.FilesChanged != 1 {
+		t.Errorf("FilesChanged = %d, want 1", stats.FilesChanged)
+	}
+	if stats.Insertions < 1 {
+		t.Errorf("Insertions = %d, want >= 1", stats.Insertions)
+	}
+	if stats.Deletions < 1 {
+		t.Errorf("Deletions = %d, want >= 1", stats.Deletions)
+	}
+	if len(stats.Packages) != 1 || stats.Packages[0] != "." {
+		t.Errorf("Packages = %v, want [\".\"]", stats.Packages)
+	}
+}
+
+// TestExecGitClient_DiffStats_BinaryFile verifies binary files counted as changed but 0 insertions/deletions.
+func TestExecGitClient_DiffStats_BinaryFile(t *testing.T) {
+	dir := initGitRepo(t)
+	client := &ExecGitClient{Dir: dir}
+	ctx := context.Background()
+
+	before, err := client.HeadCommit(ctx)
+	if err != nil {
+		t.Fatalf("HeadCommit before: %v", err)
+	}
+
+	// Create a binary file (random bytes that git detects as binary)
+	binData := []byte{0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD, 0x89, 0x50, 0x4E, 0x47}
+	if err := os.WriteFile(filepath.Join(dir, "image.png"), binData, 0644); err != nil {
+		t.Fatalf("write binary: %v", err)
+	}
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "add binary")
+
+	after, err := client.HeadCommit(ctx)
+	if err != nil {
+		t.Fatalf("HeadCommit after: %v", err)
+	}
+
+	stats, err := client.DiffStats(ctx, before, after)
+	if err != nil {
+		t.Fatalf("DiffStats: %v", err)
+	}
+	if stats.FilesChanged != 1 {
+		t.Errorf("FilesChanged = %d, want 1", stats.FilesChanged)
+	}
+	if stats.Insertions != 0 {
+		t.Errorf("Insertions = %d, want 0 (binary)", stats.Insertions)
+	}
+	if stats.Deletions != 0 {
+		t.Errorf("Deletions = %d, want 0 (binary)", stats.Deletions)
+	}
+	if len(stats.Packages) != 1 || stats.Packages[0] != "." {
+		t.Errorf("Packages = %v, want [\".\"]", stats.Packages)
+	}
+}

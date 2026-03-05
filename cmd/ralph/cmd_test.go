@@ -259,6 +259,43 @@ func writeInvalidConfig(t *testing.T, dir string) {
 	}
 }
 
+func TestGenerateRunID_Format(t *testing.T) {
+	id := generateRunID()
+
+	// UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx (36 chars, 4 dashes)
+	if len(id) != 36 {
+		t.Fatalf("generateRunID() len = %d, want 36", len(id))
+	}
+
+	parts := strings.Split(id, "-")
+	if len(parts) != 5 {
+		t.Fatalf("generateRunID() parts = %d, want 5 dash-separated groups", len(parts))
+	}
+	wantLens := []int{8, 4, 4, 4, 12}
+	for i, p := range parts {
+		if len(p) != wantLens[i] {
+			t.Errorf("generateRunID() part[%d] len = %d, want %d", i, len(p), wantLens[i])
+		}
+	}
+
+	// Version nibble = 4
+	if parts[2][0] != '4' {
+		t.Errorf("generateRunID() version nibble = %c, want '4'", parts[2][0])
+	}
+
+	// Variant nibble in {8, 9, a, b}
+	variant := parts[3][0]
+	if variant != '8' && variant != '9' && variant != 'a' && variant != 'b' {
+		t.Errorf("generateRunID() variant nibble = %c, want one of 8/9/a/b", variant)
+	}
+
+	// Uniqueness: two calls should differ
+	id2 := generateRunID()
+	if id == id2 {
+		t.Errorf("generateRunID() returned same ID twice: %s", id)
+	}
+}
+
 func TestRunRun_ConfigLoadError(t *testing.T) {
 	tmpDir := t.TempDir()
 	writeInvalidConfig(t, tmpDir)

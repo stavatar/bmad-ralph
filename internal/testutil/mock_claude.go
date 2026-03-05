@@ -13,14 +13,16 @@ import (
 // ScenarioStep defines a single mock Claude CLI response in a test scenario.
 // Each step corresponds to one session.Execute invocation.
 type ScenarioStep struct {
-	Type          string            `json:"type"`                      // "execute" or "review" (metadata, not part of JSON output)
-	ExitCode      int               `json:"exit_code"`                 // Process exit code
-	SessionID     string            `json:"session_id"`                // Mock session ID for JSON response
-	OutputFile    string            `json:"output_file,omitempty"`     // File with custom output text (optional, relative to scenario dir)
-	CreatesCommit bool              `json:"creates_commit,omitempty"`  // Signal for future MockGitClient (stored, not acted on)
-	IsError       bool              `json:"is_error,omitempty"`        // When true, JSON output uses subtype:"error" and is_error:true (matches real CLI)
-	WriteFiles    map[string]string `json:"write_files,omitempty"`     // relPath → content: files to write in MOCK_CLAUDE_PROJECT_ROOT
-	DeleteFiles   []string          `json:"delete_files,omitempty"`    // relPaths to remove from MOCK_CLAUDE_PROJECT_ROOT
+	Type          string            `json:"type"`                     // "execute" or "review" (metadata, not part of JSON output)
+	ExitCode      int               `json:"exit_code"`                // Process exit code
+	SessionID     string            `json:"session_id"`               // Mock session ID for JSON response
+	OutputFile    string            `json:"output_file,omitempty"`    // File with custom output text (optional, relative to scenario dir)
+	CreatesCommit bool              `json:"creates_commit,omitempty"` // Signal for future MockGitClient (stored, not acted on)
+	IsError       bool              `json:"is_error,omitempty"`       // When true, JSON output uses subtype:"error" and is_error:true (matches real CLI)
+	WriteFiles    map[string]string `json:"write_files,omitempty"`    // relPath → content: files to write in MOCK_CLAUDE_PROJECT_ROOT
+	DeleteFiles   []string          `json:"delete_files,omitempty"`   // relPaths to remove from MOCK_CLAUDE_PROJECT_ROOT
+	Model         string            `json:"model,omitempty"`          // Override model in JSON response (for metrics tests)
+	Usage         map[string]int    `json:"usage,omitempty"`          // Token usage data for JSON response (for metrics tests)
 }
 
 // Scenario defines an ordered sequence of mock Claude CLI responses for a test.
@@ -41,13 +43,15 @@ type mockSystemMessage struct {
 // mockResultMessage matches the Claude CLI "result" message format.
 // Do NOT use omitempty on is_error, duration_ms, num_turns — real CLI always outputs them.
 type mockResultMessage struct {
-	Type      string `json:"type"`
-	Subtype   string `json:"subtype"`
-	SessionID string `json:"session_id"`
-	Result    string `json:"result"`
-	IsError   bool   `json:"is_error"`
-	Duration  int    `json:"duration_ms"`
-	NumTurns  int    `json:"num_turns"`
+	Type      string         `json:"type"`
+	Subtype   string         `json:"subtype"`
+	SessionID string         `json:"session_id"`
+	Result    string         `json:"result"`
+	IsError   bool           `json:"is_error"`
+	Duration  int            `json:"duration_ms"`
+	NumTurns  int            `json:"num_turns"`
+	Model     string         `json:"model,omitempty"`
+	Usage     map[string]int `json:"usage,omitempty"`
 }
 
 // RunMockClaude is the self-reexec handler for mock Claude subprocess behavior.
@@ -140,13 +144,17 @@ func RunMockClaude() bool {
 	if step.IsError {
 		resultSubtype = "error"
 	}
+	model := "mock-claude"
+	if step.Model != "" {
+		model = step.Model
+	}
 	messages := []any{
 		mockSystemMessage{
 			Type:      "system",
 			Subtype:   "init",
 			SessionID: sessionID,
 			Tools:     []any{},
-			Model:     "mock-claude",
+			Model:     model,
 		},
 		mockResultMessage{
 			Type:      "result",
@@ -156,6 +164,8 @@ func RunMockClaude() bool {
 			IsError:   step.IsError,
 			Duration:  100,
 			NumTurns:  1,
+			Model:     model,
+			Usage:     step.Usage,
 		},
 	}
 

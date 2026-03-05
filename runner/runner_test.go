@@ -14,6 +14,7 @@ import (
 	"github.com/bmad-ralph/bmad-ralph/config"
 	"github.com/bmad-ralph/bmad-ralph/internal/testutil"
 	"github.com/bmad-ralph/bmad-ralph/runner"
+	"github.com/bmad-ralph/bmad-ralph/session"
 )
 
 func TestRecoverDirtyState_Scenarios(t *testing.T) {
@@ -196,7 +197,7 @@ func TestRunner_Execute_SequentialExecution(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -247,7 +248,7 @@ func TestRunner_Execute_AllTasksDone(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil (all done), got: %v", err)
 	}
@@ -285,7 +286,7 @@ func TestRunner_Execute_ErrNoTasks(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -379,7 +380,7 @@ func TestRunner_Execute_StartupErrors(t *testing.T) {
 				Knowledge:       &runner.NoOpKnowledgeWriter{},
 			}
 
-			err := r.Execute(context.Background())
+			_, err := r.Execute(context.Background())
 			if err == nil {
 				t.Fatal("Execute: want error, got nil")
 			}
@@ -437,7 +438,7 @@ func TestRunner_Execute_DirtyTreeRecoveryAtStartup(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil (recovery + all done), got: %v", err)
 	}
@@ -516,7 +517,7 @@ func TestRunner_Execute_SessionOptions(t *testing.T) {
 				Knowledge:       &runner.NoOpKnowledgeWriter{},
 			}
 
-			err := r.Execute(context.Background())
+			_, err := r.Execute(context.Background())
 			if err != nil {
 				t.Fatalf("Execute: unexpected error: %v", err)
 			}
@@ -586,7 +587,7 @@ func TestRunner_Execute_CustomReviewFunc(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -642,7 +643,7 @@ func TestRunner_Execute_ReviewFuncSequence(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -688,7 +689,7 @@ func TestRunner_Execute_ReviewFuncError(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -774,7 +775,7 @@ func TestRunner_Execute_MaxReviewCyclesExhausted(t *testing.T) {
 				Knowledge:       &runner.NoOpKnowledgeWriter{},
 			}
 
-			err := r.Execute(context.Background())
+			_, err := r.Execute(context.Background())
 			if err == nil {
 				t.Fatal("Execute: want error, got nil")
 			}
@@ -877,7 +878,7 @@ func TestRunner_Execute_ReviewCyclesPerTask(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil (per-task counter reset), got: %v", err)
 	}
@@ -940,7 +941,7 @@ func TestRunner_Execute_MutationAsymmetry(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err = r.Execute(context.Background())
+	_, err = r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -994,7 +995,7 @@ func TestRunner_Execute_NoCommitDetected(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -1062,7 +1063,7 @@ func TestRunner_Execute_HeadCommitBeforeFails(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -1105,7 +1106,7 @@ func TestRunner_Execute_HeadCommitAfterFails(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -1140,7 +1141,7 @@ func TestRunner_Execute_ReadTasksFails(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -1189,7 +1190,7 @@ func TestRunner_Execute_RetryOnNoCommit(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil, got: %v", err)
 	}
@@ -1258,7 +1259,7 @@ func TestRunner_Execute_RetryCounterIncrements(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil, got: %v", err)
 	}
@@ -1325,7 +1326,7 @@ func TestRunner_Execute_CounterPerTask(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil, got: %v", err)
 	}
@@ -1416,7 +1417,7 @@ func TestRunner_Execute_MaxRetriesExhausted(t *testing.T) {
 				Knowledge:       &runner.NoOpKnowledgeWriter{},
 			}
 
-			err := r.Execute(context.Background())
+			_, err := r.Execute(context.Background())
 			if err == nil {
 				t.Fatal("Execute: want error, got nil")
 			}
@@ -1491,7 +1492,7 @@ func TestRunner_Execute_NonZeroExitRetry(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil, got: %v", err)
 	}
@@ -1549,7 +1550,7 @@ func TestRunner_Execute_FatalExecErrorNoRetry(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -1607,7 +1608,7 @@ func TestRunner_Execute_BackoffTiming(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil, got: %v", err)
 	}
@@ -1675,7 +1676,7 @@ func TestRunner_Execute_ContextCancelDuringRetry(t *testing.T) {
 		Knowledge: &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(ctx)
+	_, err := r.Execute(ctx)
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -1731,7 +1732,7 @@ func TestRunner_Execute_ResumeExtractFnError(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -1788,7 +1789,7 @@ func TestRunner_Execute_RecoverDirtyStateFails(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -1848,7 +1849,7 @@ func TestRunner_Execute_ExitErrorWithParseFailure(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -1912,7 +1913,7 @@ func TestRunner_Execute_EmptySessionIDField(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -2352,7 +2353,7 @@ func TestRunner_Execute_FindingsInjection(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -2397,7 +2398,7 @@ func TestRunner_Execute_FindingsReadError(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -2437,6 +2438,7 @@ func TestDetermineReviewOutcome_Scenarios(t *testing.T) {
 		findingsContent *string // nil = no findings file
 		findingsIsDir   bool    // true = create directory instead of file (triggers non-NotExist error)
 		wantClean       bool
+		wantFindingsNil bool // true = expect Findings == nil
 		wantErr         bool
 		wantErrContains string
 	}{
@@ -2446,6 +2448,7 @@ func TestDetermineReviewOutcome_Scenarios(t *testing.T) {
 			currentTaskText: "- [ ] Task one",
 			findingsContent: nil,
 			wantClean:       true,
+			wantFindingsNil: true,
 		},
 		{
 			name:            "clean review - empty findings file",
@@ -2453,6 +2456,7 @@ func TestDetermineReviewOutcome_Scenarios(t *testing.T) {
 			currentTaskText: "- [ ] Task one",
 			findingsContent: &emptyFindings,
 			wantClean:       true,
+			wantFindingsNil: true,
 		},
 		{
 			name:            "clean review - whitespace-only findings",
@@ -2460,6 +2464,7 @@ func TestDetermineReviewOutcome_Scenarios(t *testing.T) {
 			currentTaskText: "- [ ] Task one",
 			findingsContent: &whitespaceFindings,
 			wantClean:       true,
+			wantFindingsNil: true,
 		},
 		{
 			name:            "with findings - task not done",
@@ -2467,6 +2472,7 @@ func TestDetermineReviewOutcome_Scenarios(t *testing.T) {
 			currentTaskText: "- [ ] Task one",
 			findingsContent: &realFindings,
 			wantClean:       false,
+			wantFindingsNil: true, // realFindings has ## not ### — no severity headers match
 		},
 		{
 			name:            "task done but findings non-empty",
@@ -2474,6 +2480,7 @@ func TestDetermineReviewOutcome_Scenarios(t *testing.T) {
 			currentTaskText: "- [ ] Task one",
 			findingsContent: &realFindings,
 			wantClean:       false,
+			wantFindingsNil: true, // realFindings has ## not ### — no severity headers match
 		},
 		{
 			name:            "no change no findings - session failed silently",
@@ -2481,6 +2488,7 @@ func TestDetermineReviewOutcome_Scenarios(t *testing.T) {
 			currentTaskText: "- [ ] Task one",
 			findingsContent: nil,
 			wantClean:       false,
+			wantFindingsNil: true,
 		},
 		{
 			name:            "bare task text without checkbox prefix",
@@ -2488,6 +2496,7 @@ func TestDetermineReviewOutcome_Scenarios(t *testing.T) {
 			currentTaskText: "Task one",
 			findingsContent: nil,
 			wantClean:       true,
+			wantFindingsNil: true,
 		},
 		{
 			name:            "read error - tasks file missing",
@@ -2546,9 +2555,127 @@ func TestDetermineReviewOutcome_Scenarios(t *testing.T) {
 			if rr.Clean != tt.wantClean {
 				t.Errorf("Clean = %v, want %v", rr.Clean, tt.wantClean)
 			}
+			if tt.wantFindingsNil && rr.Findings != nil {
+				t.Errorf("Findings = %v, want nil", rr.Findings)
+			}
 		})
 	}
 }
+
+// =============================================================================
+// Story 7.4: Review Enrichment — Severity Findings (AC: #1-#6)
+// =============================================================================
+
+// TestDetermineReviewOutcome_FindingsParsing verifies severity parsing from review-findings.md.
+func TestDetermineReviewOutcome_FindingsParsing(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksFile := writeTasksFile(t, tmpDir, "# Sprint Tasks\n\n- [ ] Task one\n")
+
+	// Use the test fixture with mixed severities
+	fixtureData, err := os.ReadFile("testdata/review-findings-with-severity.md")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	findingsPath := filepath.Join(tmpDir, "review-findings.md")
+	if err := os.WriteFile(findingsPath, fixtureData, 0644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+
+	rr, err := runner.DetermineReviewOutcome(tasksFile, "- [ ] Task one", tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rr.Clean {
+		t.Errorf("Clean = true, want false")
+	}
+	if len(rr.Findings) != 5 {
+		t.Fatalf("len(Findings) = %d, want 5", len(rr.Findings))
+	}
+
+	// Verify all 5 findings: severity and description
+	wantFindings := []struct {
+		severity    string
+		description string
+	}{
+		{"HIGH", "Missing error assertion"},
+		{"MEDIUM", "Stale doc comment"},
+		{"LOW", "Unused test fixture"},
+		{"CRITICAL", "SQL injection in query builder"},
+		{"MEDIUM", "DRY violation in test helpers"},
+	}
+	for i, wf := range wantFindings {
+		if rr.Findings[i].Severity != wf.severity {
+			t.Errorf("Findings[%d].Severity = %q, want %q", i, rr.Findings[i].Severity, wf.severity)
+		}
+		if rr.Findings[i].Description != wf.description {
+			t.Errorf("Findings[%d].Description = %q, want %q", i, rr.Findings[i].Description, wf.description)
+		}
+	}
+
+	// Verify severity counts: 1 CRITICAL, 1 HIGH, 2 MEDIUM, 1 LOW
+	counts := map[string]int{}
+	for _, f := range rr.Findings {
+		counts[f.Severity]++
+	}
+	wantCounts := map[string]int{"CRITICAL": 1, "HIGH": 1, "MEDIUM": 2, "LOW": 1}
+	for sev, want := range wantCounts {
+		if got := counts[sev]; got != want {
+			t.Errorf("count(%s) = %d, want %d", sev, got, want)
+		}
+	}
+
+	// Verify File and Line remain zero-value (not extracted by regex)
+	if rr.Findings[0].File != "" {
+		t.Errorf("Findings[0].File = %q, want empty", rr.Findings[0].File)
+	}
+	if rr.Findings[0].Line != 0 {
+		t.Errorf("Findings[0].Line = %d, want 0", rr.Findings[0].Line)
+	}
+}
+
+// TestDetermineReviewOutcome_CleanNoFindings verifies clean review has nil Findings.
+func TestDetermineReviewOutcome_CleanNoFindings(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksFile := writeTasksFile(t, tmpDir, "# Sprint Tasks\n\n- [x] Task one\n")
+
+	rr, err := runner.DetermineReviewOutcome(tasksFile, "- [ ] Task one", tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !rr.Clean {
+		t.Errorf("Clean = false, want true")
+	}
+	if rr.Findings != nil {
+		t.Errorf("Findings = %v, want nil", rr.Findings)
+	}
+}
+
+// TestDetermineReviewOutcome_MalformedFindings verifies content without severity headers
+// results in Clean=false and Findings=nil (AC4).
+func TestDetermineReviewOutcome_MalformedFindings(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksFile := writeTasksFile(t, tmpDir, "# Sprint Tasks\n\n- [ ] Task one\n")
+
+	// Content without ### [SEVERITY] headers
+	malformed := "Some review content\nwithout severity headers\nJust plain text.\n"
+	findingsPath := filepath.Join(tmpDir, "review-findings.md")
+	if err := os.WriteFile(findingsPath, []byte(malformed), 0644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+
+	rr, err := runner.DetermineReviewOutcome(tasksFile, "- [ ] Task one", tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rr.Clean {
+		t.Errorf("Clean = true, want false (malformed findings file)")
+	}
+	if rr.Findings != nil {
+		t.Errorf("Findings = %v, want nil (no parseable severity headers)", rr.Findings)
+	}
+}
+
+// BackwardCompat canary removed: identical to CleanNoFindings (M1 review finding).
 
 // =============================================================================
 // Story 5.2: Gate Detection in Runner (AC: #1-#8)
@@ -2571,7 +2698,7 @@ func TestRunner_Execute_GateContinueActions(t *testing.T) {
 			r, gp := setupGateTest(t, gateOpenTask, true)
 			gp.decision = &config.GateDecision{Action: tc.action}
 
-			err := r.Execute(context.Background())
+			_, err := r.Execute(context.Background())
 			if err != nil {
 				t.Fatalf("Execute: want nil, got: %v", err)
 			}
@@ -2595,7 +2722,7 @@ func TestRunner_Execute_GateQuit(t *testing.T) {
 	r, gp := setupGateTest(t, gateOpenTask, true)
 	gp.decision = &config.GateDecision{Action: config.ActionQuit}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -2627,7 +2754,7 @@ func TestRunner_Execute_GateQuit(t *testing.T) {
 func TestRunner_Execute_GatesDisabled(t *testing.T) {
 	r, gp := setupGateTest(t, gateOpenTask, false)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil, got: %v", err)
 	}
@@ -2642,7 +2769,7 @@ func TestRunner_Execute_GatesDisabled(t *testing.T) {
 func TestRunner_Execute_NoGateTag(t *testing.T) {
 	r, gp := setupGateTest(t, nonGateOpenTask, true)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil, got: %v", err)
 	}
@@ -2659,7 +2786,7 @@ func TestRunner_Execute_GatePromptFnNil(t *testing.T) {
 	r, _ := setupGateTest(t, gateOpenTask, true)
 	r.GatePromptFn = nil // override: nil guard path
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil (nil guard skips gate), got: %v", err)
 	}
@@ -2671,7 +2798,7 @@ func TestRunner_Execute_GatePromptError(t *testing.T) {
 	gp.decision = nil
 	gp.err = context.Canceled
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -2966,7 +3093,7 @@ func TestRunner_Execute_GateRetry(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil, got: %v", err)
 	}
@@ -3056,7 +3183,7 @@ func TestRunner_Execute_GateRetryEmptyFeedback(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil, got: %v", err)
 	}
@@ -3121,7 +3248,7 @@ func TestRunner_Execute_GateRetryInjectError(t *testing.T) {
 		return runner.ReviewResult{Clean: true}, nil
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -3184,7 +3311,7 @@ func TestRunner_Execute_CheckpointFires(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil, got: %v", err)
 	}
@@ -3276,7 +3403,7 @@ func TestRunner_Execute_CheckpointNotTriggered(t *testing.T) {
 				Knowledge:       &runner.NoOpKnowledgeWriter{},
 			}
 
-			err := r.Execute(context.Background())
+			_, err := r.Execute(context.Background())
 			if err != nil {
 				t.Fatalf("Execute: want nil, got: %v", err)
 			}
@@ -3338,7 +3465,7 @@ func TestRunner_Execute_CheckpointCombinedWithGate(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil, got: %v", err)
 	}
@@ -3411,7 +3538,7 @@ func TestRunner_Execute_CheckpointGateOnly(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil, got: %v", err)
 	}
@@ -3478,7 +3605,7 @@ func TestRunner_Execute_CheckpointSkipCounts(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil, got: %v", err)
 	}
@@ -3561,7 +3688,7 @@ func TestRunner_Execute_CheckpointRetryAdjusts(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: want nil, got: %v", err)
 	}
@@ -3651,7 +3778,7 @@ func TestRunner_Execute_GateRetryRevertError(t *testing.T) {
 		return runner.ReviewResult{Clean: true}, nil
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -3811,7 +3938,7 @@ func TestRunner_Execute_EmergencyGateExecuteRetry(t *testing.T) {
 		return runner.ReviewResult{Clean: true}, nil
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -3872,7 +3999,7 @@ func TestRunner_Execute_EmergencyGateExecuteSkip(t *testing.T) {
 
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -3912,7 +4039,7 @@ func TestRunner_Execute_EmergencyGateExecuteQuit(t *testing.T) {
 		return &config.GateDecision{Action: config.ActionQuit}, nil
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -3985,7 +4112,7 @@ func TestRunner_Execute_EmergencyGateReviewRetry(t *testing.T) {
 		return runner.ReviewResult{Clean: true}, nil
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -4058,7 +4185,7 @@ func TestRunner_Execute_EmergencyGateReviewSkip(t *testing.T) {
 		return runner.ReviewResult{Clean: true}, nil
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -4104,7 +4231,7 @@ func TestRunner_Execute_EmergencyGateReviewQuit(t *testing.T) {
 		return runner.ReviewResult{Clean: false}, nil // non-clean → triggers emergency
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -4147,7 +4274,7 @@ func TestRunner_Execute_EmergencyGateError(t *testing.T) {
 		return nil, gateErr
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -4183,7 +4310,7 @@ func TestRunner_Execute_EmergencyGateDisabled(t *testing.T) {
 		return &config.GateDecision{Action: config.ActionSkip}, nil
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")
 	}
@@ -4481,7 +4608,7 @@ func TestRunner_Execute_BudgetUnderLimit(t *testing.T) {
 	td := &trackingDistillFunc{}
 	r.DistillFn = td.fn
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -4516,7 +4643,7 @@ func TestRunner_Execute_DistillationTrigger(t *testing.T) {
 	td := &trackingDistillFunc{}
 	r.DistillFn = td.fn
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -4551,7 +4678,7 @@ func TestRunner_Execute_CooldownNotMet(t *testing.T) {
 	td := &trackingDistillFunc{}
 	r.DistillFn = td.fn
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -4593,7 +4720,7 @@ func TestRunner_Execute_DistillationBadFormatRetry(t *testing.T) {
 	r.GatePromptFn = gp.fn
 	r.Cfg.GatesEnabled = true
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -4641,7 +4768,7 @@ func TestRunner_Execute_DistillationBadFormatRetryFails(t *testing.T) {
 	r.GatePromptFn = gp.fn
 	r.Cfg.GatesEnabled = true
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -4679,6 +4806,8 @@ func TestRunner_Execute_DistillationFailureHumanGate(t *testing.T) {
 	r.Cfg.MaxIterations = 1
 	r.Cfg.DistillCooldown = 5
 	r.Cfg.LearningsBudget = 200
+	r.Cfg.RunID = "distill-gate-run"
+	r.Metrics = runner.NewMetricsCollector("distill-gate-run", nil)
 	// Non-format error → immediate gate (no free retry)
 	td := &trackingDistillFunc{errs: []error{errors.New("I/O timeout")}}
 	r.DistillFn = td.fn
@@ -4689,7 +4818,7 @@ func TestRunner_Execute_DistillationFailureHumanGate(t *testing.T) {
 	r.GatePromptFn = gp.fn
 	r.Cfg.GatesEnabled = true
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -4704,6 +4833,25 @@ func TestRunner_Execute_DistillationFailureHumanGate(t *testing.T) {
 	}
 	if !strings.Contains(gp.taskText, "160/200") {
 		t.Errorf("gate text = %q, want containing budget info %q", gp.taskText, "160/200")
+	}
+
+	// Story 7.6 L1: verify distillation gate records GateStats in MetricsCollector.
+	rm := r.Metrics.Finish()
+	if len(rm.Tasks) < 1 {
+		t.Fatalf("len(Tasks) = %d, want >= 1", len(rm.Tasks))
+	}
+	g := rm.Tasks[0].Gate
+	if g == nil {
+		t.Fatal("Gate is nil after distillation gate, want non-nil")
+	}
+	if g.TotalPrompts != 1 {
+		t.Errorf("TotalPrompts = %d, want 1", g.TotalPrompts)
+	}
+	if g.Skips != 1 {
+		t.Errorf("Skips = %d, want 1 (distillation skip)", g.Skips)
+	}
+	if g.LastAction != "skip" {
+		t.Errorf("LastAction = %q, want %q", g.LastAction, "skip")
 	}
 }
 
@@ -4732,7 +4880,7 @@ func TestRunner_Execute_MissingLearnings(t *testing.T) {
 	td := &trackingDistillFunc{}
 	r.DistillFn = td.fn
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -4766,7 +4914,7 @@ func TestRunner_Execute_MonotonicCounterPersist(t *testing.T) {
 	td := &trackingDistillFunc{}
 	r.DistillFn = td.fn
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -4811,7 +4959,7 @@ func TestRunner_Execute_DistillSuccess_UpdatesLastDistillTask(t *testing.T) {
 	td := &trackingDistillFunc{} // returns nil (success)
 	r.DistillFn = td.fn
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -4870,7 +5018,7 @@ func TestRunner_Execute_DistillationRetry5(t *testing.T) {
 	r.GatePromptFn = gp.fn
 	r.Cfg.GatesEnabled = true
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -4907,7 +5055,7 @@ func TestRunner_Execute_DistillationGateError(t *testing.T) {
 	}
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v (gate error should be non-fatal)", err)
 	}
@@ -4937,7 +5085,7 @@ func TestRunner_Execute_DistillationGateQuit(t *testing.T) {
 	}
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v (distillation quit should be non-fatal)", err)
 	}
@@ -4968,7 +5116,7 @@ func TestRunner_Execute_DistillationGateApprove(t *testing.T) {
 	}
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -5005,7 +5153,7 @@ func TestRunner_Execute_DistillationRetrySucceeds(t *testing.T) {
 	}
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -5052,7 +5200,7 @@ func TestRunner_Execute_DistillationFailureGatesDisabled(t *testing.T) {
 	td := &trackingDistillFunc{errs: []error{errors.New("crash")}}
 	r.DistillFn = td.fn
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v (distillation should be non-fatal)", err)
 	}
@@ -5086,7 +5234,7 @@ func TestRunner_Execute_RecoverDistillationError(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error for RecoverDistillation failure, got nil")
 	}
@@ -5121,7 +5269,7 @@ func TestRunner_Execute_BuildKnowledgeError(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error for buildKnowledgeReplacements failure, got nil")
 	}
@@ -5159,7 +5307,7 @@ func TestRunner_Execute_DistillStateLoadError(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err == nil {
 		t.Fatal("Execute: want error for LoadDistillState failure, got nil")
 	}
@@ -5197,7 +5345,7 @@ func TestRunner_Execute_BudgetWarning(t *testing.T) {
 		Knowledge:       &runner.NoOpKnowledgeWriter{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -5222,7 +5370,7 @@ func TestRunner_Execute_CodeIndexerPresent(t *testing.T) {
 		CodeIndexer:     &runner.NoOpCodeIndexerDetector{},
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -5248,7 +5396,7 @@ func TestRunner_Execute_NilKnowledge_NoPanic(t *testing.T) {
 	r.Knowledge = nil // explicitly nil — must not panic
 	r.Cfg.MaxIterations = 1
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -5282,7 +5430,7 @@ func TestRunner_Execute_SkippedTask_NoCounterIncrement(t *testing.T) {
 		return &config.GateDecision{Action: config.ActionSkip}, nil
 	}
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -5334,7 +5482,7 @@ func TestRunner_Execute_SkippedTask_NoValidation(t *testing.T) {
 
 	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -5370,7 +5518,7 @@ func TestRunner_Execute_NormalTask_IncrementsCounter(t *testing.T) {
 	kw := &trackingKnowledgeWriter{}
 	r.Knowledge = kw
 
-	err := r.Execute(context.Background())
+	_, err := r.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -5391,5 +5539,1462 @@ func TestRunner_Execute_NormalTask_IncrementsCounter(t *testing.T) {
 	}
 }
 
+// TestRunner_Execute_DiffStatsIntegration verifies DiffStats is called on commit detection (AC6),
+// results are logged, and MetricsCollector.RecordGitDiff populates TaskMetrics.Diff.
+func TestRunner_Execute_DiffStatsIntegration(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "diff-stats-integration",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "ds-1"},
+		},
+	}
+	diffResult := &runner.DiffStats{
+		FilesChanged: 3,
+		Insertions:   42,
+		Deletions:    7,
+		Packages:     []string{"config", "runner"},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits:      headCommitPairs([2]string{"aaa", "bbb"}),
+		DiffStatsResults: []*runner.DiffStats{diffResult},
+	}
 
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.RunID = "ds-run"
+	r.Metrics = runner.NewMetricsCollector("ds-run", nil)
 
+	rm, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	// Verify DiffStats was called
+	if git.DiffStatsCount != 1 {
+		t.Errorf("DiffStatsCount = %d, want 1", git.DiffStatsCount)
+	}
+
+	// Verify MetricsCollector received diff stats via RecordGitDiff
+	if rm == nil {
+		t.Fatal("RunMetrics is nil")
+	}
+	if len(rm.Tasks) < 1 {
+		t.Fatalf("Tasks len = %d, want >= 1", len(rm.Tasks))
+	}
+	diff := rm.Tasks[0].Diff
+	if diff == nil {
+		t.Fatal("Tasks[0].Diff is nil, want non-nil from RecordGitDiff")
+	}
+	if diff.FilesChanged != 3 {
+		t.Errorf("Diff.FilesChanged = %d, want 3", diff.FilesChanged)
+	}
+	if diff.Insertions != 42 {
+		t.Errorf("Diff.Insertions = %d, want 42", diff.Insertions)
+	}
+	if diff.Deletions != 7 {
+		t.Errorf("Diff.Deletions = %d, want 7", diff.Deletions)
+	}
+	if len(diff.Packages) != 2 || diff.Packages[0] != "config" || diff.Packages[1] != "runner" {
+		t.Errorf("Diff.Packages = %v, want [config runner]", diff.Packages)
+	}
+}
+
+// TestRunner_Execute_DiffStatsError verifies that DiffStats error is best-effort (NFR24):
+// error is logged as warning but execution continues successfully.
+func TestRunner_Execute_DiffStatsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "diff-stats-error",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "dse-1"},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits:     headCommitPairs([2]string{"aaa", "bbb"}),
+		DiffStatsErrors: []error{fmt.Errorf("mock diff error")},
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: want nil error (best-effort DiffStats), got: %v", err)
+	}
+
+	// Verify DiffStats was attempted
+	if git.DiffStatsCount != 1 {
+		t.Errorf("DiffStatsCount = %d, want 1", git.DiffStatsCount)
+	}
+}
+
+// TestRunner_Execute_DiffStatsWithoutMetrics verifies DiffStats works when Metrics is nil.
+func TestRunner_Execute_DiffStatsWithoutMetrics(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "diff-stats-no-metrics",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "dsn-1"},
+		},
+	}
+	diffResult := &runner.DiffStats{
+		FilesChanged: 1,
+		Insertions:   5,
+		Deletions:    0,
+		Packages:     []string{"."},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits:      headCommitPairs([2]string{"aaa", "bbb"}),
+		DiffStatsResults: []*runner.DiffStats{diffResult},
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	// r.Metrics intentionally left nil
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	// DiffStats should still be called even without MetricsCollector
+	if git.DiffStatsCount != 1 {
+		t.Errorf("DiffStatsCount = %d, want 1", git.DiffStatsCount)
+	}
+}
+
+// TestRunner_Execute_GatePromptIncludesCost verifies gate prompt text contains
+// "Cost so far: $X.XX" when MetricsCollector has pricing configured (AC6).
+// Covers checkpoint gate. Emergency gates (execute/review exhaustion) and distill gate
+// use identical pattern — covered by code inspection, not dedicated integration tests.
+func TestRunner_Execute_GatePromptIncludesCost(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "gate-cost-display",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "gc-1",
+				Model: "claude-sonnet-4-20250514",
+				Usage: map[string]int{"input_tokens": 1000, "output_tokens": 500, "cache_read_tokens": 200}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.GatesEnabled = true
+	r.Cfg.GatesCheckpoint = 1
+	r.Cfg.RunID = "gate-cost-run"
+
+	pricing := map[string]config.Pricing{
+		"claude-sonnet-4-20250514": {InputPer1M: 3.0, OutputPer1M: 15.0, CachePer1M: 0.30},
+	}
+	r.Metrics = runner.NewMetricsCollector("gate-cost-run", pricing)
+
+	gp := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionApprove},
+	}
+	r.GatePromptFn = gp.fn
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	if gp.count < 1 {
+		t.Fatalf("gate prompt not called, want >= 1")
+	}
+	if !strings.Contains(gp.taskText, "Cost so far: $") {
+		t.Errorf("gate prompt text missing cost string, got: %q", gp.taskText)
+	}
+}
+
+// =============================================================================
+// Story 7.5: Stuck Detection tests (AC1-AC6)
+// =============================================================================
+
+// TestRunner_Execute_StuckDetectionFeedbackInjected verifies that 2 consecutive no-commit
+// attempts trigger InjectFeedback with stuck message (AC2, AC6).
+func TestRunner_Execute_StuckDetectionFeedbackInjected(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "stuck-feedback",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "stuck-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "stuck-002"},
+			{Type: "execute", ExitCode: 0, SessionID: "stuck-003"},
+		},
+	}
+	mock := &testutil.MockGitClient{
+		HeadCommits: []string{"aaa", "aaa", "aaa", "aaa", "aaa", "aaa"},
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 3
+	r.Cfg.StuckThreshold = 2
+	r.Metrics = runner.NewMetricsCollector("stuck-run", nil) // exercise RecordRetry("stuck") positive path
+
+	rm, err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+	if !errors.Is(err, config.ErrMaxRetries) {
+		t.Errorf("errors.Is(err, ErrMaxRetries): want true; err = %v", err)
+	}
+	if rm == nil {
+		t.Fatal("RunMetrics: want non-nil when Metrics set, got nil")
+	}
+
+	content, readErr := os.ReadFile(r.TasksFile)
+	if readErr != nil {
+		t.Fatalf("ReadFile tasks: %v", readErr)
+	}
+	taskContent := string(content)
+	if !strings.Contains(taskContent, "No commit in last 2 attempts") {
+		t.Errorf("tasks file missing 'No commit in last 2 attempts', got:\n%s", taskContent)
+	}
+	if !strings.Contains(taskContent, "Consider a different approach") {
+		t.Errorf("tasks file missing 'Consider a different approach', got:\n%s", taskContent)
+	}
+	if !strings.Contains(taskContent, config.FeedbackPrefix) {
+		t.Errorf("tasks file missing FeedbackPrefix %q", config.FeedbackPrefix)
+	}
+}
+
+// TestRunner_Execute_StuckCounterResetsOnCommit verifies that consecutive no-commit counter
+// resets to 0 on successful commit (AC3). Cross-task scope: task 1 has 1 no-commit then commit
+// (reset), task 2 needs 2 fresh no-commits to trigger stuck — proves counter was reset.
+func TestRunner_Execute_StuckCounterResetsOnCommit(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "stuck-reset",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "sr-001"}, // task 1: no commit
+			{Type: "execute", ExitCode: 0, SessionID: "sr-002"}, // task 1: commit
+			{Type: "execute", ExitCode: 0, SessionID: "sr-003"}, // task 2: no commit
+			{Type: "execute", ExitCode: 0, SessionID: "sr-004"}, // task 2: no commit (stuck)
+			{Type: "execute", ExitCode: 0, SessionID: "sr-005"}, // task 2: no commit (maxiter)
+		},
+	}
+	mock := &testutil.MockGitClient{
+		HeadCommits: []string{
+			"aaa", "aaa", // task 1 attempt 1: no commit (count=1)
+			"aaa", "bbb", // task 1 attempt 2: commit (count→0)
+			"bbb", "bbb", // task 2 attempt 1: no commit (count=1)
+			"bbb", "bbb", // task 2 attempt 2: no commit (count=2 → stuck)
+			"bbb", "bbb", // task 2 attempt 3: no commit (count=3 → maxiter)
+		},
+	}
+	reviewCount := 0
+	r, _ := setupRunnerIntegration(t, tmpDir, threeOpenTasks, scenario, mock)
+	r.Cfg.MaxIterations = 3
+	r.Cfg.StuckThreshold = 2
+
+	// Custom reviewFn: marks only "Task one" done, leaving "Task two" open
+	oneDoneContent := "# Sprint Tasks\n\n## Epic 1: Foundation\n\n- [x] Task one\n- [ ] Task two\n- [ ] Task three\n"
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		reviewCount++
+		// Error ignored: test helper in controlled tmpDir
+		_ = os.WriteFile(r.TasksFile, []byte(oneDoneContent), 0644)
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	_, err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+	if !errors.Is(err, config.ErrMaxRetries) {
+		t.Errorf("errors.Is(err, ErrMaxRetries): want true; err = %v", err)
+	}
+
+	content, readErr := os.ReadFile(r.TasksFile)
+	if readErr != nil {
+		t.Fatalf("ReadFile tasks: %v", readErr)
+	}
+	taskContent := string(content)
+	// "2 attempts" not "3" — proves counter reset at commit
+	if !strings.Contains(taskContent, "No commit in last 2 attempts") {
+		t.Errorf("want 'No commit in last 2 attempts' (counter reset at commit), got:\n%s", taskContent)
+	}
+	// Exactly 1 occurrence of threshold feedback — counter was reset by commit, so
+	// stuck fires once at task 2 attempt 2, not earlier from task 1.
+	if cnt := strings.Count(taskContent, "No commit in last 2 attempts"); cnt != 1 {
+		t.Errorf("strings.Count('No commit in last 2 attempts') = %d, want 1 (counter reset proof)", cnt)
+	}
+	if reviewCount < 1 {
+		t.Errorf("reviewCount = %d, want >= 1 (task 1 committed)", reviewCount)
+	}
+}
+
+// TestRunner_Execute_StuckDisabledWhenThresholdZero verifies stuck detection is disabled
+// when StuckThreshold == 0 (AC4). No feedback injected despite multiple no-commits.
+func TestRunner_Execute_StuckDisabledWhenThresholdZero(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "stuck-disabled",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "sd-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "sd-002"},
+			{Type: "execute", ExitCode: 0, SessionID: "sd-003"},
+		},
+	}
+	mock := &testutil.MockGitClient{
+		HeadCommits: []string{"aaa", "aaa", "aaa", "aaa", "aaa", "aaa"},
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 3
+	r.Cfg.StuckThreshold = 0 // disabled
+
+	_, err := r.Execute(context.Background())
+	if !errors.Is(err, config.ErrMaxRetries) {
+		t.Fatalf("errors.Is(err, ErrMaxRetries): want true; err = %v", err)
+	}
+
+	content, readErr := os.ReadFile(r.TasksFile)
+	if readErr != nil {
+		t.Fatalf("ReadFile tasks: %v", readErr)
+	}
+	if strings.Contains(string(content), "No commit in last") {
+		t.Errorf("stuck disabled (threshold=0) but feedback was injected:\n%s", string(content))
+	}
+}
+
+// TestRunner_Execute_StuckDoesNotTerminateLoop verifies stuck detection does NOT replace
+// MaxIterations — loop continues after stuck feedback until MaxIterations exhausted (AC5).
+func TestRunner_Execute_StuckDoesNotTerminateLoop(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "stuck-continues",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "sc-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "sc-002"},
+			{Type: "execute", ExitCode: 0, SessionID: "sc-003"},
+		},
+	}
+	mock := &testutil.MockGitClient{
+		HeadCommits: []string{"aaa", "aaa", "aaa", "aaa", "aaa", "aaa"},
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 3
+	r.Cfg.StuckThreshold = 2
+
+	_, err := r.Execute(context.Background())
+	if !errors.Is(err, config.ErrMaxRetries) {
+		t.Fatalf("errors.Is(err, ErrMaxRetries): want true; err = %v", err)
+	}
+
+	// All 3 HeadCommit pairs consumed — stuck didn't stop loop
+	if mock.HeadCommitCount != 6 {
+		t.Errorf("HeadCommitCount = %d, want 6 (3 before + 3 after)", mock.HeadCommitCount)
+	}
+	if !strings.Contains(err.Error(), "3/3") {
+		t.Errorf("error message: want '3/3' (MaxIterations enforced), got %q", err.Error())
+	}
+}
+
+// TestRunner_Execute_StuckNilMetricsNoPanic verifies stuck detection works when Metrics is nil
+// — no panic from RecordRetry nil guard (AC2).
+func TestRunner_Execute_StuckNilMetricsNoPanic(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "stuck-nil-metrics",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "snm-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "snm-002"},
+		},
+	}
+	mock := &testutil.MockGitClient{
+		HeadCommits: []string{"aaa", "aaa", "aaa", "aaa"},
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 2
+	r.Cfg.StuckThreshold = 2
+	r.Metrics = nil
+
+	_, err := r.Execute(context.Background())
+	if !errors.Is(err, config.ErrMaxRetries) {
+		t.Fatalf("errors.Is(err, ErrMaxRetries): want true; err = %v", err)
+	}
+
+	content, readErr := os.ReadFile(r.TasksFile)
+	if readErr != nil {
+		t.Fatalf("ReadFile tasks: %v", readErr)
+	}
+	if !strings.Contains(string(content), "No commit in last 2 attempts") {
+		t.Errorf("stuck feedback should be injected even with nil Metrics")
+	}
+}
+
+// TestRunner_Execute_StuckExecErrorDoesNotAffectCounter verifies that exec errors (non-zero exit)
+// do NOT increment or reset the consecutive no-commit counter. Exec-error path skips headAfter
+// check entirely, so counter stays unchanged.
+func TestRunner_Execute_StuckExecErrorDoesNotAffectCounter(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Sequence: no-commit → exec-error → no-commit → stuck fires (count=2)
+	scenario := testutil.Scenario{
+		Name: "stuck-exec-error",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "see-001"}, // no commit
+			{Type: "execute", ExitCode: 1, SessionID: "see-002"}, // exec error
+			{Type: "execute", ExitCode: 0, SessionID: "see-003"}, // no commit
+			{Type: "execute", ExitCode: 0, SessionID: "see-004"}, // no commit (maxiter)
+		},
+	}
+	// HeadCommit calls: step 1 (before+after), step 2 (before only),
+	// step 3 (before+after), step 4 (before+after)
+	mock := &testutil.MockGitClient{
+		HeadCommits: []string{
+			"aaa", "aaa", // step 1: before+after, no commit (count=1)
+			"aaa",        // step 2: before only (exec error skips after)
+			"aaa", "aaa", // step 3: before+after, no commit (count=2 → stuck)
+			"aaa", "aaa", // step 4: before+after, no commit (count=3 → maxiter)
+		},
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 4
+	r.Cfg.StuckThreshold = 2
+
+	_, err := r.Execute(context.Background())
+	if !errors.Is(err, config.ErrMaxRetries) {
+		t.Fatalf("errors.Is(err, ErrMaxRetries): want true; err = %v", err)
+	}
+
+	content, readErr := os.ReadFile(r.TasksFile)
+	if readErr != nil {
+		t.Fatalf("ReadFile tasks: %v", readErr)
+	}
+	// "2 attempts" proves exec-error didn't increment counter
+	if !strings.Contains(string(content), "No commit in last 2 attempts") {
+		t.Errorf("want 'No commit in last 2 attempts' (exec-error doesn't affect counter), got:\n%s", string(content))
+	}
+}
+
+// TestRunner_Execute_StuckFeedbackMessageContent verifies exact feedback message format (AC6).
+func TestRunner_Execute_StuckFeedbackMessageContent(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "stuck-msg",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "sm-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "sm-002"},
+			{Type: "execute", ExitCode: 0, SessionID: "sm-003"},
+		},
+	}
+	mock := &testutil.MockGitClient{
+		HeadCommits: []string{"aaa", "aaa", "aaa", "aaa", "aaa", "aaa"},
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 3
+	r.Cfg.StuckThreshold = 2
+
+	_, err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: expected error, got nil")
+	}
+	if !errors.Is(err, config.ErrMaxRetries) {
+		t.Errorf("Execute: want ErrMaxRetries, got %v", err)
+	}
+
+	content, readErr := os.ReadFile(r.TasksFile)
+	if readErr != nil {
+		t.Fatalf("ReadFile tasks: %v", readErr)
+	}
+	taskContent := string(content)
+
+	// Full feedback line format
+	wantLine := config.FeedbackPrefix + " No commit in last 2 attempts. Consider a different approach."
+	if !strings.Contains(taskContent, wantLine) {
+		t.Errorf("feedback line mismatch\nwant substring: %q\ngot:\n%s", wantLine, taskContent)
+	}
+
+	// At step 3, counter=3, second stuck feedback should say "3 attempts"
+	if !strings.Contains(taskContent, "No commit in last 3 attempts") {
+		t.Errorf("want second stuck feedback 'No commit in last 3 attempts', got:\n%s", taskContent)
+	}
+}
+
+// =============================================================================
+// Story 7.6: Gate Analytics tests (AC1-AC4)
+// =============================================================================
+
+// TestRunner_Execute_GateAnalytics_NormalGateRecordsMetrics verifies normal gate records GateStats (AC1,AC2)
+// and writes structured log with step_type=gate, action, wait_ms, task fields (AC1).
+func TestRunner_Execute_GateAnalytics_NormalGateRecordsMetrics(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "gate-analytics-normal",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "ga-1"},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.GatesEnabled = true
+	r.Cfg.GatesCheckpoint = 1
+	r.Cfg.RunID = "gate-analytics-run"
+	r.Metrics = runner.NewMetricsCollector("gate-analytics-run", nil)
+
+	// Set up logger so we can verify structured log output (AC1).
+	logr, logErr := runner.OpenRunLogger(tmpDir, "logs", "gate-analytics-run")
+	if logErr != nil {
+		t.Fatalf("OpenRunLogger: %v", logErr)
+	}
+	defer logr.Close() //nolint:errcheck
+	r.Logger = logr
+
+	gp := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionApprove},
+	}
+	r.GatePromptFn = gp.fn
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	// AC1: Verify structured log contains gate decision fields.
+	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "logs", "ralph-*.log"))
+	if len(logFiles) == 0 {
+		t.Fatal("no log file found")
+	}
+	logData, readErr := os.ReadFile(logFiles[0])
+	if readErr != nil {
+		t.Fatalf("read log: %v", readErr)
+	}
+	logContent := string(logData)
+	for _, want := range []string{"gate decision", "step_type=gate", "action=approve", "wait_ms=", "task="} {
+		if !strings.Contains(logContent, want) {
+			t.Errorf("log missing %q in:\n%s", want, logContent)
+		}
+	}
+
+	// AC2: Verify GateStats counters.
+	rm := r.Metrics.Finish()
+	if len(rm.Tasks) < 1 {
+		t.Fatalf("len(Tasks) = %d, want >= 1", len(rm.Tasks))
+	}
+	g := rm.Tasks[0].Gate
+	if g == nil {
+		t.Fatal("Gate is nil, want non-nil")
+	}
+	if g.TotalPrompts != 1 {
+		t.Errorf("TotalPrompts = %d, want 1", g.TotalPrompts)
+	}
+	if g.Approvals != 1 {
+		t.Errorf("Approvals = %d, want 1", g.Approvals)
+	}
+	if g.Rejections != 0 {
+		t.Errorf("Rejections = %d, want 0", g.Rejections)
+	}
+	if g.Skips != 0 {
+		t.Errorf("Skips = %d, want 0", g.Skips)
+	}
+	if g.TotalWaitMs < 0 {
+		t.Errorf("TotalWaitMs = %d, want >= 0", g.TotalWaitMs)
+	}
+	if g.LastAction != "approve" {
+		t.Errorf("LastAction = %q, want %q", g.LastAction, "approve")
+	}
+}
+
+// TestRunner_Execute_GateAnalytics_EmergencyGateRecordsMetrics verifies emergency gate records same GateStats (AC3).
+func TestRunner_Execute_GateAnalytics_EmergencyGateRecordsMetrics(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "gate-analytics-emergency",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "ga-em-1"},
+			{Type: "execute", ExitCode: 0, SessionID: "ga-em-2"},
+		},
+	}
+	// All no-commit → triggers emergency at MaxIterations
+	git := &testutil.MockGitClient{
+		HeadCommits: []string{"aaa", "aaa", "aaa", "aaa", "aaa", "aaa"},
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 2
+	r.Cfg.GatesEnabled = true
+	r.Cfg.StuckThreshold = 0 // disable stuck to isolate emergency
+	r.Cfg.RunID = "gate-em-run"
+	r.Metrics = runner.NewMetricsCollector("gate-em-run", nil)
+
+	ep := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionSkip},
+	}
+	r.EmergencyGatePromptFn = ep.fn
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	rm := r.Metrics.Finish()
+	if len(rm.Tasks) < 1 {
+		t.Fatalf("len(Tasks) = %d, want >= 1", len(rm.Tasks))
+	}
+	g := rm.Tasks[0].Gate
+	if g == nil {
+		t.Fatal("Gate is nil, want non-nil after emergency gate")
+	}
+	if g.TotalPrompts != 1 {
+		t.Errorf("TotalPrompts = %d, want 1", g.TotalPrompts)
+	}
+	if g.Skips != 1 {
+		t.Errorf("Skips = %d, want 1 (emergency skip)", g.Skips)
+	}
+	if g.Approvals != 0 {
+		t.Errorf("Approvals = %d, want 0", g.Approvals)
+	}
+	if g.Rejections != 0 {
+		t.Errorf("Rejections = %d, want 0", g.Rejections)
+	}
+	if g.LastAction != "skip" {
+		t.Errorf("LastAction = %q, want %q", g.LastAction, "skip")
+	}
+}
+
+// TestRunner_Execute_GateAnalytics_NilMetricsNoPanic verifies gate recording is safe with nil Metrics (AC2 nil guard).
+func TestRunner_Execute_GateAnalytics_NilMetricsNoPanic(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "gate-analytics-nil",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "ga-nil-1"},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.GatesEnabled = true
+	r.Cfg.GatesCheckpoint = 1
+	r.Metrics = nil // explicitly nil
+
+	gp := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionApprove},
+	}
+	r.GatePromptFn = gp.fn
+
+	// Must not panic
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if gp.count < 1 {
+		t.Errorf("gate prompt not called, want >= 1")
+	}
+	// AC6 negative: no cost string when Metrics is nil
+	if strings.Contains(gp.taskText, "Cost so far") {
+		t.Errorf("gate prompt should NOT contain cost string with nil Metrics, got: %q", gp.taskText)
+	}
+}
+
+// TestRunner_Execute_GateAnalytics_QuitRecordsRejection verifies quit action records Rejections counter.
+func TestRunner_Execute_GateAnalytics_QuitRecordsRejection(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "gate-analytics-quit",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "ga-quit-1"},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.GatesEnabled = true
+	r.Cfg.GatesCheckpoint = 1
+	r.Cfg.RunID = "gate-quit-run"
+	r.Metrics = runner.NewMetricsCollector("gate-quit-run", nil)
+
+	gp := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionQuit},
+	}
+	r.GatePromptFn = gp.fn
+
+	_, err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: expected error for quit, got nil")
+	}
+
+	rm := r.Metrics.Finish()
+	if len(rm.Tasks) < 1 {
+		t.Fatalf("len(Tasks) = %d, want >= 1", len(rm.Tasks))
+	}
+	g := rm.Tasks[0].Gate
+	if g == nil {
+		t.Fatal("Gate is nil, want non-nil after quit")
+	}
+	if g.Rejections != 1 {
+		t.Errorf("Rejections = %d, want 1", g.Rejections)
+	}
+	if g.Approvals != 0 {
+		t.Errorf("Approvals = %d, want 0", g.Approvals)
+	}
+	if g.Skips != 0 {
+		t.Errorf("Skips = %d, want 0", g.Skips)
+	}
+	if g.LastAction != "quit" {
+		t.Errorf("LastAction = %q, want %q", g.LastAction, "quit")
+	}
+}
+
+// --- Story 7.9: Latency + Error integration ---
+
+// TestRunner_Execute_LatencyRecorded verifies latency breakdown is populated after normal execution (AC3,AC4).
+func TestRunner_Execute_LatencyRecorded(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "latency-record",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "lat-1"},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.RunID = "latency-run"
+	r.Metrics = runner.NewMetricsCollector("latency-run", nil)
+
+	rm, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if rm == nil {
+		t.Fatal("RunMetrics is nil, want non-nil")
+	}
+	if len(rm.Tasks) < 1 {
+		t.Fatalf("len(Tasks) = %d, want >= 1", len(rm.Tasks))
+	}
+	lat := rm.Tasks[0].Latency
+	if lat == nil {
+		t.Fatal("Latency is nil, want non-nil")
+	}
+	// SessionMs should be > 0 since session.Execute was called
+	if lat.SessionMs <= 0 {
+		t.Errorf("SessionMs = %d, want > 0", lat.SessionMs)
+	}
+	// GitMs >= 0 (MockGitClient returns instantly; sub-millisecond rounds to 0)
+	if lat.GitMs < 0 {
+		t.Errorf("GitMs = %d, want >= 0", lat.GitMs)
+	}
+}
+
+// TestRunner_Execute_NilMetricsNoPanicLatency verifies nil Metrics doesn't panic on latency/error instrumentation (AC5).
+func TestRunner_Execute_NilMetricsNoPanicLatency(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "nil-metrics-latency",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "nml-1"},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Metrics = nil // explicitly nil
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	// No panic = pass
+}
+
+// TestRunner_Execute_ErrorRecorded verifies that execute session errors are recorded
+// in metrics via RecordError (AC3, AC4).
+func TestRunner_Execute_ErrorRecorded(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "error-record",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 1, SessionID: "err-1"},
+			{Type: "execute", ExitCode: 0, SessionID: "err-2"},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: []string{"aaa", "aaa", "bbb"},
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 3
+	r.Cfg.RunID = "error-run"
+	r.Metrics = runner.NewMetricsCollector("error-run", nil)
+	r.ReviewFn = reviewAndMarkDoneFn(r.TasksFile, nil)
+
+	rm, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if rm == nil {
+		t.Fatal("RunMetrics is nil, want non-nil")
+	}
+	if len(rm.Tasks) < 1 {
+		t.Fatalf("len(Tasks) = %d, want >= 1", len(rm.Tasks))
+	}
+	errs := rm.Tasks[0].Errors
+	if errs == nil {
+		t.Fatal("Errors is nil, want non-nil after exit code 1")
+	}
+	if errs.TotalErrors < 1 {
+		t.Errorf("TotalErrors = %d, want >= 1", errs.TotalErrors)
+	}
+	if len(errs.Categories) < 1 {
+		t.Fatalf("Categories len = %d, want >= 1", len(errs.Categories))
+	}
+	if errs.Categories[0] == "" {
+		t.Error("Categories[0] is empty, want non-empty category")
+	}
+}
+
+// TestRunner_Execute_SimilarityWarnInjectsFeedback verifies that when consecutive commits
+// touch similar packages, the similarity detector triggers warn and injects feedback (AC4).
+func TestRunner_Execute_SimilarityWarnInjectsFeedback(t *testing.T) {
+	tmpDir := t.TempDir()
+	// 3 execute steps: each produces a commit with overlapping packages
+	scenario := testutil.Scenario{
+		Name: "sim-warn",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "sw-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "sw-002"},
+			{Type: "execute", ExitCode: 0, SessionID: "sw-003"},
+		},
+	}
+	// All 3 iterations detect a commit (different hashes)
+	mock := &testutil.MockGitClient{
+		HeadCommits: []string{
+			"aaa", "bbb", // iter 1: commit detected
+			"bbb", "ccc", // iter 2: commit detected
+			"ccc", "ddd", // iter 3: commit detected
+		},
+		DiffStatsResults: []*runner.DiffStats{
+			{Packages: []string{"pkg/a", "pkg/b", "pkg/c"}},
+			{Packages: []string{"pkg/a", "pkg/b", "pkg/d"}},
+			{Packages: []string{"pkg/a", "pkg/b", "pkg/e"}},
+		},
+	}
+
+	oneDoneContent := "# Sprint Tasks\n\n## Epic 1: Foundation\n\n- [x] Task one\n- [ ] Task two\n- [ ] Task three\n"
+	r, _ := setupRunnerIntegration(t, tmpDir, threeOpenTasks, scenario, mock)
+	r.Cfg.MaxIterations = 3
+	r.Cfg.SimilarityWindow = 3
+	r.Cfg.SimilarityWarn = 0.3 // low threshold to trigger warn with partial overlap
+	r.Cfg.SimilarityHard = 0.95
+	r.Similarity = runner.NewSimilarityDetector(3, 0.3, 0.95)
+
+	// Capture tasks file content before ReviewFn overwrites it
+	var feedbackSeen bool
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		data, _ := os.ReadFile(r.TasksFile) // Error ignored: test helper reads controlled tmpDir
+		if strings.Contains(string(data), "Recent changes are very similar") {
+			feedbackSeen = true
+		}
+		_ = os.WriteFile(r.TasksFile, []byte(oneDoneContent), 0644) // Error ignored: test helper
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	_, err := r.Execute(context.Background())
+	_ = err // May complete or exhaust iterations
+
+	if !feedbackSeen {
+		t.Error("similarity warn feedback was never injected into tasks file")
+	}
+}
+
+// TestRunner_Execute_SimilarityHardTriggersEmergencyGate verifies that when diff packages
+// are identical across window, the hard threshold triggers EmergencyGatePromptFn (AC5).
+func TestRunner_Execute_SimilarityHardTriggersEmergencyGate(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "sim-hard",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "sh-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "sh-002"},
+			{Type: "execute", ExitCode: 0, SessionID: "sh-003"},
+		},
+	}
+	// All commits, identical packages each time
+	mock := &testutil.MockGitClient{
+		HeadCommits: []string{
+			"aaa", "bbb",
+			"bbb", "ccc",
+			"ccc", "ddd",
+		},
+		DiffStatsResults: []*runner.DiffStats{
+			{Packages: []string{"pkg/a", "pkg/b"}},
+			{Packages: []string{"pkg/a", "pkg/b"}},
+			{Packages: []string{"pkg/a", "pkg/b"}},
+		},
+	}
+
+	oneDoneContent := "# Sprint Tasks\n\n## Epic 1: Foundation\n\n- [x] Task one\n- [ ] Task two\n- [ ] Task three\n"
+	r, _ := setupRunnerIntegration(t, tmpDir, threeOpenTasks, scenario, mock)
+	r.Cfg.MaxIterations = 3
+	r.Cfg.GatesEnabled = true
+	r.Cfg.SimilarityWindow = 3
+	r.Cfg.SimilarityWarn = 0.5
+	r.Cfg.SimilarityHard = 0.8
+	r.Similarity = runner.NewSimilarityDetector(3, 0.5, 0.8)
+
+	gate := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionQuit},
+	}
+	r.EmergencyGatePromptFn = gate.fn
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		_ = os.WriteFile(r.TasksFile, []byte(oneDoneContent), 0644) // Error ignored: test helper
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	_, err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error from similarity hard gate quit, got nil")
+	}
+	if !strings.Contains(err.Error(), "similarity gate") {
+		t.Errorf("error = %q, want containing 'similarity gate'", err.Error())
+	}
+	if gate.count == 0 {
+		t.Error("EmergencyGatePromptFn was not called for similarity hard threshold")
+	}
+	if gate.count > 0 {
+		if !strings.Contains(gate.taskText, "Similarity loop detected") {
+			t.Errorf("gate taskText = %q, want containing 'Similarity loop detected'", gate.taskText)
+		}
+		if !strings.Contains(gate.taskText, "score:") {
+			t.Errorf("gate taskText = %q, want containing 'score:'", gate.taskText)
+		}
+		if !strings.Contains(gate.taskText, "Diffs are repeating") {
+			t.Errorf("gate taskText = %q, want containing 'Diffs are repeating'", gate.taskText)
+		}
+	}
+}
+
+// TestRunner_Execute_SimilarityHardNoGateContinues verifies that when hard threshold
+// triggers but GatesEnabled=false, execution continues without calling EmergencyGatePromptFn.
+func TestRunner_Execute_SimilarityHardNoGateContinues(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "sim-hard-no-gate",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "sng-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "sng-002"},
+			{Type: "execute", ExitCode: 0, SessionID: "sng-003"},
+		},
+	}
+	mock := &testutil.MockGitClient{
+		HeadCommits: []string{
+			"aaa", "bbb",
+			"bbb", "ccc",
+			"ccc", "ddd",
+		},
+		DiffStatsResults: []*runner.DiffStats{
+			{Packages: []string{"pkg/same"}},
+			{Packages: []string{"pkg/same"}},
+			{Packages: []string{"pkg/same"}},
+		},
+	}
+
+	oneDoneContent := "# Sprint Tasks\n\n## Epic 1: Foundation\n\n- [x] Task one\n- [ ] Task two\n- [ ] Task three\n"
+	r, _ := setupRunnerIntegration(t, tmpDir, threeOpenTasks, scenario, mock)
+	r.Cfg.MaxIterations = 3
+	r.Cfg.GatesEnabled = false // gates disabled
+	r.Cfg.SimilarityWindow = 3
+	r.Cfg.SimilarityWarn = 0.5
+	r.Cfg.SimilarityHard = 0.8
+	r.Similarity = runner.NewSimilarityDetector(3, 0.5, 0.8)
+
+	gate := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionQuit},
+	}
+	r.EmergencyGatePromptFn = gate.fn // set but should not be called (GatesEnabled=false)
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		_ = os.WriteFile(r.TasksFile, []byte(oneDoneContent), 0644) // Error ignored: test helper
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	_, err := r.Execute(context.Background())
+	_ = err // May complete or exhaust iterations — no gate quit expected
+
+	if gate.count != 0 {
+		t.Errorf("EmergencyGatePromptFn called %d times, want 0 (gates disabled)", gate.count)
+	}
+}
+
+// TestRunner_Execute_SimilarityDisabledWhenWindowZero verifies no similarity detection
+// when SimilarityWindow == 0 (AC6). Identical packages but no detector → no feedback.
+func TestRunner_Execute_SimilarityDisabledWhenWindowZero(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "sim-disabled",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "sd-001"},
+		},
+	}
+	mock := &testutil.MockGitClient{
+		HeadCommits: []string{"aaa", "bbb"},
+		DiffStatsResults: []*runner.DiffStats{
+			{Packages: []string{"pkg/a", "pkg/b"}},
+		},
+	}
+
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, mock)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.SimilarityWindow = 0 // disabled
+	// Similarity field stays nil (no detector created)
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	content, readErr := os.ReadFile(r.TasksFile)
+	if readErr != nil {
+		t.Fatalf("ReadFile tasks: %v", readErr)
+	}
+	if strings.Contains(string(content), "similar") {
+		t.Error("tasks file should not contain similarity feedback when disabled")
+	}
+}
+
+// =============================================================================
+// Story 7.7: Budget Alerts tests (AC1-AC6)
+// =============================================================================
+
+// budgetPricing returns pricing that yields $1.00 per input token for easy cost math.
+func budgetPricing() map[string]config.Pricing {
+	return map[string]config.Pricing{
+		"test-model": {InputPer1M: 1_000_000, OutputPer1M: 0, CachePer1M: 0},
+	}
+}
+
+// TestRunner_Execute_BudgetAlertDisabled verifies that BudgetMaxUSD==0 (default)
+// produces no budget warnings or errors even with high cost (AC4).
+func TestRunner_Execute_BudgetAlertDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "budget-disabled",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "bd-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 100}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.BudgetMaxUSD = 0 // disabled (default)
+	r.Cfg.RunID = "budget-disabled-run"
+	r.Metrics = runner.NewMetricsCollector("budget-disabled-run", budgetPricing())
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	// No budget warning in tasks file
+	content, _ := os.ReadFile(r.TasksFile)
+	if strings.Contains(string(content), "Budget warning") {
+		t.Error("tasks file should not contain budget warning when disabled")
+	}
+}
+
+// TestRunner_Execute_BudgetAlertWarning verifies that cost at warn threshold triggers
+// InjectFeedback with budget warning message, logged once per task (AC2).
+func TestRunner_Execute_BudgetAlertWarning(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Session costs $5 (5 input tokens * $1/token).
+	// BudgetMaxUSD=100, BudgetWarnPct=5 → warnAt=$5.
+	// After execute: $5 >= $5 warnAt → warning injected into tasks file.
+	// Review captures tasks file state (with warning), then marks task done.
+	scenario := testutil.Scenario{
+		Name: "budget-warn",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "bw-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 5}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.BudgetMaxUSD = 100.0
+	r.Cfg.BudgetWarnPct = 5
+	r.Cfg.RunID = "budget-warn-run"
+	r.Metrics = runner.NewMetricsCollector("budget-warn-run", budgetPricing())
+
+	// Capture tasks file content during review (before overwrite) to verify warning.
+	var capturedTasksContent string
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		data, _ := os.ReadFile(r.TasksFile)
+		capturedTasksContent = string(data)
+		// Error ignored: test helper in controlled tmpDir
+		_ = os.WriteFile(r.TasksFile, []byte(allDoneTasks), 0644)
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	if !strings.Contains(capturedTasksContent, "Budget warning") {
+		t.Errorf("tasks file at review time should contain budget warning feedback, got: %s", capturedTasksContent)
+	}
+	// Verify concrete dollar amounts in warning message
+	if !strings.Contains(capturedTasksContent, "$5.00") {
+		t.Errorf("budget warning should contain current cost '$5.00', got: %s", capturedTasksContent)
+	}
+	if !strings.Contains(capturedTasksContent, "$100.00") {
+		t.Errorf("budget warning should contain budget limit '$100.00', got: %s", capturedTasksContent)
+	}
+	// Warning injected only once per task (AC2)
+	if count := strings.Count(capturedTasksContent, "Budget warning"); count != 1 {
+		t.Errorf("budget warning count = %d, want 1 (once per task)", count)
+	}
+}
+
+// TestRunner_Execute_BudgetExceededHardError verifies that cost exceeding budget
+// without gates enabled returns a hard error (AC3).
+func TestRunner_Execute_BudgetExceededHardError(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Session costs $10 (10 input tokens). BudgetMaxUSD=5 → exceeded after first session.
+	scenario := testutil.Scenario{
+		Name: "budget-exceeded-hard",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "be-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 10}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.BudgetMaxUSD = 5.0
+	r.Cfg.BudgetWarnPct = 80
+	r.Cfg.GatesEnabled = false
+	r.Cfg.RunID = "budget-exceeded-run"
+	r.Metrics = runner.NewMetricsCollector("budget-exceeded-run", budgetPricing())
+
+	_, err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "budget exceeded") {
+		t.Errorf("error = %q, want containing 'budget exceeded'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "cost limit reached") {
+		t.Errorf("error = %q, want containing 'cost limit reached'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "$10.00") {
+		t.Errorf("error = %q, want containing actual cost '$10.00'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "$5.00") {
+		t.Errorf("error = %q, want containing budget limit '$5.00'", err.Error())
+	}
+}
+
+// TestRunner_Execute_BudgetExceededEmergencyGateQuit verifies budget exceeded with
+// gates enabled triggers emergency gate, and quit action returns error (AC3).
+func TestRunner_Execute_BudgetExceededEmergencyGateQuit(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "budget-gate-quit",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "bgq-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 10}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.BudgetMaxUSD = 5.0
+	r.Cfg.BudgetWarnPct = 80
+	r.Cfg.GatesEnabled = true
+	r.Cfg.RunID = "budget-gate-quit-run"
+	r.Metrics = runner.NewMetricsCollector("budget-gate-quit-run", budgetPricing())
+
+	gate := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionQuit},
+	}
+	r.EmergencyGatePromptFn = gate.fn
+
+	_, err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "budget exceeded") {
+		t.Errorf("error = %q, want containing 'budget exceeded'", err.Error())
+	}
+	if gate.count != 1 {
+		t.Errorf("emergency gate count = %d, want 1", gate.count)
+	}
+	if !strings.Contains(gate.taskText, "budget exceeded") {
+		t.Errorf("gate taskText = %q, want containing 'budget exceeded'", gate.taskText)
+	}
+	if !strings.Contains(err.Error(), "gate: quit") {
+		t.Errorf("error = %q, want containing inner error 'gate: quit'", err.Error())
+	}
+}
+
+// TestRunner_Execute_BudgetExceededEmergencyGateRetry verifies that retry action
+// continues execution despite exceeded budget (AC3).
+func TestRunner_Execute_BudgetExceededEmergencyGateRetry(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "budget-gate-retry",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "bgr-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 10}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.BudgetMaxUSD = 5.0
+	r.Cfg.BudgetWarnPct = 80
+	r.Cfg.GatesEnabled = true
+	r.Cfg.RunID = "budget-gate-retry-run"
+	r.Metrics = runner.NewMetricsCollector("budget-gate-retry-run", budgetPricing())
+
+	gate := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionRetry},
+	}
+	r.EmergencyGatePromptFn = gate.fn
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if gate.count != 2 {
+		t.Errorf("emergency gate count = %d, want 2 (once after execute, once after review)", gate.count)
+	}
+}
+
+// TestRunner_Execute_BudgetExceededEmergencyGateSkip verifies that skip action
+// skips the current task and continues to next (AC3).
+func TestRunner_Execute_BudgetExceededEmergencyGateSkip(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "budget-gate-skip",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "bgs-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 10}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.BudgetMaxUSD = 5.0
+	r.Cfg.BudgetWarnPct = 80
+	r.Cfg.GatesEnabled = true
+	r.Cfg.RunID = "budget-gate-skip-run"
+	r.Metrics = runner.NewMetricsCollector("budget-gate-skip-run", budgetPricing())
+
+	gate := &trackingGatePrompt{
+		decision: &config.GateDecision{Action: config.ActionSkip},
+	}
+	r.EmergencyGatePromptFn = gate.fn
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if gate.count != 1 {
+		t.Errorf("emergency gate count = %d, want 1", gate.count)
+	}
+	// Task should be marked as skipped
+	content, readErr := os.ReadFile(r.TasksFile)
+	if readErr != nil {
+		t.Fatalf("ReadFile tasks: %v", readErr)
+	}
+	if !strings.Contains(string(content), "[x] Task one") {
+		t.Errorf("tasks file should contain '[x] Task one' after budget skip, got: %s", content)
+	}
+}
+
+// TestRunner_Execute_BudgetExceededGateError verifies that gate prompt error
+// propagates as error (AC3).
+func TestRunner_Execute_BudgetExceededGateError(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "budget-gate-err",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "bge-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 10}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.BudgetMaxUSD = 5.0
+	r.Cfg.BudgetWarnPct = 80
+	r.Cfg.GatesEnabled = true
+	r.Cfg.RunID = "budget-gate-err-run"
+	r.Metrics = runner.NewMetricsCollector("budget-gate-err-run", budgetPricing())
+
+	r.EmergencyGatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		return nil, fmt.Errorf("gate broken")
+	}
+
+	_, err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "budget gate") {
+		t.Errorf("error = %q, want containing 'budget gate'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "gate broken") {
+		t.Errorf("error = %q, want containing inner error 'gate broken'", err.Error())
+	}
+}
+
+// TestRunner_Execute_BudgetNilMetricsNoPanic verifies that nil Metrics
+// produces no budget checks and no panic (AC4 edge case).
+func TestRunner_Execute_BudgetNilMetricsNoPanic(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "budget-nil-metrics",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "bnm-001"},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.BudgetMaxUSD = 5.0
+	r.Cfg.BudgetWarnPct = 80
+	// r.Metrics is nil (not set)
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+}
+
+// TestRunner_Execute_BudgetExceededDuringReview verifies that budget exceeded
+// after review session RecordSession triggers hard error (AC5, Task 3.8).
+// Execute session is cheap, review session pushes cost over budget.
+func TestRunner_Execute_BudgetExceededDuringReview(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Execute session costs $1 (1 input token). Budget=$5.
+	// Review returns SessionMetrics with 10 input tokens → $10 → cumulative $11 > $5 → exceeded.
+	scenario := testutil.Scenario{
+		Name: "budget-review-exceeded",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "bre-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 1}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.BudgetMaxUSD = 5.0
+	r.Cfg.BudgetWarnPct = 80
+	r.Cfg.GatesEnabled = false
+	r.Cfg.RunID = "budget-review-exceeded-run"
+	r.Metrics = runner.NewMetricsCollector("budget-review-exceeded-run", budgetPricing())
+
+	// ReviewFn returns high-cost SessionMetrics that push cumulative cost over budget.
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		return runner.ReviewResult{
+			Clean: true,
+			SessionMetrics: &session.SessionMetrics{
+				InputTokens: 10,
+			},
+			Model: "test-model",
+		}, nil
+	}
+
+	_, err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error from budget exceeded during review, got nil")
+	}
+	if !strings.Contains(err.Error(), "budget exceeded") {
+		t.Errorf("error = %q, want containing 'budget exceeded'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "cost limit reached") {
+		t.Errorf("error = %q, want containing 'cost limit reached' (no gates)", err.Error())
+	}
+}
+
+// TestRunner_Execute_BudgetWarningNotRepeated verifies that budget warning is
+// injected only once per task even across multiple iterations (AC2, Task 3.9).
+// Two execute iterations both above warn threshold, but only one feedback injection.
+func TestRunner_Execute_BudgetWarningNotRepeated(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Two iterations: first no-commit (retry), second with commit.
+	// Each costs $6 (6 input tokens). BudgetMaxUSD=100, BudgetWarnPct=5 → warnAt=$5.
+	// After iter1: $6 >= $5 → warning. After iter2: $12 >= $5, but budgetWarned → no repeat.
+	scenario := testutil.Scenario{
+		Name: "budget-warn-once",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "bwo-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 6}},
+			{Type: "execute", ExitCode: 0, SessionID: "bwo-002",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 6}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: []string{
+			"aaa", "aaa", // first iteration: no commit → retry
+			"aaa", "bbb", // second iteration: commit detected
+		},
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 2
+	r.Cfg.BudgetMaxUSD = 100.0
+	r.Cfg.BudgetWarnPct = 5
+	r.Cfg.RunID = "budget-warn-once-run"
+	r.Metrics = runner.NewMetricsCollector("budget-warn-once-run", budgetPricing())
+
+	// Capture tasks file during review to count warnings.
+	var capturedContent string
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		data, _ := os.ReadFile(r.TasksFile)
+		capturedContent = string(data)
+		_ = os.WriteFile(r.TasksFile, []byte(allDoneTasks), 0644) // Error ignored: test helper
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	// Warning should appear exactly once despite two iterations above threshold.
+	if count := strings.Count(capturedContent, "Budget warning"); count != 1 {
+		t.Errorf("budget warning count = %d, want 1 (once per task), tasks content:\n%s", count, capturedContent)
+	}
+}

@@ -14,15 +14,38 @@ type SessionResult struct {
 	ExitCode  int           // From process exit code (RawResult.ExitCode)
 	Output    string        // From JSON "result" field (or raw stdout for non-JSON)
 	Duration  time.Duration // Measured wall-clock time by caller
+	Metrics   *SessionMetrics // Token usage metrics; nil when usage data absent
+	Model     string          // Model name from JSON; empty when absent
 }
 
 // jsonResultMessage unmarshals the "result" element from Claude CLI JSON output.
 // Only fields we need are mapped — unknown fields are silently ignored by encoding/json.
+
+// SessionMetrics holds token usage and turn count extracted from Claude Code JSON output.
+// CostUSD is always 0 in this story; populated by runner in Story 7.3.
+type SessionMetrics struct {
+	InputTokens     int     `json:"input_tokens"`
+	OutputTokens    int     `json:"output_tokens"`
+	CacheReadTokens int     `json:"cache_read_tokens"`
+	CostUSD         float64 `json:"cost_usd"`
+	NumTurns        int     `json:"num_turns"`
+}
+
+// usageData maps the "usage" object in Claude Code JSON output.
+type usageData struct {
+	InputTokens     int `json:"input_tokens"`
+	OutputTokens    int `json:"output_tokens"`
+	CacheReadTokens int `json:"cache_read_tokens"`
+}
+
 type jsonResultMessage struct {
-	Type      string `json:"type"`
-	SessionID string `json:"session_id"`
-	Result    string `json:"result"`
-	IsError   bool   `json:"is_error"`
+	Type      string     `json:"type"`
+	SessionID string     `json:"session_id"`
+	Result    string     `json:"result"`
+	IsError   bool       `json:"is_error"`
+	Usage     *usageData `json:"usage"`
+	Model     string     `json:"model"`
+	NumTurns  int        `json:"num_turns"`
 }
 
 // ParseResult transforms raw Claude CLI output into a structured SessionResult.
@@ -50,12 +73,7 @@ func ParseResult(raw *RawResult, elapsed time.Duration) (*SessionResult, error) 
 	if strings.HasPrefix(trimmed, "{") {
 		var msg jsonResultMessage
 		if err := json.Unmarshal(raw.Stdout, &msg); err == nil && msg.Type == "result" {
-			return &SessionResult{
-				SessionID: msg.SessionID,
-				ExitCode:  raw.ExitCode,
-				Output:    msg.Result,
-				Duration:  elapsed,
-			}, nil
+			return resultFromMessage(&msg, raw.ExitCode, elapsed), nil
 		}
 		// Valid JSON object but not a result message — fall through to plain-text fallback
 		return &SessionResult{
@@ -88,12 +106,7 @@ func ParseResult(raw *RawResult, elapsed time.Duration) (*SessionResult, error) 
 				continue
 			}
 			if msg.Type == "result" {
-				return &SessionResult{
-					SessionID: msg.SessionID,
-					ExitCode:  raw.ExitCode,
-					Output:    msg.Result,
-					Duration:  elapsed,
-				}, nil
+				return resultFromMessage(&msg, raw.ExitCode, elapsed), nil
 			}
 		}
 
@@ -106,4 +119,25 @@ func ParseResult(raw *RawResult, elapsed time.Duration) (*SessionResult, error) 
 		ExitCode: raw.ExitCode,
 		Duration: elapsed,
 	}, nil
+}
+
+// resultFromMessage builds a SessionResult from a parsed jsonResultMessage.
+// Populates Metrics only when usage data is present (graceful degradation).
+func resultFromMessage(msg *jsonResultMessage, exitCode int, elapsed time.Duration) *SessionResult {
+	r := &SessionResult{
+		SessionID: msg.SessionID,
+		ExitCode:  exitCode,
+		Output:    msg.Result,
+		Duration:  elapsed,
+		Model:     msg.Model,
+	}
+	if msg.Usage != nil {
+		r.Metrics = &SessionMetrics{
+			InputTokens:     msg.Usage.InputTokens,
+			OutputTokens:    msg.Usage.OutputTokens,
+			CacheReadTokens: msg.Usage.CacheReadTokens,
+			NumTurns:        msg.NumTurns,
+		}
+	}
+	return r
 }

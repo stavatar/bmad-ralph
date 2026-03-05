@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -16,6 +18,7 @@ type GitClient interface {
 	HealthCheck(ctx context.Context) error
 	HeadCommit(ctx context.Context) (string, error)
 	RestoreClean(ctx context.Context) error
+	DiffStats(ctx context.Context, before, after string) (*DiffStats, error)
 }
 
 // Sentinel errors for git health check failures.
@@ -102,4 +105,58 @@ func (e *ExecGitClient) RestoreClean(ctx context.Context) error {
 		return fmt.Errorf("runner: git restore clean: %w", err)
 	}
 	return nil
+}
+
+// DiffStats returns file change statistics between two commits using git diff --numstat.
+// Returns zero-value DiffStats when before == after (no git command executed).
+// Returns error for empty inputs or git failures.
+func (c *ExecGitClient) DiffStats(ctx context.Context, before, after string) (*DiffStats, error) {
+	if before == "" || after == "" {
+		return nil, fmt.Errorf("runner: diff stats: before and after SHAs must be non-empty")
+	}
+	if before == after {
+		return &DiffStats{}, nil
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "diff", "--numstat", before, after)
+	cmd.Dir = c.Dir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("runner: diff stats: %w", err)
+	}
+
+	var stats DiffStats
+	pkgSet := make(map[string]bool)
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		stats.FilesChanged++
+		// Binary files show "-" for insertions/deletions in numstat
+		if parts[0] != "-" {
+			if ins, err := strconv.Atoi(parts[0]); err == nil {
+				stats.Insertions += ins
+			}
+		}
+		if parts[1] != "-" {
+			if del, err := strconv.Atoi(parts[1]); err == nil {
+				stats.Deletions += del
+			}
+		}
+		dir := filepath.Dir(parts[2])
+		pkgSet[dir] = true
+	}
+
+	// Sort packages for deterministic output
+	stats.Packages = make([]string, 0, len(pkgSet))
+	for pkg := range pkgSet {
+		stats.Packages = append(stats.Packages, pkg)
+	}
+	sort.Strings(stats.Packages)
+	return &stats, nil
 }

@@ -16,11 +16,11 @@ var update = flag.Bool("update", false, "update golden files")
 // placeholders set to empty. Callers override specific keys as needed.
 func executeReplacements() map[string]string {
 	return map[string]string{
-		"__FORMAT_CONTRACT__":  "",
-		"__RALPH_KNOWLEDGE__":  "",
+		"__FORMAT_CONTRACT__":   "",
+		"__RALPH_KNOWLEDGE__":   "",
 		"__LEARNINGS_CONTENT__": "",
-		"__FINDINGS_CONTENT__": "",
-		"__SERENA_HINT__":      "",
+		"__FINDINGS_CONTENT__":  "",
+		"__SERENA_HINT__":       "",
 	}
 }
 

@@ -172,7 +172,7 @@ END_DISTILLED_OUTPUT`
 	// Old freqs: assertion-quality was 8, error-paths was 3
 	oldFreqs := map[string]int{
 		"testing:assertion-quality": 8,
-		"testing:error-paths":      3,
+		"testing:error-paths":       3,
 	}
 
 	ValidateFreqMonotonicity(output, oldFreqs)

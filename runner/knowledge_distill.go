@@ -823,8 +823,8 @@ func AutoDistill(ctx context.Context, cfg *config.Config, state *DistillState) e
 		config.TemplateData{},
 		map[string]string{
 			"__LEARNINGS_CONTENT__": string(learningsContent),
-			"__SCOPE_HINTS__":      scopeHints,
-			"__EXISTING_RULES__":   existingRules,
+			"__SCOPE_HINTS__":       scopeHints,
+			"__EXISTING_RULES__":    existingRules,
 		},
 	)
 	if promptErr != nil {

@@ -27,6 +27,7 @@ const (
 type RunLogger struct {
 	file   io.WriteCloser
 	stderr io.Writer
+	runID  string
 }
 
 // noopWriteCloser is a no-op writer for the NopLogger.
@@ -50,7 +51,7 @@ func NopLogger() *RunLogger {
 //
 // The log directory is created if it does not exist.
 // Returns an error if the directory cannot be created or the file cannot be opened.
-func OpenRunLogger(projectRoot, logDir string) (*RunLogger, error) {
+func OpenRunLogger(projectRoot, logDir, runID string) (*RunLogger, error) {
 	dir := filepath.Join(projectRoot, logDir)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("runner: log: mkdir: %w", err)
@@ -67,6 +68,7 @@ func OpenRunLogger(projectRoot, logDir string) (*RunLogger, error) {
 	return &RunLogger{
 		file:   f,
 		stderr: os.Stderr,
+		runID:  runID,
 	}, nil
 }
 
@@ -106,6 +108,12 @@ func (l *RunLogger) write(level LogLevel, msg string, kvs []string) {
 	sb.WriteString(string(level))
 	sb.WriteString(" [runner] ")
 	sb.WriteString(msg)
+
+	// Prepend run_id as first kv pair if set
+	if l.runID != "" {
+		sb.WriteString(" run_id=")
+		sb.WriteString(l.runID)
+	}
 
 	for i := 0; i+1 < len(kvs); i += 2 {
 		sb.WriteByte(' ')
