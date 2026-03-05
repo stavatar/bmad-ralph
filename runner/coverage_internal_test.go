@@ -1040,3 +1040,74 @@ func TestRunOnce_BuildKnowledgeError(t *testing.T) {
 		t.Errorf("RunOnce inner error = %q, want containing %q", err.Error(), "runner: build knowledge: read learnings:")
 	}
 }
+
+// --- DESIGN-4: selectReviewModel tests ---
+
+func TestSelectReviewModel_Scenarios(t *testing.T) {
+	baseCfg := func() *config.Config {
+		return &config.Config{
+			ModelReview:         "claude-sonnet-4-6",
+			ModelReviewLight:    "claude-haiku-4-5-20251001",
+			ReviewLightMaxFiles: 5,
+			ReviewLightMaxLines: 50,
+		}
+	}
+
+	cases := []struct {
+		name      string
+		cfg       *config.Config
+		ds        *DiffStats
+		wantModel string
+	}{
+		{
+			name:      "nil diff stats falls back to standard",
+			cfg:       baseCfg(),
+			ds:        nil,
+			wantModel: "claude-sonnet-4-6",
+		},
+		{
+			name:      "small diff uses light model",
+			cfg:       baseCfg(),
+			ds:        &DiffStats{FilesChanged: 3, Insertions: 20, Deletions: 10},
+			wantModel: "claude-haiku-4-5-20251001",
+		},
+		{
+			name:      "exact threshold uses light model",
+			cfg:       baseCfg(),
+			ds:        &DiffStats{FilesChanged: 5, Insertions: 30, Deletions: 20},
+			wantModel: "claude-haiku-4-5-20251001",
+		},
+		{
+			name:      "too many files uses standard model",
+			cfg:       baseCfg(),
+			ds:        &DiffStats{FilesChanged: 6, Insertions: 10, Deletions: 5},
+			wantModel: "claude-sonnet-4-6",
+		},
+		{
+			name:      "too many lines uses standard model",
+			cfg:       baseCfg(),
+			ds:        &DiffStats{FilesChanged: 2, Insertions: 40, Deletions: 15},
+			wantModel: "claude-sonnet-4-6",
+		},
+		{
+			name: "empty light model falls back to standard",
+			cfg: &config.Config{
+				ModelReview:         "claude-sonnet-4-6",
+				ModelReviewLight:    "",
+				ReviewLightMaxFiles: 5,
+				ReviewLightMaxLines: 50,
+			},
+			ds:        &DiffStats{FilesChanged: 1, Insertions: 5, Deletions: 2},
+			wantModel: "claude-sonnet-4-6",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := selectReviewModel(tc.cfg, tc.ds)
+			if got != tc.wantModel {
+				t.Errorf("selectReviewModel() = %q, want %q", got, tc.wantModel)
+			}
+		})
+	}
+}

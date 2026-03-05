@@ -19,6 +19,8 @@ Launch 5 review sub-agents using the Task tool. Each sub-agent reads its prompt 
 
 Each sub-agent MUST read its prompt file, then analyze the code changes for the current task within its defined SCOPE. Sub-agents report their findings back to you.
 
+**IMPORTANT**: Sub-agents must evaluate ONLY the diff (changes for the current task). Pre-existing code that was not modified must NOT be criticized.
+
 Collect all findings from all 5 sub-agents before proceeding to verification.
 
 ---

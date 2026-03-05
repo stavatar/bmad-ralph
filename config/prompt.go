@@ -28,11 +28,12 @@ var unreplacedPlaceholderRe = regexp.MustCompile(`__[A-Z_]+__`)
 // should use {{- if .Field -}} trim markers to avoid unwanted whitespace.
 type TemplateData struct {
 	// Stage 1: bool conditionals for template structure
-	SerenaEnabled    bool
-	GatesEnabled     bool
-	HasExistingTasks bool // bridge merge mode
-	HasFindings      bool // execute findings mode
-	HasLearnings     bool // true when validated LEARNINGS.md content is non-empty
+	SerenaEnabled     bool
+	GatesEnabled      bool
+	HasExistingTasks  bool // bridge merge mode
+	HasFindings       bool // execute findings mode
+	HasLearnings      bool // true when validated LEARNINGS.md content is non-empty
+	HasCompletedTasks bool // true when completed tasks text is non-empty
 
 	// Stage 2: string fields for caller convenience / type grouping.
 	// Injected via replacements map, NOT via {{.FieldName}} in templates.

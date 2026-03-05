@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,9 @@ model_review: "sonnet"
 review_min_severity: "HIGH"
 always_extract: true
 serena_enabled: false
+serena_sync_enabled: true
+serena_sync_max_turns: 10
+serena_sync_trigger: "run"
 learnings_budget: 500
 stuck_threshold: 5
 budget_max_usd: 25.0
@@ -98,6 +102,15 @@ log_dir: "/tmp/ralph-logs"
 	}
 	if cfg.SerenaEnabled {
 		t.Error("SerenaEnabled = true, want false")
+	}
+	if !cfg.SerenaSyncEnabled {
+		t.Error("SerenaSyncEnabled = false, want true")
+	}
+	if cfg.SerenaSyncMaxTurns != 10 {
+		t.Errorf("SerenaSyncMaxTurns = %d, want 10", cfg.SerenaSyncMaxTurns)
+	}
+	if cfg.SerenaSyncTrigger != "run" {
+		t.Errorf("SerenaSyncTrigger = %q, want %q", cfg.SerenaSyncTrigger, "run")
 	}
 	if cfg.LearningsBudget != 500 {
 		t.Errorf("LearningsBudget = %d, want 500", cfg.LearningsBudget)
@@ -347,11 +360,20 @@ func TestConfig_Load_DefaultsComplete(t *testing.T) {
 	if cfg.ReviewEvery != 1 {
 		t.Errorf("ReviewEvery = %d, want 1", cfg.ReviewEvery)
 	}
-	if cfg.ModelExecute != "" {
-		t.Errorf("ModelExecute = %q, want empty", cfg.ModelExecute)
+	if cfg.ModelExecute != "claude-opus-4-6" {
+		t.Errorf("ModelExecute = %q, want %q", cfg.ModelExecute, "claude-opus-4-6")
 	}
-	if cfg.ModelReview != "" {
-		t.Errorf("ModelReview = %q, want empty", cfg.ModelReview)
+	if cfg.ModelReview != "claude-sonnet-4-6" {
+		t.Errorf("ModelReview = %q, want %q", cfg.ModelReview, "claude-sonnet-4-6")
+	}
+	if cfg.ModelReviewLight != "claude-haiku-4-5-20251001" {
+		t.Errorf("ModelReviewLight = %q, want %q", cfg.ModelReviewLight, "claude-haiku-4-5-20251001")
+	}
+	if cfg.ReviewLightMaxFiles != 5 {
+		t.Errorf("ReviewLightMaxFiles = %d, want 5", cfg.ReviewLightMaxFiles)
+	}
+	if cfg.ReviewLightMaxLines != 50 {
+		t.Errorf("ReviewLightMaxLines = %d, want 50", cfg.ReviewLightMaxLines)
 	}
 	if cfg.ReviewMinSeverity != "LOW" {
 		t.Errorf("ReviewMinSeverity = %q, want %q", cfg.ReviewMinSeverity, "LOW")
@@ -400,6 +422,15 @@ func TestConfig_Load_DefaultsComplete(t *testing.T) {
 	}
 	if cfg.ProjectRoot == "" {
 		t.Error("ProjectRoot should not be empty")
+	}
+	if cfg.SerenaSyncEnabled {
+		t.Error("SerenaSyncEnabled should default to false")
+	}
+	if cfg.SerenaSyncMaxTurns != 5 {
+		t.Errorf("SerenaSyncMaxTurns = %d, want 5", cfg.SerenaSyncMaxTurns)
+	}
+	if cfg.SerenaSyncTrigger != "task" {
+		t.Errorf("SerenaSyncTrigger = %q, want %q", cfg.SerenaSyncTrigger, "task")
 	}
 }
 
@@ -613,8 +644,8 @@ func TestConfig_Load_EmbeddedDefaultUsed(t *testing.T) {
 	if cfg.GatesEnabled {
 		t.Error("GatesEnabled = true, want false (embedded default)")
 	}
-	if cfg.ModelExecute != "" {
-		t.Errorf("ModelExecute = %q, want empty (embedded default)", cfg.ModelExecute)
+	if cfg.ModelExecute != "claude-opus-4-6" {
+		t.Errorf("ModelExecute = %q, want %q (embedded default)", cfg.ModelExecute, "claude-opus-4-6")
 	}
 }
 
@@ -634,24 +665,28 @@ func TestConfig_Load_CascadeThreeLevels(t *testing.T) {
 			yaml:    "max_turns: 75\n",
 			flags:   CLIFlags{MaxTurns: intPtr(100)},
 			wantInt: 100,
+			wantStr: "claude-opus-4-6",
 		},
 		{
 			name:    "int/config overrides embedded",
 			yaml:    "max_turns: 75\n",
 			flags:   CLIFlags{},
 			wantInt: 75,
+			wantStr: "claude-opus-4-6",
 		},
 		{
 			name:     "int/embedded default used",
 			noConfig: true,
 			flags:    CLIFlags{},
 			wantInt:  50,
+			wantStr:  "claude-opus-4-6",
 		},
 		{
 			name:     "int/CLI overrides embedded no config",
 			noConfig: true,
 			flags:    CLIFlags{MaxTurns: intPtr(100)},
 			wantInt:  100,
+			wantStr:  "claude-opus-4-6",
 		},
 		// bool cascade (GatesEnabled: embedded=false)
 		{
@@ -660,6 +695,7 @@ func TestConfig_Load_CascadeThreeLevels(t *testing.T) {
 			flags:    CLIFlags{GatesEnabled: boolPtr(true)},
 			wantBool: true,
 			wantInt:  50,
+			wantStr:  "claude-opus-4-6",
 		},
 		{
 			name:     "bool/CLI false overrides config true",
@@ -667,6 +703,7 @@ func TestConfig_Load_CascadeThreeLevels(t *testing.T) {
 			flags:    CLIFlags{GatesEnabled: boolPtr(false)},
 			wantBool: false,
 			wantInt:  50,
+			wantStr:  "claude-opus-4-6",
 		},
 		{
 			name:     "bool/config overrides embedded",
@@ -674,6 +711,7 @@ func TestConfig_Load_CascadeThreeLevels(t *testing.T) {
 			flags:    CLIFlags{},
 			wantBool: true,
 			wantInt:  50,
+			wantStr:  "claude-opus-4-6",
 		},
 		{
 			name:     "bool/embedded default used",
@@ -681,8 +719,9 @@ func TestConfig_Load_CascadeThreeLevels(t *testing.T) {
 			flags:    CLIFlags{},
 			wantBool: false,
 			wantInt:  50,
+			wantStr:  "claude-opus-4-6",
 		},
-		// string cascade (ModelExecute: embedded="")
+		// string cascade (ModelExecute: embedded="claude-opus-4-6")
 		{
 			name:    "string/CLI overrides config",
 			yaml:    "model_execute: sonnet\n",
@@ -701,7 +740,7 @@ func TestConfig_Load_CascadeThreeLevels(t *testing.T) {
 			name:     "string/embedded default used",
 			noConfig: true,
 			flags:    CLIFlags{},
-			wantStr:  "",
+			wantStr:  "claude-opus-4-6",
 			wantInt:  50,
 		},
 	}
@@ -785,7 +824,7 @@ func TestConfig_Load_CLIOverridesEmptyConfig(t *testing.T) {
 
 func TestConfig_Load_AllCLIFlagsOverrideFullConfig(t *testing.T) {
 	dir := t.TempDir()
-	// Full config file with all 15 parameters set to non-default values
+	// Full config file with all parameters set to non-default values
 	writeConfigYAML(t, dir, `claude_command: "custom-claude"
 max_turns: 75
 max_iterations: 5
@@ -798,12 +837,15 @@ model_review: "opus"
 review_min_severity: "HIGH"
 always_extract: true
 serena_enabled: false
+serena_sync_enabled: true
+serena_sync_max_turns: 10
+serena_sync_trigger: "run"
 learnings_budget: 500
 log_dir: "/custom/logs"
 `)
 	t.Chdir(dir)
 
-	// Set ALL 9 CLI flags to override config values
+	// Set ALL 10 CLI flags to override config values
 	cfg, err := Load(CLIFlags{
 		MaxTurns:            intPtr(200),
 		MaxIterations:       intPtr(10),
@@ -814,12 +856,13 @@ log_dir: "/custom/logs"
 		ModelExecute:        strPtr("haiku"),
 		ModelReview:         strPtr("haiku"),
 		AlwaysExtract:       boolPtr(false),
+		SerenaSyncEnabled:   boolPtr(false),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// All 9 CLI-overridable fields must reflect CLI values
+	// All 10 CLI-overridable fields must reflect CLI values
 	if cfg.MaxTurns != 200 {
 		t.Errorf("MaxTurns = %d, want 200", cfg.MaxTurns)
 	}
@@ -847,6 +890,9 @@ log_dir: "/custom/logs"
 	if cfg.AlwaysExtract {
 		t.Error("AlwaysExtract = true, want false")
 	}
+	if cfg.SerenaSyncEnabled {
+		t.Error("SerenaSyncEnabled = true, want false (CLI override)")
+	}
 
 	// Config-only fields (no CLI flags) must retain config file values
 	if cfg.ClaudeCommand != "custom-claude" {
@@ -863,6 +909,12 @@ log_dir: "/custom/logs"
 	}
 	if cfg.LogDir != "/custom/logs" {
 		t.Errorf("LogDir = %q, want %q (config-only)", cfg.LogDir, "/custom/logs")
+	}
+	if cfg.SerenaSyncMaxTurns != 10 {
+		t.Errorf("SerenaSyncMaxTurns = %d, want 10 (config-only)", cfg.SerenaSyncMaxTurns)
+	}
+	if cfg.SerenaSyncTrigger != "run" {
+		t.Errorf("SerenaSyncTrigger = %q, want %q (config-only)", cfg.SerenaSyncTrigger, "run")
 	}
 }
 
@@ -1200,6 +1252,11 @@ func TestConfig_Validate_Errors(t *testing.T) {
 			},
 			errContains: "budget_warn_pct must be 1-99",
 		},
+		{
+			name:        "SerenaSyncTrigger invalid",
+			mutate:      func(c *Config) { c.SerenaSyncTrigger = "invalid" },
+			errContains: `invalid serena_sync_trigger "invalid"`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1265,5 +1322,168 @@ func TestConfig_Validate_EmptySeverity(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate: empty severity should be valid, got: %v", err)
+	}
+}
+
+// TestConfig_Validate_SerenaSyncTrigger covers AC#3: valid/invalid trigger values.
+func TestConfig_Validate_SerenaSyncTrigger(t *testing.T) {
+	base := Config{
+		MaxTurns:            50,
+		MaxIterations:       3,
+		MaxReviewIterations: 3,
+		DistillCooldown:     5,
+		DistillTimeout:      120,
+		LearningsBudget:     200,
+		SerenaSyncMaxTurns:  5,
+	}
+
+	tests := []struct {
+		name    string
+		trigger string
+		wantErr bool
+		errMsg  string
+	}{
+		{"task valid", "task", false, ""},
+		{"run valid", "run", false, ""},
+		{"empty valid", "", false, ""},
+		{"invalid value", "invalid", true, `config: validate: invalid serena_sync_trigger "invalid" (must be "run" or "task")`},
+		{"unknown value", "hourly", true, `config: validate: invalid serena_sync_trigger "hourly" (must be "run" or "task")`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := base
+			cfg.SerenaSyncTrigger = tt.trigger
+			err := cfg.Validate()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("Validate: expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("error = %q, want containing %q", err.Error(), tt.errMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Validate: unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestConfig_Validate_SerenaSyncMaxTurns covers AC#4: max turns correction behavior.
+func TestConfig_Validate_SerenaSyncMaxTurns(t *testing.T) {
+	base := Config{
+		MaxTurns:            50,
+		MaxIterations:       3,
+		MaxReviewIterations: 3,
+		DistillCooldown:     5,
+		DistillTimeout:      120,
+		LearningsBudget:     200,
+		SerenaSyncTrigger:   "task",
+	}
+
+	tests := []struct {
+		name     string
+		maxTurns int
+		want     int
+	}{
+		{"zero corrected to 5", 0, 5},
+		{"negative corrected to 5", -10, 5},
+		{"one stays 1", 1, 1},
+		{"five stays 5", 5, 5},
+		{"hundred stays 100", 100, 100},
+		{"beyond range stays 200", 200, 200},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := base
+			cfg.SerenaSyncMaxTurns = tt.maxTurns
+			err := cfg.Validate()
+			if err != nil {
+				t.Fatalf("Validate: unexpected error: %v", err)
+			}
+			if cfg.SerenaSyncMaxTurns != tt.want {
+				t.Errorf("SerenaSyncMaxTurns = %d, want %d", cfg.SerenaSyncMaxTurns, tt.want)
+			}
+		})
+	}
+}
+
+// TestConfig_Load_SerenaSyncFields covers AC#5: round-trip with/without serena_sync fields.
+func TestConfig_Load_SerenaSyncFields(t *testing.T) {
+	t.Run("all fields from YAML", func(t *testing.T) {
+		dir := t.TempDir()
+		writeConfigYAML(t, dir, `serena_sync_enabled: true
+serena_sync_max_turns: 10
+serena_sync_trigger: "run"
+`)
+		t.Chdir(dir)
+
+		cfg, err := Load(CLIFlags{})
+		if err != nil {
+			t.Fatalf("Load: unexpected error: %v", err)
+		}
+		if !cfg.SerenaSyncEnabled {
+			t.Error("SerenaSyncEnabled = false, want true")
+		}
+		if cfg.SerenaSyncMaxTurns != 10 {
+			t.Errorf("SerenaSyncMaxTurns = %d, want 10", cfg.SerenaSyncMaxTurns)
+		}
+		if cfg.SerenaSyncTrigger != "run" {
+			t.Errorf("SerenaSyncTrigger = %q, want %q", cfg.SerenaSyncTrigger, "run")
+		}
+	})
+
+	t.Run("defaults when absent", func(t *testing.T) {
+		dir := t.TempDir()
+		writeConfigYAML(t, dir, "max_turns: 50\n")
+		t.Chdir(dir)
+
+		cfg, err := Load(CLIFlags{})
+		if err != nil {
+			t.Fatalf("Load: unexpected error: %v", err)
+		}
+		if cfg.SerenaSyncEnabled {
+			t.Error("SerenaSyncEnabled = true, want false (default)")
+		}
+		if cfg.SerenaSyncMaxTurns != 5 {
+			t.Errorf("SerenaSyncMaxTurns = %d, want 5 (default)", cfg.SerenaSyncMaxTurns)
+		}
+		if cfg.SerenaSyncTrigger != "task" {
+			t.Errorf("SerenaSyncTrigger = %q, want %q (default)", cfg.SerenaSyncTrigger, "task")
+		}
+	})
+}
+
+// TestConfig_ApplyCLIFlags_SerenaSyncEnabled covers AC#2: CLI override for SerenaSyncEnabled.
+func TestConfig_ApplyCLIFlags_SerenaSyncEnabled(t *testing.T) {
+	tests := []struct {
+		name       string
+		configVal  bool
+		cliVal     *bool
+		wantResult bool
+	}{
+		{"CLI true overrides config false", false, boolPtr(true), true},
+		{"CLI false overrides config true", true, boolPtr(false), false},
+		{"CLI nil keeps config value", true, nil, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			yaml := "serena_sync_enabled: " + fmt.Sprintf("%t", tt.configVal) + "\n"
+			writeConfigYAML(t, dir, yaml)
+			t.Chdir(dir)
+
+			cfg, err := Load(CLIFlags{SerenaSyncEnabled: tt.cliVal})
+			if err != nil {
+				t.Fatalf("Load: unexpected error: %v", err)
+			}
+			if cfg.SerenaSyncEnabled != tt.wantResult {
+				t.Errorf("SerenaSyncEnabled = %v, want %v", cfg.SerenaSyncEnabled, tt.wantResult)
+			}
+		})
 	}
 }

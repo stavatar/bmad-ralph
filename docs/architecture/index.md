@@ -11,3 +11,4 @@
   - [Architecture Validation Results](#architecture-validation-results)
   - [Architecture Completion Summary](#architecture-completion-summary)
   - [Observability & Metrics](observability-metrics.md) — Epic 7: metrics types, MetricsCollector, data flow, package mapping
+  - [Serena Memory Sync](serena-memory-sync.md) — Epic 8: sync-сессия, backup/rollback, конфигурация, интеграция в runner

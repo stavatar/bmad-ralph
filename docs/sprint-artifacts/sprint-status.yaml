@@ -124,3 +124,14 @@ development_status:
   7-9-error-categorization-latency: done
   7-10-run-summary-report: done
   epic-7-retrospective: done
+
+  # Epic 8: Serena Memory Sync (7 stories, FR57-FR66)
+  epic-8: done
+  8-1-config-cli-flags: done
+  8-2-sync-prompt-template: done
+  8-3-backup-rollback-memories: done
+  8-4-run-serena-sync-core: done
+  8-5-sync-metrics-summary: done
+  8-6-per-task-trigger-growth: done
+  8-7-integration-tests: done
+  epic-8-retrospective: done

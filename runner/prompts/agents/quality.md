@@ -24,7 +24,7 @@ Do NOT report findings in these areas — they are handled by dedicated agents:
 
 ## Instructions
 
-1. Review ONLY the changed files in the diff.
+1. Review ONLY the diff (changes for the current task). Do NOT criticize pre-existing code that was not modified in this task.
 2. For each finding, report:
    - **WHAT**: A concise description of the issue
    - **WHERE**: File path and line number (e.g., `runner/runner.go:42`)

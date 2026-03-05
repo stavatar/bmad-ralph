@@ -24,11 +24,17 @@ type Config struct {
 	GatesEnabled        bool   `yaml:"gates_enabled"`
 	GatesCheckpoint     int    `yaml:"gates_checkpoint"`
 	ReviewEvery         int    `yaml:"review_every"`
-	ModelExecute        string `yaml:"model_execute"`
-	ModelReview         string `yaml:"model_review"`
-	ReviewMinSeverity   string `yaml:"review_min_severity"`
+	ModelExecute         string `yaml:"model_execute"`
+	ModelReview          string `yaml:"model_review"`
+	ModelReviewLight     string `yaml:"model_review_light"`
+	ReviewLightMaxFiles  int    `yaml:"review_light_max_files"`
+	ReviewLightMaxLines  int    `yaml:"review_light_max_lines"`
+	ReviewMinSeverity    string `yaml:"review_min_severity"`
 	AlwaysExtract       bool   `yaml:"always_extract"`
-	SerenaEnabled   bool `yaml:"serena_enabled"`
+	SerenaEnabled       bool   `yaml:"serena_enabled"`
+	SerenaSyncEnabled   bool   `yaml:"serena_sync_enabled"`
+	SerenaSyncMaxTurns  int    `yaml:"serena_sync_max_turns"`
+	SerenaSyncTrigger   string `yaml:"serena_sync_trigger"`
 	LearningsBudget int  `yaml:"learnings_budget"`
 	DistillCooldown int  `yaml:"distill_cooldown"`
 	DistillTimeout  int  `yaml:"distill_timeout"`
@@ -58,6 +64,7 @@ type CLIFlags struct {
 	ModelExecute        *string
 	ModelReview         *string
 	AlwaysExtract       *bool
+	SerenaSyncEnabled   *bool
 }
 
 func defaultConfig() *Config {
@@ -99,6 +106,9 @@ func applyCLIFlags(cfg *Config, flags CLIFlags) {
 	}
 	if flags.AlwaysExtract != nil {
 		cfg.AlwaysExtract = *flags.AlwaysExtract
+	}
+	if flags.SerenaSyncEnabled != nil {
+		cfg.SerenaSyncEnabled = *flags.SerenaSyncEnabled
 	}
 }
 
@@ -157,6 +167,7 @@ func Load(flags CLIFlags) (*Config, error) {
 }
 
 // Validate checks Config field constraints and returns a descriptive error on first violation.
+// SerenaSyncMaxTurns < 1 is silently corrected to 5 (not an error).
 func (c *Config) Validate() error {
 	if c.MaxTurns <= 0 {
 		return fmt.Errorf("config: validate: max_turns must be > 0, got %d", c.MaxTurns)
@@ -207,6 +218,15 @@ func (c *Config) Validate() error {
 		if c.SimilarityWarn >= c.SimilarityHard {
 			return fmt.Errorf("config: validate: similarity_warn must be less than similarity_hard")
 		}
+	}
+	switch c.SerenaSyncTrigger {
+	case "", "run", "task":
+		// valid
+	default:
+		return fmt.Errorf("config: validate: invalid serena_sync_trigger %q (must be \"run\" or \"task\")", c.SerenaSyncTrigger)
+	}
+	if c.SerenaSyncMaxTurns < 1 {
+		c.SerenaSyncMaxTurns = 5
 	}
 	return nil
 }

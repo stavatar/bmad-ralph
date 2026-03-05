@@ -90,6 +90,20 @@ type GatePromptFunc func(ctx context.Context, taskText string) (*config.GateDeci
 // Default: closure over ResumeExtraction in Run(). Tests inject custom implementations.
 type ResumeExtractFunc func(ctx context.Context, rc RunConfig, sessionID string) error
 
+// selectReviewModel returns the light model if the diff is small enough,
+// otherwise the standard review model. If diffStats is nil (e.g., first review
+// cycle or diff stats failed), falls back to the standard model.
+func selectReviewModel(cfg *config.Config, ds *DiffStats) string {
+	if ds == nil || cfg.ModelReviewLight == "" {
+		return cfg.ModelReview
+	}
+	totalLines := ds.Insertions + ds.Deletions
+	if ds.FilesChanged <= cfg.ReviewLightMaxFiles && totalLines <= cfg.ReviewLightMaxLines {
+		return cfg.ModelReviewLight
+	}
+	return cfg.ModelReview
+}
+
 // RealReview runs a review session and determines the outcome from file state.
 // It reads the current task, assembles the review prompt, launches a fresh Claude
 // session with ModelReview, then checks sprint-tasks.md and review-findings.md
@@ -160,12 +174,15 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 		return ReviewResult{}, fmt.Errorf("runner: review: assemble prompt: %w", err)
 	}
 
+	// DESIGN-4: select review model based on diff size (without mutating Config)
+	reviewModel := selectReviewModel(rc.Cfg, rc.LastDiffStats)
+
 	opts := session.Options{
 		Command:                    rc.Cfg.ClaudeCommand,
 		Dir:                        rc.Cfg.ProjectRoot,
 		Prompt:                     prompt,
 		MaxTurns:                   rc.Cfg.MaxTurns,
-		Model:                      rc.Cfg.ModelReview,
+		Model:                      reviewModel,
 		OutputJSON:                 true,
 		DangerouslySkipPermissions: true,
 		AppendSystemPrompt:         reviewAppendSys,
@@ -183,9 +200,12 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 	start := time.Now()
 	raw, execErr := session.Execute(ctx, opts)
 	elapsed := time.Since(start)
+	if rc.Logger != nil {
+		rc.Logger.SaveSession("review", raw, raw.ExitCode, elapsed)
+	}
 
 	var reviewMetrics *session.SessionMetrics
-	var reviewModel string
+	var resolvedModel string
 	if execErr != nil {
 		var exitErr *exec.ExitError
 		if !errors.As(execErr, &exitErr) {
@@ -198,7 +218,7 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 		// not by session output parsing.
 		if sr, parseErr := session.ParseResult(raw, elapsed); parseErr == nil {
 			reviewMetrics = sr.Metrics
-			reviewModel = sr.Model
+			resolvedModel = sr.Model
 		}
 	}
 
@@ -207,7 +227,7 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 		return ReviewResult{}, outcomeErr
 	}
 	outcome.SessionMetrics = reviewMetrics
-	outcome.Model = reviewModel
+	outcome.Model = resolvedModel
 
 	// Story 6.4: post-validate lessons on non-clean review (FR28a)
 	// Clean review = no findings = no lessons to validate.
@@ -374,8 +394,9 @@ func (r *Runner) recordGateDecision(action string, waitMs int64, taskText string
 // ResumeExtraction invokes claude --resume with -p extraction prompt to capture
 // WIP progress and failure insights from an interrupted execute session.
 // Returns nil when sessionID is empty (nothing to resume).
+// When mc is non-nil, merges resume session metrics (tokens, cost) into the current task (BUG-11).
 // After session: snapshot-diffs LEARNINGS.md and validates new entries via KnowledgeWriter.
-func ResumeExtraction(ctx context.Context, cfg *config.Config, kw KnowledgeWriter, sessionID string) error {
+func ResumeExtraction(ctx context.Context, cfg *config.Config, kw KnowledgeWriter, logger *RunLogger, mc *MetricsCollector, sessionID string) error {
 	if sessionID == "" {
 		return nil
 	}
@@ -401,6 +422,9 @@ func ResumeExtraction(ctx context.Context, cfg *config.Config, kw KnowledgeWrite
 	start := time.Now()
 	raw, execErr := session.Execute(ctx, opts)
 	elapsed := time.Since(start)
+	if logger != nil {
+		logger.SaveSession("resume", raw, raw.ExitCode, elapsed)
+	}
 
 	if execErr != nil {
 		return fmt.Errorf("runner: resume extraction: execute: %w", execErr)
@@ -409,6 +433,11 @@ func ResumeExtraction(ctx context.Context, cfg *config.Config, kw KnowledgeWrite
 	sr, parseErr := session.ParseResult(raw, elapsed)
 	if parseErr != nil {
 		return fmt.Errorf("runner: resume extraction: parse: %w", parseErr)
+	}
+
+	// BUG-11: merge resume session metrics into the current task
+	if mc != nil {
+		mc.RecordSession(sr.Metrics, cfg.ModelExecute, "resume", elapsed.Milliseconds())
 	}
 
 	if err := kw.WriteProgress(ctx, ProgressData{SessionID: sr.SessionID}); err != nil {
@@ -526,11 +555,13 @@ func buildTemplateData(cfg *config.Config, serenaHint string, hasFindings, hasLe
 
 // RunConfig passes dependencies to runner functions.
 type RunConfig struct {
-	Cfg        *config.Config
-	Git        GitClient
-	TasksFile  string          // path to sprint-tasks.md
-	SerenaHint string          // Serena MCP prompt hint (empty if unavailable)
-	Knowledge  KnowledgeWriter // records execution progress and validates lessons (nil = skip)
+	Cfg           *config.Config
+	Git           GitClient
+	TasksFile     string          // path to sprint-tasks.md
+	SerenaHint    string          // Serena MCP prompt hint (empty if unavailable)
+	Knowledge     KnowledgeWriter // records execution progress and validates lessons (nil = skip)
+	Logger        *RunLogger      // session log writer (nil = skip session logging)
+	LastDiffStats *DiffStats      // diff stats from last execute cycle (DESIGN-4: review model routing)
 }
 
 // Runner orchestrates the execute-review loop with injectable dependencies.
@@ -538,6 +569,7 @@ type RunConfig struct {
 // EmergencyGatePromptFn: called at execute/review exhaustion when gates enabled.
 // Uses same GatePromptFunc type as GatePromptFn but creates Gate{Emergency: true}.
 // DistillFn: called after clean review when budget check and cooldown pass (Story 6.5a).
+// SerenaSyncFn: called after execute loop when sync enabled and Serena available. Nil = no sync capability.
 // Logger: structured log writer; nil falls back to NopLogger (no-op, no file I/O).
 type Runner struct {
 	Cfg                   *config.Config
@@ -548,6 +580,7 @@ type Runner struct {
 	EmergencyGatePromptFn GatePromptFunc      // called at execute/review exhaustion when gates enabled (Story 5.5)
 	ResumeExtractFn       ResumeExtractFunc   // called before retry to extract session context
 	DistillFn             DistillFunc         // called after clean review when budget+cooldown checks pass (Story 6.5a)
+	SerenaSyncFn          func(ctx context.Context, opts SerenaSyncOpts) (*session.SessionResult, error) // called after execute loop when sync enabled and Serena available
 	SleepFn               func(time.Duration) // injectable sleep for testable backoff
 	Knowledge             KnowledgeWriter     // records execution progress and validates lessons
 	CodeIndexer           CodeIndexerDetector // detects code indexing tools (Serena MCP)
@@ -595,6 +628,9 @@ func (r *Runner) logger() *RunLogger {
 // and cooldown (counter - lastDistill >= DistillCooldown). If both pass, calls DistillFn.
 // Distillation failures are non-fatal: ErrBadFormat gets one free retry, then human gate.
 // Loops up to Cfg.MaxIterations task-processing cycles in the outer loop.
+// After the execute loop (before Metrics.Finish), runs Serena memory sync when
+// SerenaSyncEnabled && trigger == "run" && SerenaSyncFn != nil && CodeIndexer.Available.
+// Sync is best-effort: failure does not affect runErr.
 // Structured progress is written to Logger (file + stderr) at every key decision point.
 // Returns RunMetrics (nil on early error before collection starts) and error.
 // Returns nil error when all tasks are complete. Returns error on any failure.
@@ -603,11 +639,28 @@ func (r *Runner) Execute(ctx context.Context) (*RunMetrics, error) {
 	tasksBase := filepath.Base(r.TasksFile)
 	log.Info("run started", "tasks_file", tasksBase)
 
+	// Capture initial HEAD SHA for diff summary in sync (best-effort).
+	// Only call when batch sync is active to avoid consuming mock HeadCommit slots.
+	var initialCommit string
+	if r.Cfg.SerenaSyncEnabled && r.Cfg.SerenaSyncTrigger == "run" {
+		initialCommit, _ = r.Git.HeadCommit(ctx)
+	}
+
 	runErr := r.execute(ctx)
 	if runErr != nil {
 		log.Error("run finished", "status", "error", "error", runErr.Error())
 	} else {
 		log.Info("run finished", "status", "ok")
+	}
+
+	// Serena sync: batch mode only when trigger == "run" (AC #2, #3, #4).
+	if r.Cfg.SerenaSyncEnabled && r.Cfg.SerenaSyncTrigger == "run" &&
+		r.SerenaSyncFn != nil && r.CodeIndexer != nil &&
+		r.CodeIndexer.Available(r.Cfg.ProjectRoot) {
+		r.runSerenaSync(ctx, initialCommit, "")
+	} else if r.Cfg.SerenaSyncEnabled && r.Cfg.SerenaSyncTrigger == "run" &&
+		(r.CodeIndexer == nil || !r.CodeIndexer.Available(r.Cfg.ProjectRoot)) {
+		log.Info("serena sync skipped", "reason", "serena not available")
 	}
 
 	if r.Metrics != nil {
@@ -675,6 +728,7 @@ func (r *Runner) execute(ctx context.Context) error {
 		TasksFile:  r.TasksFile,
 		SerenaHint: serenaHint,
 		Knowledge:  r.Knowledge,
+		Logger:     r.Logger,
 	}
 
 	// Story 6.1: snapshot LEARNINGS.md before task execution for post-validation diff
@@ -723,10 +777,24 @@ func (r *Runner) execute(ctx context.Context) error {
 			"task", taskText,
 		)
 
+		// Story 8.6: capture HEAD before task for per-task diff scope.
+		// Only call when per-task sync is active to avoid consuming mock HeadCommit slots.
+		var taskHeadBefore string
+		if r.Cfg.SerenaSyncEnabled && r.Cfg.SerenaSyncTrigger == "task" &&
+			r.SerenaSyncFn != nil && r.CodeIndexer != nil &&
+			r.CodeIndexer.Available(r.Cfg.ProjectRoot) {
+			taskHeadBefore, _ = r.Git.HeadCommit(ctx)
+		}
+
 		// Review cycle loop: per-task counter, resets when clean (AC3, AC4)
 		reviewCycles := 0
-		wasSkipped := false // Story 5.5: emergency skip exits without completedTasks++ or gate check
+		wasSkipped := false          // Story 5.5: emergency skip exits without completedTasks++ or gate check
+		reviewExhausted := false     // BUG-2: review exhaust continues to next task instead of aborting
+		lastKnownSHA := ""           // Track last HEAD SHA for FinishTask on error paths (MINOR-2)
+		var lastDiffStats *DiffStats // DESIGN-4: last execute diff stats for review model selection
 		for {
+			cycleStart := time.Now() // MINOR-7: track full cycle duration
+
 			// Read findings file: absent = empty (normal first-execute case)
 			findingsContent := ""
 			findingsPath := filepath.Join(r.Cfg.ProjectRoot, "review-findings.md")
@@ -791,6 +859,9 @@ func (r *Runner) execute(ctx context.Context) error {
 				start := time.Now()
 				raw, execErr := session.Execute(ctx, opts)
 				elapsed := time.Since(start)
+				if r.Logger != nil {
+					r.Logger.SaveSession("execute", raw, raw.ExitCode, elapsed)
+				}
 				if r.Metrics != nil {
 					r.Metrics.RecordLatency(LatencyBreakdown{SessionMs: elapsed.Milliseconds()})
 				}
@@ -870,6 +941,7 @@ func (r *Runner) execute(ctx context.Context) error {
 						}
 						return fmt.Errorf("runner: head commit after: %w", err)
 					}
+					lastKnownSHA = headAfter
 
 					if headBefore == headAfter {
 						log.Info("commit check",
@@ -910,6 +982,7 @@ func (r *Runner) execute(ctx context.Context) error {
 								"deletions", fmt.Sprintf("%d", diffStats.Deletions),
 								"packages", strings.Join(diffStats.Packages, ","),
 							)
+							lastDiffStats = diffStats // DESIGN-4: save for review model selection
 							if r.Metrics != nil {
 								r.Metrics.RecordGitDiff(*diffStats)
 							}
@@ -1040,7 +1113,11 @@ func (r *Runner) execute(ctx context.Context) error {
 				break
 			}
 
-			log.Info("review session started", "task", taskText)
+			// DESIGN-4: pass diff stats to ReviewFn via RunConfig for model routing
+			rc.LastDiffStats = lastDiffStats
+			reviewModel := selectReviewModel(r.Cfg, lastDiffStats)
+
+			log.Info("review session started", "task", taskText, "model", reviewModel)
 			reviewStart := time.Now()
 			rr, err := r.ReviewFn(ctx, rc)
 			reviewElapsed := time.Since(reviewStart)
@@ -1069,6 +1146,10 @@ func (r *Runner) execute(ctx context.Context) error {
 				return budgetErr
 			}
 			if rr.Clean {
+				if r.Metrics != nil {
+					r.Metrics.RecordFindingsCycle(0)
+					r.Metrics.RecordCycleDuration(time.Since(cycleStart).Milliseconds())
+				}
 				log.Info("review session finished",
 					"duration", fmt.Sprintf("%ds", int(reviewElapsed.Seconds())),
 					"clean", "true",
@@ -1106,6 +1187,24 @@ func (r *Runner) execute(ctx context.Context) error {
 				if r.Metrics != nil {
 					r.Metrics.RecordReview(rr.Findings)
 				}
+			}
+
+			// DESIGN-6: record findings count per cycle and detect hydra pattern
+			findingsCount := len(rr.Findings)
+			if r.Metrics != nil {
+				hydra := r.Metrics.RecordFindingsCycle(findingsCount)
+				if hydra {
+					log.Warn("hydra pattern detected: findings not decreasing",
+						"task", taskText,
+						"count", fmt.Sprintf("%d", findingsCount),
+						"cycle", fmt.Sprintf("%d", reviewCycles+1),
+					)
+				}
+			}
+
+			// MINOR-7: record full cycle duration
+			if r.Metrics != nil {
+				r.Metrics.RecordCycleDuration(time.Since(cycleStart).Milliseconds())
 			}
 
 			reviewCycles++
@@ -1155,10 +1254,25 @@ func (r *Runner) execute(ctx context.Context) error {
 						continue // restart review cycle loop
 					}
 				} else {
-					return fmt.Errorf("runner: review cycles exhausted (%d/%d) for %q (check logs for details): %w",
-						reviewCycles, r.Cfg.MaxReviewIterations, result.OpenTasks[0].Text, config.ErrMaxReviewCycles)
+					// BUG-2: continue to next task instead of aborting entire run.
+					log.Warn("review cycles exhausted, skipping task",
+						"task", taskText,
+						"cycles", fmt.Sprintf("%d/%d", reviewCycles, r.Cfg.MaxReviewIterations),
+					)
+					if r.Metrics != nil {
+						r.Metrics.RecordError("review_exhaust", fmt.Sprintf("review cycles exhausted (%d/%d) for %q",
+							reviewCycles, r.Cfg.MaxReviewIterations, result.OpenTasks[0].Text))
+						r.Metrics.FinishTask("error", lastKnownSHA)
+					}
+					reviewExhausted = true
+					break // exit review cycle loop, continue to next task
 				}
 			}
+		}
+
+		// BUG-2: review exhaust already called FinishTask("error"), skip to next task
+		if reviewExhausted {
+			continue
 		}
 
 		// Story 5.5: emergency skip bypasses validation, completion counter, and gate check
@@ -1265,10 +1379,17 @@ func (r *Runner) execute(ctx context.Context) error {
 			}
 		}
 
+		// Story 8.6: per-task Serena sync — after distillation, before FinishTask.
+		if r.Cfg.SerenaSyncEnabled && r.Cfg.SerenaSyncTrigger == "task" &&
+			r.SerenaSyncFn != nil && r.CodeIndexer != nil &&
+			r.CodeIndexer.Available(r.Cfg.ProjectRoot) {
+			r.runSerenaSync(ctx, taskHeadBefore, taskText)
+		}
+
 		// Finalize task metrics after all phases (latency already recorded incrementally).
 		if r.Metrics != nil {
 			headSHA, _ := r.Git.HeadCommit(ctx) // best-effort: SHA is optional for metrics
-			r.Metrics.FinishTask("done", headSHA)
+			r.Metrics.FinishTask("completed", headSHA)
 		}
 	}
 
@@ -1418,6 +1539,9 @@ func RunOnce(ctx context.Context, rc RunConfig) error {
 	start := time.Now()
 	raw, execErr := session.Execute(ctx, opts)
 	elapsed := time.Since(start)
+	if rc.Logger != nil {
+		rc.Logger.SaveSession("once", raw, raw.ExitCode, elapsed)
+	}
 
 	if execErr != nil {
 		return fmt.Errorf("runner: execute: %w", execErr)
@@ -1503,10 +1627,13 @@ func Run(ctx context.Context, cfg *config.Config) (*RunMetrics, error) {
 		}
 	}
 	r.ResumeExtractFn = func(_ context.Context, _ RunConfig, sid string) error {
-		return ResumeExtraction(ctx, cfg, r.Knowledge, sid)
+		return ResumeExtraction(ctx, cfg, r.Knowledge, runLog, r.Metrics, sid)
 	}
 	r.DistillFn = func(ctx context.Context, state *DistillState) error {
 		return AutoDistill(ctx, cfg, state)
+	}
+	r.SerenaSyncFn = func(ctx context.Context, opts SerenaSyncOpts) (*session.SessionResult, error) {
+		return RealSerenaSync(ctx, cfg, opts, runLog)
 	}
 	return r.Execute(ctx)
 }
@@ -1541,6 +1668,9 @@ func RunReview(ctx context.Context, rc RunConfig) error {
 	start := time.Now()
 	raw, execErr := session.Execute(ctx, opts)
 	elapsed := time.Since(start)
+	if rc.Logger != nil {
+		rc.Logger.SaveSession("once-review", raw, raw.ExitCode, elapsed)
+	}
 
 	if execErr != nil {
 		return fmt.Errorf("runner: review execute: %w", execErr)

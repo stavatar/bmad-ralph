@@ -23,14 +23,15 @@ Do NOT report findings in these areas — they are handled by dedicated agents:
 
 ## Instructions
 
-1. Read the story's acceptance criteria.
-2. For each AC, identify the test(s) that validate it. Flag any AC without a corresponding test.
-3. Scan all test files for skip, xfail, pending, or commented-out test patterns that suppress failures.
-4. Check test quality: verify assertions use `t.Errorf`/`t.Fatalf` (not `t.Logf`), error tests verify message content via `strings.Contains`, return values are captured (not discarded with `_`), and table-driven patterns are used where multiple cases exist.
-5. For each finding, report:
+1. Review ONLY the diff (changes for the current task). Do NOT criticize pre-existing tests that were not modified in this task.
+2. Read the story's acceptance criteria.
+3. For each AC, identify the test(s) that validate it. Flag any AC without a corresponding test.
+4. Scan all test files for skip, xfail, pending, or commented-out test patterns that suppress failures.
+5. Check test quality: verify assertions use `t.Errorf`/`t.Fatalf` (not `t.Logf`), error tests verify message content via `strings.Contains`, return values are captured (not discarded with `_`), and table-driven patterns are used where multiple cases exist.
+6. For each finding, report:
    - **WHAT**: Which AC lacks test coverage, or which test has a quality issue
    - **WHERE**: File path and line number of the test (or where a test should exist)
    - **WHY**: How the missing or weak test creates a coverage gap
    - **HOW**: The specific test that should be added or how the existing test should be improved
-6. Classify each finding by severity: HIGH (AC without any test), MED (AC with weak test), or LOW (test quality improvement).
-7. If all ACs have adequate test coverage, explicitly state: "All acceptance criteria have test coverage."
+7. Classify each finding by severity: HIGH (AC without any test), MED (AC with weak test), or LOW (test quality improvement).
+8. If all ACs have adequate test coverage, explicitly state: "All acceptance criteria have test coverage."

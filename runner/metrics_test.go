@@ -1,8 +1,10 @@
 package runner
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/bmad-ralph/bmad-ralph/config"
@@ -27,27 +29,30 @@ func TestMetricsCollector_FullLifecycle(t *testing.T) {
 
 	mc.StartTask("task-1")
 	mc.RecordSession(&session.SessionMetrics{
-		InputTokens:     1000,
-		OutputTokens:    500,
-		CacheReadTokens: 200,
-		NumTurns:        3,
+		InputTokens:          1000,
+		OutputTokens:         500,
+		CacheReadTokens:      200,
+		CacheCreationTokens:  150,
+		NumTurns:             3,
 	}, "", "execute", 5000)
 	mc.RecordSession(&session.SessionMetrics{
-		InputTokens:     800,
-		OutputTokens:    400,
-		CacheReadTokens: 100,
-		NumTurns:        2,
+		InputTokens:          800,
+		OutputTokens:         400,
+		CacheReadTokens:      100,
+		CacheCreationTokens:  50,
+		NumTurns:             2,
 	}, "", "review", 3000)
-	mc.FinishTask("done", "abc123")
+	mc.FinishTask("completed", "abc123")
 
 	mc.StartTask("task-2")
 	mc.RecordSession(&session.SessionMetrics{
-		InputTokens:     600,
-		OutputTokens:    300,
-		CacheReadTokens: 50,
-		NumTurns:        1,
+		InputTokens:          600,
+		OutputTokens:         300,
+		CacheReadTokens:      50,
+		CacheCreationTokens:  30,
+		NumTurns:             1,
 	}, "", "execute", 2000)
-	mc.FinishTask("done", "def456")
+	mc.FinishTask("completed", "def456")
 
 	rm := mc.Finish()
 
@@ -63,8 +68,8 @@ func TestMetricsCollector_FullLifecycle(t *testing.T) {
 	if t1.Name != "task-1" {
 		t.Errorf("Tasks[0].Name = %q, want %q", t1.Name, "task-1")
 	}
-	if t1.Status != "done" {
-		t.Errorf("Tasks[0].Status = %q, want %q", t1.Status, "done")
+	if t1.Status != "completed" {
+		t.Errorf("Tasks[0].Status = %q, want %q", t1.Status, "completed")
 	}
 	if t1.CommitSHA != "abc123" {
 		t.Errorf("Tasks[0].CommitSHA = %q, want %q", t1.CommitSHA, "abc123")
@@ -77,6 +82,9 @@ func TestMetricsCollector_FullLifecycle(t *testing.T) {
 	}
 	if t1.CacheTokens != 300 {
 		t.Errorf("Tasks[0].CacheTokens = %d, want 300", t1.CacheTokens)
+	}
+	if t1.CacheCreationTokens != 200 {
+		t.Errorf("Tasks[0].CacheCreationTokens = %d, want 200", t1.CacheCreationTokens)
 	}
 	if t1.NumTurns != 5 {
 		t.Errorf("Tasks[0].NumTurns = %d, want 5", t1.NumTurns)
@@ -107,6 +115,9 @@ func TestMetricsCollector_FullLifecycle(t *testing.T) {
 	if rm.CacheTokens != 350 {
 		t.Errorf("CacheTokens = %d, want 350", rm.CacheTokens)
 	}
+	if rm.CacheCreationTokens != 230 {
+		t.Errorf("CacheCreationTokens = %d, want 230", rm.CacheCreationTokens)
+	}
 	if rm.NumTurns != 6 {
 		t.Errorf("NumTurns = %d, want 6", rm.NumTurns)
 	}
@@ -131,7 +142,7 @@ func TestMetricsCollector_NilMetricsInput(t *testing.T) {
 	mc := NewMetricsCollector("run-nil", nil)
 	mc.StartTask("task-nil")
 	mc.RecordSession(nil, "", "execute", 1000)
-	mc.FinishTask("done", "sha1")
+	mc.FinishTask("completed", "sha1")
 
 	rm := mc.Finish()
 	if len(rm.Tasks) != 1 {
@@ -149,7 +160,7 @@ func TestMetricsCollector_NoCurrentTask(t *testing.T) {
 	// RecordSession and FinishTask with no StartTask should not panic
 	mc := NewMetricsCollector("run-nocurrent", nil)
 	mc.RecordSession(&session.SessionMetrics{InputTokens: 100}, "", "execute", 500)
-	mc.FinishTask("done", "sha1")
+	mc.FinishTask("completed", "sha1")
 
 	rm := mc.Finish()
 	if len(rm.Tasks) != 0 {
@@ -276,7 +287,7 @@ func TestMetricsCollector_CostCalculation(t *testing.T) {
 		CacheReadTokens: 200,
 		NumTurns:        1,
 	}, "claude-sonnet-4-20250514", "execute", 5000)
-	mc.FinishTask("done", "sha1")
+	mc.FinishTask("completed", "sha1")
 
 	rm := mc.Finish()
 	// Expected: (1000*3.0 + 500*15.0 + 200*0.30) / 1_000_000 = (3000 + 7500 + 60) / 1_000_000 = 0.01056
@@ -310,7 +321,7 @@ func TestMetricsCollector_MultiSessionCostAggregation(t *testing.T) {
 	}, "opus", "review", 2000)
 	// Expected: (1000*15 + 500*75 + 200*1.5) / 1M = 52800 / 1M = 0.0528
 
-	mc.FinishTask("done", "sha1")
+	mc.FinishTask("completed", "sha1")
 	rm := mc.Finish()
 
 	wantCost := 0.01056 + 0.0528 // 0.06336
@@ -331,7 +342,7 @@ func TestMetricsCollector_CumulativeCostIncludesCurrent(t *testing.T) {
 	mc.RecordSession(&session.SessionMetrics{
 		InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 200,
 	}, "sonnet", "execute", 1000)
-	mc.FinishTask("done", "sha1")
+	mc.FinishTask("completed", "sha1")
 	task1Cost := 0.01056
 
 	// Start second task (in-progress)
@@ -362,7 +373,7 @@ func TestMetricsCollector_CostPrecision(t *testing.T) {
 			InputTokens: 1000,
 		}, "model", "execute", 100)
 	}
-	mc.FinishTask("done", "sha1")
+	mc.FinishTask("completed", "sha1")
 
 	rm := mc.Finish()
 	// Expected: 1000 sessions * (1000 * 3.0 / 1_000_000) = 1000 * 0.003 = 3.0
@@ -388,13 +399,97 @@ func TestMetricsCollector_UnknownModelFallback(t *testing.T) {
 		t.Errorf("resolved model = %q, want %q", resolved, "pricey")
 	}
 
-	mc.FinishTask("done", "sha1")
+	mc.FinishTask("completed", "sha1")
 	rm := mc.Finish()
 
 	// Cost should use pricey pricing: (1000*15 + 500*75 + 200*1.5) / 1M = 0.0528
 	wantCost := 0.0528
 	if rm.Tasks[0].CostUSD != wantCost {
 		t.Errorf("CostUSD = %f, want %f", rm.Tasks[0].CostUSD, wantCost)
+	}
+}
+
+// TestMetricsCollector_CLICostPreferred verifies CLI-reported total_cost_usd is used over recalculation.
+func TestMetricsCollector_CLICostPreferred(t *testing.T) {
+	pricing := map[string]config.Pricing{
+		"claude-sonnet-4-20250514": {InputPer1M: 3.0, OutputPer1M: 15.0, CachePer1M: 0.30},
+	}
+	mc := NewMetricsCollector("run-cli-cost", pricing)
+	mc.StartTask("task-cli-cost")
+
+	// Session with CLI-reported cost — should use 0.042, NOT recalculate
+	mc.RecordSession(&session.SessionMetrics{
+		InputTokens:     1000,
+		OutputTokens:    500,
+		CacheReadTokens: 200,
+		CostUSD:         0.042,
+		NumTurns:        3,
+	}, "claude-sonnet-4-20250514", "execute", 5000)
+
+	mc.FinishTask("completed", "sha1")
+	rm := mc.Finish()
+
+	if rm.Tasks[0].CostUSD != 0.042 {
+		t.Errorf("Tasks[0].CostUSD = %f, want 0.042 (CLI cost preferred)", rm.Tasks[0].CostUSD)
+	}
+	if rm.CostUSD != 0.042 {
+		t.Errorf("RunMetrics.CostUSD = %f, want 0.042", rm.CostUSD)
+	}
+}
+
+// TestMetricsCollector_CLICostZeroFallsBackToRecalculation verifies fallback when CLI cost is zero.
+func TestMetricsCollector_CLICostZeroFallsBackToRecalculation(t *testing.T) {
+	pricing := map[string]config.Pricing{
+		"claude-sonnet-4-20250514": {InputPer1M: 3.0, OutputPer1M: 15.0, CachePer1M: 0.30},
+	}
+	mc := NewMetricsCollector("run-fallback", pricing)
+	mc.StartTask("task-fallback")
+
+	// Session with zero CLI cost — should recalculate
+	mc.RecordSession(&session.SessionMetrics{
+		InputTokens:     1000,
+		OutputTokens:    500,
+		CacheReadTokens: 200,
+		CostUSD:         0.0,
+		NumTurns:        1,
+	}, "claude-sonnet-4-20250514", "execute", 5000)
+
+	mc.FinishTask("completed", "sha1")
+	rm := mc.Finish()
+
+	// Recalculated: (1000*3.0 + 500*15.0 + 200*0.30) / 1_000_000 = 0.01056
+	wantCost := 0.01056
+	if rm.Tasks[0].CostUSD != wantCost {
+		t.Errorf("Tasks[0].CostUSD = %f, want %f (recalculated fallback)", rm.Tasks[0].CostUSD, wantCost)
+	}
+}
+
+// TestMetricsCollector_CLICostMixedSessions verifies mixed CLI and recalculated costs aggregate correctly.
+func TestMetricsCollector_CLICostMixedSessions(t *testing.T) {
+	pricing := map[string]config.Pricing{
+		"sonnet": {InputPer1M: 3.0, OutputPer1M: 15.0, CachePer1M: 0.30},
+	}
+	mc := NewMetricsCollector("run-mixed", pricing)
+	mc.StartTask("task-mixed")
+
+	// Session 1: CLI cost provided
+	mc.RecordSession(&session.SessionMetrics{
+		InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 200,
+		CostUSD: 0.05,
+	}, "sonnet", "execute", 1000)
+
+	// Session 2: no CLI cost, recalculate
+	mc.RecordSession(&session.SessionMetrics{
+		InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 200,
+	}, "sonnet", "review", 2000)
+
+	mc.FinishTask("completed", "sha1")
+	rm := mc.Finish()
+
+	// Expected: 0.05 (CLI) + 0.01056 (recalculated) = 0.06056
+	wantCost := 0.05 + 0.01056
+	if rm.Tasks[0].CostUSD != wantCost {
+		t.Errorf("Tasks[0].CostUSD = %f, want %f (mixed CLI + recalculated)", rm.Tasks[0].CostUSD, wantCost)
 	}
 }
 
@@ -411,7 +506,7 @@ func TestMetricsCollector_EmptyPricingNoCost(t *testing.T) {
 		t.Errorf("resolved model = %q, want empty", resolved)
 	}
 
-	mc.FinishTask("done", "sha1")
+	mc.FinishTask("completed", "sha1")
 	rm := mc.Finish()
 
 	if rm.Tasks[0].CostUSD != 0.0 {
@@ -506,7 +601,7 @@ func TestMetricsCollector_RecordReview(t *testing.T) {
 		{Severity: "LOW", Description: "Unused fixture"},
 	}
 	mc.RecordReview(findings)
-	mc.FinishTask("done", "sha-review")
+	mc.FinishTask("completed", "sha-review")
 
 	rm := mc.Finish()
 	if len(rm.Tasks) != 1 {
@@ -550,7 +645,7 @@ func TestMetricsCollector_RecordGate(t *testing.T) {
 	// Approve action
 	mc.RecordGate(GateStats{TotalPrompts: 1, Approvals: 1, TotalWaitMs: 500, LastAction: "approve"})
 
-	mc.FinishTask("done", "sha-gate")
+	mc.FinishTask("completed", "sha-gate")
 	rm := mc.Finish()
 
 	if len(rm.Tasks) != 1 {
@@ -589,7 +684,7 @@ func TestMetricsCollector_RecordGate_MultipleCallsAccumulate(t *testing.T) {
 	mc.RecordGate(GateStats{TotalPrompts: 1, Rejections: 1, TotalWaitMs: 300, LastAction: "quit"})
 	mc.RecordGate(GateStats{TotalPrompts: 1, Skips: 1, TotalWaitMs: 200, LastAction: "skip"})
 
-	mc.FinishTask("done", "sha-multi")
+	mc.FinishTask("completed", "sha-multi")
 	rm := mc.Finish()
 
 	g := rm.Tasks[0].Gate
@@ -635,7 +730,7 @@ func TestMetricsCollector_RecordGate_RetryOnlyIncrementsPrompts(t *testing.T) {
 	// Retry: TotalPrompts=1 but no action counters set
 	mc.RecordGate(GateStats{TotalPrompts: 1, TotalWaitMs: 150, LastAction: "retry"})
 
-	mc.FinishTask("done", "sha-retry")
+	mc.FinishTask("completed", "sha-retry")
 	rm := mc.Finish()
 
 	g := rm.Tasks[0].Gate
@@ -669,7 +764,7 @@ func TestMetricsCollector_RecordReview_MultipleReviewCycles(t *testing.T) {
 
 	mc.RecordReview([]ReviewFinding{{Severity: "HIGH", Description: "first"}})
 	mc.RecordReview([]ReviewFinding{{Severity: "LOW", Description: "second"}, {Severity: "MEDIUM", Description: "third"}})
-	mc.FinishTask("done", "sha-multi")
+	mc.FinishTask("completed", "sha-multi")
 
 	rm := mc.Finish()
 	if len(rm.Tasks[0].Findings) != 3 {
@@ -697,11 +792,15 @@ func TestCategorizeError_Patterns(t *testing.T) {
 		err      error
 		wantCat  string
 	}{
+		// Proxy patterns (checked first — takes priority over transient)
+		{name: "407 Proxy", err: errors.New("407 Proxy Authentication Required"), wantCat: "proxy"},
+		{name: "proxy keyword", err: errors.New("proxy connection failed"), wantCat: "proxy"},
+		{name: "connection refused", err: errors.New("connection refused"), wantCat: "proxy"},
 		// Transient patterns
 		{name: "rate limit", err: errors.New("rate limit exceeded"), wantCat: "transient"},
 		{name: "timeout", err: errors.New("request timeout"), wantCat: "transient"},
 		{name: "API error", err: errors.New("API error 500"), wantCat: "transient"},
-		{name: "connection", err: errors.New("connection refused"), wantCat: "transient"},
+		{name: "connection reset", err: errors.New("connection reset by peer"), wantCat: "transient"},
 		// Persistent patterns
 		{name: "config", err: errors.New("config file missing"), wantCat: "persistent"},
 		{name: "not found", err: errors.New("file not found"), wantCat: "persistent"},
@@ -769,7 +868,7 @@ func TestMetricsCollector_RecordLatency(t *testing.T) {
 		DistillMs: 10,
 	})
 
-	mc.FinishTask("done", "sha-lat")
+	mc.FinishTask("completed", "sha-lat")
 	rm := mc.Finish()
 
 	lat := rm.Tasks[0].Latency
@@ -800,7 +899,7 @@ func TestMetricsCollector_RecordLatency_MultipleCallsAccumulate(t *testing.T) {
 	mc.RecordLatency(LatencyBreakdown{SessionMs: 100, GitMs: 10})
 	mc.RecordLatency(LatencyBreakdown{SessionMs: 200, GitMs: 20, ReviewMs: 50})
 
-	mc.FinishTask("done", "sha-lat2")
+	mc.FinishTask("completed", "sha-lat2")
 	rm := mc.Finish()
 
 	lat := rm.Tasks[0].Latency
@@ -829,4 +928,365 @@ func TestMetricsCollector_RecordLatency_NoTask(t *testing.T) {
 	mc := NewMetricsCollector("run-nolat", nil)
 	// No StartTask — should not panic
 	mc.RecordLatency(LatencyBreakdown{SessionMs: 100})
+}
+
+// --- Story 8.5: SerenaSyncMetrics tests ---
+
+func TestSerenaSyncMetrics_JSONSerialization(t *testing.T) {
+	sm := SerenaSyncMetrics{
+		Status:     "success",
+		DurationMs: 12000,
+		TokensIn:   500,
+		TokensOut:  200,
+		CostUSD:    0.05,
+	}
+	data, err := json.Marshal(sm)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	s := string(data)
+
+	// Verify field names (AC #1)
+	for _, field := range []string{`"status"`, `"duration_ms"`, `"tokens_input"`, `"tokens_output"`, `"cost_usd"`} {
+		if !strings.Contains(s, field) {
+			t.Errorf("JSON missing field %s: %s", field, s)
+		}
+	}
+
+	// Verify omitempty: zero tokens/cost should be omitted
+	smZero := SerenaSyncMetrics{Status: "skipped", DurationMs: 1000}
+	dataZero, err := json.Marshal(smZero)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	sZero := string(dataZero)
+	for _, field := range []string{`"tokens_input"`, `"tokens_output"`, `"cost_usd"`} {
+		if strings.Contains(sZero, field) {
+			t.Errorf("JSON should omit zero field %s: %s", field, sZero)
+		}
+	}
+	// status and duration_ms always present
+	for _, field := range []string{`"status"`, `"duration_ms"`} {
+		if !strings.Contains(sZero, field) {
+			t.Errorf("JSON missing required field %s: %s", field, sZero)
+		}
+	}
+}
+
+func TestRunMetrics_JSON_WithSerenaSync(t *testing.T) {
+	rm := RunMetrics{
+		RunID: "run-sync",
+		SerenaSync: &SerenaSyncMetrics{
+			Status:     "success",
+			DurationMs: 5000,
+			TokensIn:   100,
+			TokensOut:  50,
+			CostUSD:    0.02,
+		},
+	}
+	data, err := json.Marshal(rm)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `"serena_sync"`) {
+		t.Errorf("JSON should contain serena_sync when populated: %s", s)
+	}
+	// Verify all nested field names (AC #6)
+	for _, field := range []string{`"status"`, `"duration_ms"`, `"tokens_input"`, `"tokens_output"`, `"cost_usd"`} {
+		if !strings.Contains(s, field) {
+			t.Errorf("JSON serena_sync missing field %s: %s", field, s)
+		}
+	}
+	// Verify field values
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	sync, ok := parsed["serena_sync"].(map[string]any)
+	if !ok {
+		t.Fatalf("serena_sync not a map: %v", parsed["serena_sync"])
+	}
+	if v, _ := sync["status"].(string); v != "success" {
+		t.Errorf("status = %q, want %q", v, "success")
+	}
+	if v, _ := sync["duration_ms"].(float64); v != 5000 {
+		t.Errorf("duration_ms = %v, want 5000", v)
+	}
+	if v, _ := sync["tokens_input"].(float64); v != 100 {
+		t.Errorf("tokens_input = %v, want 100", v)
+	}
+	if v, _ := sync["tokens_output"].(float64); v != 50 {
+		t.Errorf("tokens_output = %v, want 50", v)
+	}
+	if v, _ := sync["cost_usd"].(float64); v != 0.02 {
+		t.Errorf("cost_usd = %v, want 0.02", v)
+	}
+}
+
+func TestRunMetrics_JSON_WithoutSerenaSync(t *testing.T) {
+	rm := RunMetrics{RunID: "run-nosync"}
+	data, err := json.Marshal(rm)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	s := string(data)
+	if strings.Contains(s, `"serena_sync"`) {
+		t.Errorf("JSON should omit serena_sync when nil: %s", s)
+	}
+}
+
+func TestMetricsCollector_RecordSerenaSync_WithResult(t *testing.T) {
+	mc := NewMetricsCollector("run-sync", nil)
+	result := &session.SessionResult{
+		Metrics: &session.SessionMetrics{
+			InputTokens:  800,
+			OutputTokens: 300,
+			CostUSD:      0.07,
+		},
+	}
+	mc.RecordSerenaSync("success", 15000, result)
+	rm := mc.Finish()
+
+	if rm.SerenaSync == nil {
+		t.Fatal("SerenaSync should be populated after RecordSerenaSync")
+	}
+	sm := rm.SerenaSync
+	if sm.Status != "success" {
+		t.Errorf("Status = %q, want %q", sm.Status, "success")
+	}
+	if sm.DurationMs != 15000 {
+		t.Errorf("DurationMs = %d, want 15000", sm.DurationMs)
+	}
+	if sm.TokensIn != 800 {
+		t.Errorf("TokensIn = %d, want 800", sm.TokensIn)
+	}
+	if sm.TokensOut != 300 {
+		t.Errorf("TokensOut = %d, want 300", sm.TokensOut)
+	}
+	if sm.CostUSD != 0.07 {
+		t.Errorf("CostUSD = %f, want 0.07", sm.CostUSD)
+	}
+}
+
+func TestMetricsCollector_RecordSerenaSync_NilResult(t *testing.T) {
+	mc := NewMetricsCollector("run-nilres", nil)
+	mc.RecordSerenaSync("skipped", 500, nil)
+	rm := mc.Finish()
+
+	if rm.SerenaSync == nil {
+		t.Fatal("SerenaSync should be populated even with nil result")
+	}
+	sm := rm.SerenaSync
+	// "skipped" is not a fail status, so derived aggregate = "success"
+	if sm.Status != "success" {
+		t.Errorf("Status = %q, want %q", sm.Status, "success")
+	}
+	if sm.DurationMs != 500 {
+		t.Errorf("DurationMs = %d, want 500", sm.DurationMs)
+	}
+	if sm.TokensIn != 0 {
+		t.Errorf("TokensIn = %d, want 0", sm.TokensIn)
+	}
+	if sm.TokensOut != 0 {
+		t.Errorf("TokensOut = %d, want 0", sm.TokensOut)
+	}
+	if sm.CostUSD != 0 {
+		t.Errorf("CostUSD = %f, want 0", sm.CostUSD)
+	}
+}
+
+func TestMetricsCollector_RecordSerenaSync_NilReceiver(t *testing.T) {
+	var mc *MetricsCollector
+	// Must not panic (AC #4)
+	mc.RecordSerenaSync("failed", 1000, nil)
+}
+
+func TestMetricsCollector_Finish_PreservesSerenaSync(t *testing.T) {
+	mc := NewMetricsCollector("run-preserve", nil)
+	mc.StartTask("task-1")
+	mc.RecordSerenaSync("rollback", 8000, &session.SessionResult{
+		Metrics: &session.SessionMetrics{
+			InputTokens:  400,
+			OutputTokens: 150,
+			CostUSD:      0.03,
+		},
+	})
+	mc.FinishTask("completed", "abc123")
+	rm := mc.Finish()
+
+	// Verify SerenaSync is preserved alongside task data
+	if rm.SerenaSync == nil {
+		t.Fatal("SerenaSync should be preserved in Finish()")
+	}
+	// "rollback" is a fail status, so single call derived aggregate = "failed"
+	if rm.SerenaSync.Status != "failed" {
+		t.Errorf("Status = %q, want %q", rm.SerenaSync.Status, "failed")
+	}
+	if rm.SerenaSync.TokensIn != 400 {
+		t.Errorf("TokensIn = %d, want 400", rm.SerenaSync.TokensIn)
+	}
+	if rm.SerenaSync.DurationMs != 8000 {
+		t.Errorf("DurationMs = %d, want 8000", rm.SerenaSync.DurationMs)
+	}
+	if rm.SerenaSync.TokensOut != 150 {
+		t.Errorf("TokensOut = %d, want 150", rm.SerenaSync.TokensOut)
+	}
+	if rm.SerenaSync.CostUSD != 0.03 {
+		t.Errorf("CostUSD = %f, want 0.03", rm.SerenaSync.CostUSD)
+	}
+	if rm.TasksCompleted != 1 {
+		t.Errorf("TasksCompleted = %d, want 1", rm.TasksCompleted)
+	}
+}
+
+// TestMetricsCollector_RecordSerenaSync_MultipleCalls verifies accumulation across
+// multiple RecordSerenaSync calls: duration/tokens/cost are summed, status follows
+// ternary logic (all success → "success", mixed → "partial", all fail → "failed").
+func TestMetricsCollector_RecordSerenaSync_MultipleCalls(t *testing.T) {
+	mc := NewMetricsCollector("run-multi", nil)
+
+	// Call 1: success with metrics
+	mc.RecordSerenaSync("success", 5000, &session.SessionResult{
+		Metrics: &session.SessionMetrics{
+			InputTokens:  100,
+			OutputTokens: 50,
+			CostUSD:      0.01,
+		},
+	})
+
+	// Call 2: failed with metrics
+	mc.RecordSerenaSync("failed", 3000, &session.SessionResult{
+		Metrics: &session.SessionMetrics{
+			InputTokens:  200,
+			OutputTokens: 80,
+			CostUSD:      0.02,
+		},
+	})
+
+	// Call 3: success with nil result
+	mc.RecordSerenaSync("success", 2000, nil)
+
+	rm := mc.Finish()
+	if rm.SerenaSync == nil {
+		t.Fatal("SerenaSync should be populated after multiple calls")
+	}
+	sm := rm.SerenaSync
+
+	// Status: 1 fail out of 3 → "partial"
+	if sm.Status != "partial" {
+		t.Errorf("Status = %q, want %q (1 fail of 3 = partial)", sm.Status, "partial")
+	}
+	// Duration accumulated: 5000 + 3000 + 2000
+	if sm.DurationMs != 10000 {
+		t.Errorf("DurationMs = %d, want 10000", sm.DurationMs)
+	}
+	// Tokens accumulated from calls 1+2 (call 3 nil result)
+	if sm.TokensIn != 300 {
+		t.Errorf("TokensIn = %d, want 300 (100+200)", sm.TokensIn)
+	}
+	if sm.TokensOut != 130 {
+		t.Errorf("TokensOut = %d, want 130 (50+80)", sm.TokensOut)
+	}
+	if sm.CostUSD != 0.03 {
+		t.Errorf("CostUSD = %f, want 0.03 (0.01+0.02)", sm.CostUSD)
+	}
+}
+
+// --- DESIGN-6: Findings progression and hydra detection ---
+
+func TestMetricsCollector_RecordFindingsCycle_Progression(t *testing.T) {
+	mc := NewMetricsCollector("run-prog", nil)
+	mc.StartTask("task-1")
+
+	// Cycle 1: 5 findings — first cycle, no hydra
+	hydra := mc.RecordFindingsCycle(5)
+	if hydra {
+		t.Error("cycle 1: unexpected hydra detection")
+	}
+
+	// Cycle 2: 3 findings — decreasing, no hydra
+	hydra = mc.RecordFindingsCycle(3)
+	if hydra {
+		t.Error("cycle 2: unexpected hydra on decreasing findings")
+	}
+
+	// Cycle 3: 4 findings — increasing, hydra detected
+	hydra = mc.RecordFindingsCycle(4)
+	if !hydra {
+		t.Error("cycle 3: expected hydra detection on increase")
+	}
+
+	mc.FinishTask("completed", "abc")
+	rm := mc.Finish()
+
+	if len(rm.Tasks) != 1 {
+		t.Fatalf("Tasks len = %d, want 1", len(rm.Tasks))
+	}
+	prog := rm.Tasks[0].FindingsProgression
+	if len(prog) != 3 {
+		t.Fatalf("FindingsProgression len = %d, want 3", len(prog))
+	}
+	if prog[0] != 5 || prog[1] != 3 || prog[2] != 4 {
+		t.Errorf("FindingsProgression = %v, want [5 3 4]", prog)
+	}
+}
+
+func TestMetricsCollector_RecordFindingsCycle_SameCountIsHydra(t *testing.T) {
+	mc := NewMetricsCollector("run-same", nil)
+	mc.StartTask("task-same")
+
+	mc.RecordFindingsCycle(3)
+	hydra := mc.RecordFindingsCycle(3) // same count = not decreasing
+	if !hydra {
+		t.Error("same count should be detected as hydra")
+	}
+
+	mc.FinishTask("completed", "def")
+	rm := mc.Finish()
+	prog := rm.Tasks[0].FindingsProgression
+	if len(prog) != 2 || prog[0] != 3 || prog[1] != 3 {
+		t.Errorf("FindingsProgression = %v, want [3 3]", prog)
+	}
+}
+
+func TestMetricsCollector_RecordFindingsCycle_NoTask(t *testing.T) {
+	mc := NewMetricsCollector("run-no-task", nil)
+	// Should not panic and return false
+	hydra := mc.RecordFindingsCycle(5)
+	if hydra {
+		t.Error("expected false when no task started")
+	}
+}
+
+// --- RecordCycleDuration ---
+
+func TestMetricsCollector_RecordCycleDuration_Accumulated(t *testing.T) {
+	mc := NewMetricsCollector("run-cycle", nil)
+	mc.StartTask("task-cycle")
+	mc.RecordCycleDuration(1500)
+	mc.RecordCycleDuration(2300)
+	mc.RecordCycleDuration(900)
+	mc.FinishTask("completed", "abc123")
+	rm := mc.Finish()
+
+	if len(rm.Tasks) != 1 {
+		t.Fatalf("Tasks count = %d, want 1", len(rm.Tasks))
+	}
+	durations := rm.Tasks[0].CycleDurationsMs
+	if len(durations) != 3 {
+		t.Fatalf("CycleDurationsMs length = %d, want 3", len(durations))
+	}
+	want := []int64{1500, 2300, 900}
+	for i, d := range durations {
+		if d != want[i] {
+			t.Errorf("CycleDurationsMs[%d] = %d, want %d", i, d, want[i])
+		}
+	}
+}
+
+func TestMetricsCollector_RecordCycleDuration_NoTask(t *testing.T) {
+	mc := NewMetricsCollector("run-no-task", nil)
+	// Should not panic when no task started
+	mc.RecordCycleDuration(1000)
 }

@@ -148,7 +148,7 @@ func (c *ExecGitClient) DiffStats(ctx context.Context, before, after string) (*D
 				stats.Deletions += del
 			}
 		}
-		dir := filepath.Dir(parts[2])
+		dir := filepath.ToSlash(filepath.Dir(parts[2]))
 		pkgSet[dir] = true
 	}
 

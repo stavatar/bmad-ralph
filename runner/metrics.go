@@ -51,56 +51,74 @@ type ErrorStats struct {
 
 // TaskMetrics holds metrics for a single task within a run.
 type TaskMetrics struct {
-	Name         string            `json:"name"`
-	Status       string            `json:"status"`
-	CommitSHA    string            `json:"commit_sha"`
-	StartTime    time.Time         `json:"start_time"`
-	EndTime      time.Time         `json:"end_time"`
-	DurationMs   int64             `json:"duration_ms"`
-	InputTokens  int               `json:"input_tokens"`
-	OutputTokens int               `json:"output_tokens"`
-	CacheTokens  int               `json:"cache_tokens"`
-	CostUSD      float64           `json:"cost_usd"`
-	NumTurns     int               `json:"num_turns"`
-	Sessions     int               `json:"sessions"`
-	Diff         *DiffStats        `json:"diff,omitempty"`
-	Findings     []ReviewFinding   `json:"findings,omitempty"`
-	Latency      *LatencyBreakdown `json:"latency,omitempty"`
+	Name                string            `json:"name"`
+	Status              string            `json:"status"`
+	CommitSHA           string            `json:"commit_sha"`
+	StartTime           time.Time         `json:"start_time"`
+	EndTime             time.Time         `json:"end_time"`
+	DurationMs          int64             `json:"duration_ms"`
+	InputTokens         int               `json:"input_tokens"`
+	OutputTokens        int               `json:"output_tokens"`
+	CacheTokens         int               `json:"cache_read_tokens"`
+	CacheCreationTokens int               `json:"cache_creation_tokens"`
+	CostUSD             float64           `json:"cost_usd"`
+	NumTurns            int               `json:"num_turns"`
+	Sessions            int               `json:"sessions"`
+	Diff                *DiffStats        `json:"diff,omitempty"`
+	Findings            []ReviewFinding   `json:"findings,omitempty"`
+	FindingsProgression []int             `json:"findings_progression,omitempty"`
+	CycleDurationsMs    []int64           `json:"cycle_durations_ms,omitempty"`
+	Latency             *LatencyBreakdown `json:"latency,omitempty"`
 	Gate         *GateStats        `json:"gate,omitempty"`
 	Errors       *ErrorStats       `json:"errors,omitempty"`
 }
 
 // RunMetrics holds accumulated metrics for an entire run.
+
+// SerenaSyncMetrics holds metrics from a Serena memory sync session.
+type SerenaSyncMetrics struct {
+	Status     string  `json:"status"`
+	DurationMs int64   `json:"duration_ms"`
+	TokensIn   int     `json:"tokens_input,omitempty"`
+	TokensOut  int     `json:"tokens_output,omitempty"`
+	CostUSD    float64 `json:"cost_usd,omitempty"`
+}
+
 type RunMetrics struct {
-	RunID          string        `json:"run_id"`
-	StartTime      time.Time     `json:"start_time"`
-	EndTime        time.Time     `json:"end_time"`
-	DurationMs     int64         `json:"duration_ms"`
-	Tasks          []TaskMetrics `json:"tasks"`
-	InputTokens    int           `json:"input_tokens"`
-	OutputTokens   int           `json:"output_tokens"`
-	CacheTokens    int           `json:"cache_tokens"`
-	CostUSD        float64       `json:"cost_usd"`
+	RunID               string        `json:"run_id"`
+	StartTime           time.Time     `json:"start_time"`
+	EndTime             time.Time     `json:"end_time"`
+	DurationMs          int64         `json:"duration_ms"`
+	Tasks               []TaskMetrics `json:"tasks"`
+	InputTokens         int           `json:"input_tokens"`
+	OutputTokens        int           `json:"output_tokens"`
+	CacheTokens         int           `json:"cache_read_tokens"`
+	CacheCreationTokens int           `json:"cache_creation_tokens"`
+	CostUSD             float64       `json:"cost_usd"`
 	NumTurns       int           `json:"num_turns"`
 	TotalSessions  int           `json:"total_sessions"`
 	TasksCompleted int           `json:"tasks_completed"`
 	TasksFailed    int           `json:"tasks_failed"`
-	TasksSkipped   int           `json:"tasks_skipped"`
+	TasksSkipped   int                `json:"tasks_skipped"`
+	SerenaSync     *SerenaSyncMetrics `json:"serena_sync,omitempty"`
 }
 
 // taskAccumulator is internal mutable state for the current task.
 type taskAccumulator struct {
-	name         string
-	startTime    time.Time
-	inputTokens  int
-	outputTokens int
-	cacheTokens  int
-	costUSD      float64
+	name                string
+	startTime           time.Time
+	inputTokens         int
+	outputTokens        int
+	cacheTokens         int
+	cacheCreationTokens int
+	costUSD             float64
 	numTurns     int
 	sessions     int
-	diff         *DiffStats
-	findings     []ReviewFinding
-	gate         *GateStats
+	diff                *DiffStats
+	findings            []ReviewFinding
+	findingsProgression []int
+	cycleDurationsMs    []int64
+	gate                *GateStats
 	errors       *ErrorStats
 	latency      *LatencyBreakdown
 }
@@ -115,12 +133,16 @@ type MetricsCollector struct {
 	current   *taskAccumulator
 
 	// Run-level accumulators
-	totalInput    int
-	totalOutput   int
-	totalCache    int
-	totalCost     float64
+	totalInput         int
+	totalOutput        int
+	totalCache         int
+	totalCacheCreation int
+	totalCost          float64
 	totalTurns    int
 	totalSessions int
+	serenaSync          *SerenaSyncMetrics
+	serenaSyncCount     int
+	serenaSyncFailCount int
 }
 
 // NewMetricsCollector creates a MetricsCollector for the given run.
@@ -143,7 +165,9 @@ func (mc *MetricsCollector) StartTask(name string) {
 
 // RecordSession records token usage from a completed session and calculates cost.
 // metrics may be nil (graceful degradation when usage data absent).
-// model is the Claude model ID used for the session (for pricing lookup).
+// When metrics.CostUSD > 0 (from Claude CLI's total_cost_usd), uses it as authoritative cost.
+// Falls back to pricing table recalculation when CLI cost is missing or zero.
+// model is the Claude model ID used for the session (for pricing lookup on fallback).
 // Returns the resolved model used for pricing (may differ from input if fallback applied).
 // Returns original model unchanged if no current task (StartTask not called).
 // Returns empty string if pricing map is empty (no fallback available).
@@ -159,20 +183,26 @@ func (mc *MetricsCollector) RecordSession(metrics *session.SessionMetrics, model
 		mc.current.inputTokens += metrics.InputTokens
 		mc.current.outputTokens += metrics.OutputTokens
 		mc.current.cacheTokens += metrics.CacheReadTokens
+		mc.current.cacheCreationTokens += metrics.CacheCreationTokens
 		mc.current.numTurns += metrics.NumTurns
 
-		// Cost calculation using pricing table.
-		p, ok := mc.pricing[model]
-		if !ok {
-			resolvedModel = config.MostExpensiveModel(mc.pricing)
-			if resolvedModel != "" {
-				p = mc.pricing[resolvedModel]
+		// Prefer CLI-reported total_cost_usd when available; fall back to recalculation.
+		if metrics.CostUSD > 0 {
+			mc.current.costUSD += metrics.CostUSD
+		} else {
+			// Cost calculation using pricing table.
+			p, ok := mc.pricing[model]
+			if !ok {
+				resolvedModel = config.MostExpensiveModel(mc.pricing)
+				if resolvedModel != "" {
+					p = mc.pricing[resolvedModel]
+				}
 			}
+			cost := (float64(metrics.InputTokens)*p.InputPer1M +
+				float64(metrics.OutputTokens)*p.OutputPer1M +
+				float64(metrics.CacheReadTokens)*p.CachePer1M) / 1_000_000
+			mc.current.costUSD += cost
 		}
-		cost := (float64(metrics.InputTokens)*p.InputPer1M +
-			float64(metrics.OutputTokens)*p.OutputPer1M +
-			float64(metrics.CacheReadTokens)*p.CachePer1M) / 1_000_000
-		mc.current.costUSD += cost
 	}
 	return resolvedModel
 }
@@ -184,23 +214,26 @@ func (mc *MetricsCollector) FinishTask(status, commitSHA string) {
 	}
 	now := time.Now()
 	tm := TaskMetrics{
-		Name:         mc.current.name,
-		Status:       status,
-		CommitSHA:    commitSHA,
-		StartTime:    mc.current.startTime,
-		EndTime:      now,
-		DurationMs:   now.Sub(mc.current.startTime).Milliseconds(),
-		InputTokens:  mc.current.inputTokens,
-		OutputTokens: mc.current.outputTokens,
-		CacheTokens:  mc.current.cacheTokens,
-		CostUSD:      mc.current.costUSD,
-		NumTurns:     mc.current.numTurns,
-		Sessions:     mc.current.sessions,
-		Diff:         mc.current.diff,
-		Findings:     mc.current.findings,
-		Gate:         mc.current.gate,
-		Errors:       mc.current.errors,
-		Latency:      mc.current.latency,
+		Name:                mc.current.name,
+		Status:              status,
+		CommitSHA:           commitSHA,
+		StartTime:           mc.current.startTime,
+		EndTime:             now,
+		DurationMs:          now.Sub(mc.current.startTime).Milliseconds(),
+		InputTokens:         mc.current.inputTokens,
+		OutputTokens:        mc.current.outputTokens,
+		CacheTokens:         mc.current.cacheTokens,
+		CacheCreationTokens: mc.current.cacheCreationTokens,
+		CostUSD:             mc.current.costUSD,
+		NumTurns:            mc.current.numTurns,
+		Sessions:            mc.current.sessions,
+		Diff:                mc.current.diff,
+		Findings:            mc.current.findings,
+		FindingsProgression: mc.current.findingsProgression,
+		CycleDurationsMs:    mc.current.cycleDurationsMs,
+		Gate:                mc.current.gate,
+		Errors:              mc.current.errors,
+		Latency:             mc.current.latency,
 	}
 	mc.tasks = append(mc.tasks, tm)
 
@@ -208,6 +241,7 @@ func (mc *MetricsCollector) FinishTask(status, commitSHA string) {
 	mc.totalInput += mc.current.inputTokens
 	mc.totalOutput += mc.current.outputTokens
 	mc.totalCache += mc.current.cacheTokens
+	mc.totalCacheCreation += mc.current.cacheCreationTokens
 	mc.totalCost += mc.current.costUSD
 	mc.totalTurns += mc.current.numTurns
 	mc.totalSessions += mc.current.sessions
@@ -237,20 +271,54 @@ func (mc *MetricsCollector) Finish() RunMetrics {
 	}
 
 	return RunMetrics{
-		RunID:          mc.runID,
-		StartTime:      mc.startTime,
-		EndTime:        now,
-		DurationMs:     now.Sub(mc.startTime).Milliseconds(),
-		Tasks:          mc.tasks,
-		InputTokens:    mc.totalInput,
-		OutputTokens:   mc.totalOutput,
-		CacheTokens:    mc.totalCache,
-		CostUSD:        mc.totalCost,
-		NumTurns:       mc.totalTurns,
-		TotalSessions:  mc.totalSessions,
-		TasksCompleted: completed,
-		TasksFailed:    failed,
-		TasksSkipped:   skipped,
+		RunID:               mc.runID,
+		StartTime:           mc.startTime,
+		EndTime:             now,
+		DurationMs:          now.Sub(mc.startTime).Milliseconds(),
+		Tasks:               mc.tasks,
+		InputTokens:         mc.totalInput,
+		OutputTokens:        mc.totalOutput,
+		CacheTokens:         mc.totalCache,
+		CacheCreationTokens: mc.totalCacheCreation,
+		CostUSD:             mc.totalCost,
+		NumTurns:            mc.totalTurns,
+		TotalSessions:       mc.totalSessions,
+		TasksCompleted:      completed,
+		TasksFailed:         failed,
+		TasksSkipped:        skipped,
+		SerenaSync:          mc.serenaSync,
+	}
+}
+
+// RecordSerenaSync records Serena memory sync metrics for the run.
+// Supports multiple calls (per-task mode): accumulates duration, tokens, and cost.
+// Status logic: all success → "success", any fail → "partial", all fail → "failed".
+// If result is non-nil and has Metrics, token and cost data are extracted.
+// Nil receiver safe: returns immediately when mc == nil.
+func (mc *MetricsCollector) RecordSerenaSync(status string, durationMs int64, result *session.SessionResult) {
+	if mc == nil {
+		return
+	}
+	mc.serenaSyncCount++
+	if status == "failed" || status == "rollback" {
+		mc.serenaSyncFailCount++
+	}
+	if mc.serenaSync == nil {
+		mc.serenaSync = &SerenaSyncMetrics{}
+	}
+	mc.serenaSync.DurationMs += durationMs
+	if result != nil && result.Metrics != nil {
+		mc.serenaSync.TokensIn += result.Metrics.InputTokens
+		mc.serenaSync.TokensOut += result.Metrics.OutputTokens
+		mc.serenaSync.CostUSD += result.Metrics.CostUSD
+	}
+	// Status: all success → "success", any fail → "partial", all fail → "failed"
+	if mc.serenaSyncFailCount == 0 {
+		mc.serenaSync.Status = "success"
+	} else if mc.serenaSyncFailCount == mc.serenaSyncCount {
+		mc.serenaSync.Status = "failed"
+	} else {
+		mc.serenaSync.Status = "partial"
 	}
 }
 
@@ -271,6 +339,30 @@ func (mc *MetricsCollector) RecordReview(findings []ReviewFinding) {
 		return
 	}
 	mc.current.findings = append(mc.current.findings, findings...)
+}
+
+// RecordFindingsCycle appends the findings count for a review cycle to the
+// progression slice. Returns true if a hydra pattern is detected (findings
+// not decreasing for 2+ consecutive cycles).
+func (mc *MetricsCollector) RecordFindingsCycle(count int) bool {
+	if mc.current == nil {
+		return false
+	}
+	mc.current.findingsProgression = append(mc.current.findingsProgression, count)
+	p := mc.current.findingsProgression
+	if len(p) >= 2 && p[len(p)-1] >= p[len(p)-2] {
+		return true // hydra: findings not decreasing
+	}
+	return false
+}
+
+// RecordCycleDuration appends the duration of a review cycle (execute + review + git + gate)
+// in milliseconds to the current task's cycle durations.
+func (mc *MetricsCollector) RecordCycleDuration(ms int64) {
+	if mc.current == nil {
+		return
+	}
+	mc.current.cycleDurationsMs = append(mc.current.cycleDurationsMs, ms)
 }
 
 // RecordGate records a gate interaction for the current task.
@@ -331,6 +423,11 @@ func CategorizeError(err error) string {
 		return "unknown"
 	}
 	msg := err.Error()
+	for _, pattern := range []string{"407 Proxy", "proxy", "connection refused"} {
+		if strings.Contains(msg, pattern) {
+			return "proxy"
+		}
+	}
 	for _, pattern := range []string{"rate limit", "timeout", "API error", "connection"} {
 		if strings.Contains(msg, pattern) {
 			return "transient"

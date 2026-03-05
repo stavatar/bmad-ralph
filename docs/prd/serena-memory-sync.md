@@ -59,9 +59,9 @@ Out of scope:
 
 ### Конфигурация (Config)
 
-- **FR63:** Три новых поля в `config.Config`: `serena_sync_enabled bool` (default false), `serena_sync_max_turns int` (default 5), `serena_sync_trigger string` (default "run", допустимые: "run", "task"). Поля парсятся из `.ralph/config.yaml` с fallback на defaults. CLI флаг `--serena-sync` включает `serena_sync_enabled` без правки config файла
+- **FR63:** Три новых поля в `config.Config`: `serena_sync_enabled bool` (default false), `serena_sync_max_turns int` (default 5), `serena_sync_trigger string` (default "task", допустимые: "run", "task"). Поля парсятся из `.ralph/config.yaml` с fallback на defaults. CLI флаг `--serena-sync` включает `serena_sync_enabled` без правки config файла
 
-- **FR64 (Growth):** Trigger per-task (`serena_sync_trigger: "task"`) запускает sync-сессию после каждой завершённой задачи (SYNC POINT B, после knowledge extraction). Для крупных прогонов с архитектурными изменениями, где batch sync может быть перегружен контекстом. При per-task trigger backup/rollback выполняется на каждую задачу
+- **FR64:** Trigger per-task (`serena_sync_trigger: "task"`, default) запускает sync-сессию после каждой завершённой задачи (SYNC POINT B, после knowledge extraction). Memories обновляются инкрементально — актуальны на протяжении всего прогона. При per-task trigger backup/rollback выполняется на каждую задачу. Batch trigger (`"run"`) — опциональная альтернатива для экономии на коротких прогонах
 
 ### Observability
 
@@ -137,5 +137,5 @@ Out of scope:
 | P1 (safety) | FR61, FR62 | ~200 | P0 (sync session) |
 | P2 (config) | FR63 | ~150 | None (extends existing config) |
 | P3 (observability) | FR65, FR66 | ~150 | P0 + FR42 (RunMetrics) |
-| P4 (growth) | FR64 | ~100 | P0 + P1 |
+| P1 (per-task) | FR64 | ~100 | P0 + P1 (safety) |
 | **Total** | **10 FRs, 4 NFRs** | **~1000** | **Zero new deps** |

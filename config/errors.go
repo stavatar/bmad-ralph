@@ -7,9 +7,8 @@ import (
 
 // Sentinel errors for control flow.
 var (
-	ErrNoTasks         = errors.New("no tasks found")
-	ErrMaxRetries      = errors.New("max retries exceeded")
-	ErrMaxReviewCycles = errors.New("max review cycles exceeded")
+	ErrNoTasks    = errors.New("no tasks found")
+	ErrMaxRetries = errors.New("max retries exceeded")
 )
 
 // ExitCodeError represents a Claude CLI exit with a specific code.

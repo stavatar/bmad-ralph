@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/bmad-ralph/bmad-ralph/config"
 	"github.com/bmad-ralph/bmad-ralph/runner"
 )
@@ -278,6 +280,35 @@ func TestFormatSummary_ReviewLine(t *testing.T) {
 	}
 }
 
+// TestFormatSummary_CriticalAndUnknownSeverity verifies CRITICAL counts as high, unknown as low (BUG-10 fix).
+func TestFormatSummary_CriticalAndUnknownSeverity(t *testing.T) {
+	m := &runner.RunMetrics{
+		RunID: "sev-test",
+		Tasks: []runner.TaskMetrics{
+			{
+				Name: "mixed-severities",
+				Findings: []runner.ReviewFinding{
+					{Severity: "CRITICAL"},
+					{Severity: "HIGH"},
+					{Severity: "MEDIUM"},
+					{Severity: "LOW"},
+					{Severity: "INFO"},
+				},
+			},
+		},
+	}
+	cfg := &config.Config{LogDir: "logs", RunID: "sev-test"}
+
+	out := formatSummary(m, cfg)
+	if !strings.Contains(out, "5 findings") {
+		t.Errorf("should count 5 total findings, got: %s", out)
+	}
+	// CRITICAL→high, HIGH→high, MEDIUM→medium, LOW→default→low, INFO→default→low
+	if !strings.Contains(out, "2h/1m/2l") {
+		t.Errorf("severity breakdown should be 2h/1m/2l, got: %s", out)
+	}
+}
+
 // TestRunRun_NilMetrics verifies no report or summary when runner returns nil metrics (AC1, Task 3.2).
 func TestRunRun_NilMetrics(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -351,8 +382,8 @@ func TestRunMetrics_JSONRoundTrip(t *testing.T) {
 	// Verify all top-level json tag keys
 	wantKeys := []string{
 		"run_id", "start_time", "end_time", "duration_ms",
-		"tasks", "input_tokens", "output_tokens", "cache_tokens",
-		"cost_usd", "num_turns", "total_sessions",
+		"tasks", "input_tokens", "output_tokens", "cache_read_tokens",
+		"cache_creation_tokens", "cost_usd", "num_turns", "total_sessions",
 		"tasks_completed", "tasks_failed", "tasks_skipped",
 	}
 	for _, key := range wantKeys {
@@ -401,5 +432,118 @@ func TestRunMetrics_JSONRoundTrip(t *testing.T) {
 		if _, ok := finding[key]; !ok {
 			t.Errorf("finding JSON missing key %q", key)
 		}
+	}
+}
+
+// TestBuildCLIFlags_SerenaSyncFlag covers AC#2: --serena-sync flag wiring.
+func TestBuildCLIFlags_SerenaSyncFlag(t *testing.T) {
+	t.Run("flag definition exists with correct default", func(t *testing.T) {
+		f := runCmd.Flags().Lookup("serena-sync")
+		if f == nil {
+			t.Fatal("--serena-sync flag not defined on runCmd")
+		}
+		if f.DefValue != "false" {
+			t.Errorf("DefValue = %q, want %q", f.DefValue, "false")
+		}
+	})
+
+	t.Run("flag set maps to CLIFlags", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		cmd.Flags().Bool("serena-sync", false, "")
+		if err := cmd.Flags().Set("serena-sync", "true"); err != nil {
+			t.Fatalf("Set flag: %v", err)
+		}
+		flags := buildCLIFlags(cmd)
+		if flags.SerenaSyncEnabled == nil {
+			t.Fatal("SerenaSyncEnabled = nil, want non-nil")
+		}
+		if !*flags.SerenaSyncEnabled {
+			t.Error("SerenaSyncEnabled = false, want true")
+		}
+	})
+
+	t.Run("flag not set keeps nil", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		cmd.Flags().Bool("serena-sync", false, "")
+		flags := buildCLIFlags(cmd)
+		if flags.SerenaSyncEnabled != nil {
+			t.Errorf("SerenaSyncEnabled = %v, want nil (flag not set)", *flags.SerenaSyncEnabled)
+		}
+	})
+}
+
+// TestBuildCLIFlags_ModelFlag covers --model flag wiring to CLIFlags.ModelExecute.
+func TestBuildCLIFlags_ModelFlag(t *testing.T) {
+	t.Run("flag definition exists with correct default", func(t *testing.T) {
+		f := runCmd.Flags().Lookup("model")
+		if f == nil {
+			t.Fatal("--model flag not defined on runCmd")
+		}
+		if f.DefValue != "" {
+			t.Errorf("DefValue = %q, want %q", f.DefValue, "")
+		}
+	})
+
+	t.Run("flag set maps to CLIFlags", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		cmd.Flags().String("model", "", "")
+		if err := cmd.Flags().Set("model", "claude-opus-4-20250514"); err != nil {
+			t.Fatalf("Set flag: %v", err)
+		}
+		flags := buildCLIFlags(cmd)
+		if flags.ModelExecute == nil {
+			t.Fatal("ModelExecute = nil, want non-nil")
+		}
+		if *flags.ModelExecute != "claude-opus-4-20250514" {
+			t.Errorf("ModelExecute = %q, want %q", *flags.ModelExecute, "claude-opus-4-20250514")
+		}
+	})
+
+	t.Run("flag not set keeps nil", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		cmd.Flags().String("model", "", "")
+		flags := buildCLIFlags(cmd)
+		if flags.ModelExecute != nil {
+			t.Errorf("ModelExecute = %v, want nil (flag not set)", *flags.ModelExecute)
+		}
+	})
+}
+
+// --- Story 8.5: formatSummary sync line tests ---
+
+func TestFormatSummary_WithSerenaSync(t *testing.T) {
+	m := &runner.RunMetrics{
+		TasksCompleted: 3,
+		DurationMs:     120000,
+		SerenaSync: &runner.SerenaSyncMetrics{
+			Status:     "success",
+			DurationMs: 12000,
+			CostUSD:    0.05,
+		},
+	}
+	cfg := &config.Config{LogDir: t.TempDir(), RunID: "test-sync"}
+	summary := formatSummary(m, cfg)
+
+	// Verify 5 lines (4 base + 1 sync line)
+	lines := strings.Split(summary, "\n")
+	if len(lines) != 5 {
+		t.Fatalf("summary lines = %d, want 5 (4 base + sync):\n%s", len(lines), summary)
+	}
+
+	if !strings.Contains(summary, "Serena sync: success ($0.05, 12s)") {
+		t.Errorf("summary should contain sync success line, got:\n%s", summary)
+	}
+}
+
+func TestFormatSummary_WithoutSerenaSync(t *testing.T) {
+	m := &runner.RunMetrics{
+		TasksCompleted: 2,
+		DurationMs:     60000,
+	}
+	cfg := &config.Config{LogDir: t.TempDir(), RunID: "test-nosync"}
+	summary := formatSummary(m, cfg)
+
+	if strings.Contains(summary, "Serena sync") {
+		t.Errorf("summary should not contain sync line when SerenaSync is nil, got:\n%s", summary)
 	}
 }

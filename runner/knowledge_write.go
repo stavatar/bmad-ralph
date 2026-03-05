@@ -143,7 +143,7 @@ func (f *FileKnowledgeWriter) ValidateNewLessons(_ context.Context, data Lessons
 		if len(issues) > 0 {
 			tagEntryInContent(&lines, entry, issues)
 			modified = true
-			fmt.Fprintf(os.Stderr, "WARNING: Entry saved with [needs-formatting] — will be fixed at distillation\n")
+			fmt.Fprintf(os.Stderr, "WARNING: Entry saved with [needs-formatting] — will be fixed at distillation (entry: %s: %s)\n", entry.Category, entry.Topic)
 		}
 	}
 

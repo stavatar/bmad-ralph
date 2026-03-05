@@ -701,38 +701,31 @@ func TestRunner_Execute_ReviewFuncError(t *testing.T) {
 	}
 }
 
-// TestRunner_Execute_MaxReviewCyclesExhausted verifies ErrMaxReviewCycles with informative message
-// when all reviews return non-clean. Table-driven to prove configurable max (AC2, AC5).
+// TestRunner_Execute_MaxReviewCyclesExhausted verifies that review exhaust continues
+// to next task instead of aborting the entire run (BUG-2). Metrics record the task
+// as "error" with the last known HEAD SHA (MINOR-2).
+// Table-driven to prove configurable max (AC2, AC5).
 func TestRunner_Execute_MaxReviewCyclesExhausted(t *testing.T) {
 	tests := []struct {
 		name                 string
 		maxReviewIter        int
 		wantReviewCount      int
-		wantResumeCount      int
-		wantSleepCount       int
 		wantHeadCommitCount  int
 		wantHealthCheckCount int
-		wantCountFormat      string
 	}{
 		{
 			name:                 "max 3 default",
 			maxReviewIter:        3,
 			wantReviewCount:      3,
-			wantResumeCount:      0,
-			wantSleepCount:       0,
 			wantHeadCommitCount:  6,
 			wantHealthCheckCount: 1, // startup only
-			wantCountFormat:      "3/3",
 		},
 		{
 			name:                 "max 5 configurable",
 			maxReviewIter:        5,
 			wantReviewCount:      5,
-			wantResumeCount:      0,
-			wantSleepCount:       0,
 			wantHeadCommitCount:  10,
 			wantHealthCheckCount: 1, // startup only
-			wantCountFormat:      "5/5",
 		},
 	}
 
@@ -755,17 +748,19 @@ func TestRunner_Execute_MaxReviewCyclesExhausted(t *testing.T) {
 			}
 			mock := &testutil.MockGitClient{HeadCommits: headCommitPairs(pairs...)}
 
-			cfg := testConfig(tmpDir, 1) // single task
+			cfg := testConfig(tmpDir, 1) // single iteration
 			cfg.MaxReviewIterations = tt.maxReviewIter
 
 			re := &trackingResumeExtract{}
 			ts := &trackingSleep{}
 			reviewCount := 0
+			mc := runner.NewMetricsCollector("test-review-exhaust", nil)
 
 			r := &runner.Runner{
 				Cfg:       cfg,
 				Git:       mock,
 				TasksFile: tasksPath,
+				Metrics:   mc,
 				ReviewFn: func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
 					reviewCount++
 					return runner.ReviewResult{Clean: false}, nil // always non-clean
@@ -775,36 +770,41 @@ func TestRunner_Execute_MaxReviewCyclesExhausted(t *testing.T) {
 				Knowledge:       &runner.NoOpKnowledgeWriter{},
 			}
 
-			_, err := r.Execute(context.Background())
-			if err == nil {
-				t.Fatal("Execute: want error, got nil")
+			rm, err := r.Execute(context.Background())
+			// BUG-2: Execute no longer returns error on review exhaust
+			if err != nil {
+				t.Fatalf("Execute: want nil error, got %v", err)
 			}
 			if reviewCount != tt.wantReviewCount {
 				t.Errorf("reviewCount = %d, want %d", reviewCount, tt.wantReviewCount)
 			}
-			if !errors.Is(err, config.ErrMaxReviewCycles) {
-				t.Errorf("errors.Is(err, ErrMaxReviewCycles): want true, got false; err = %v", err)
+			// Verify task recorded as "error" in metrics
+			if rm == nil {
+				t.Fatal("RunMetrics = nil, want non-nil")
 			}
-			if !strings.Contains(err.Error(), "review cycles exhausted") {
-				t.Errorf("error message: want 'review cycles exhausted', got %q", err.Error())
+			if len(rm.Tasks) != 1 {
+				t.Fatalf("len(Tasks) = %d, want 1", len(rm.Tasks))
 			}
-			if !strings.Contains(err.Error(), "Task one") {
-				t.Errorf("error message: want 'Task one' task name, got %q", err.Error())
+			if rm.Tasks[0].Status != "error" {
+				t.Errorf("Tasks[0].Status = %q, want %q", rm.Tasks[0].Status, "error")
 			}
-			if !strings.Contains(err.Error(), "check logs") {
-				t.Errorf("error message: want 'check logs' suggestion, got %q", err.Error())
+			// MINOR-2: last known SHA recorded
+			lastSHA := fmt.Sprintf("%03d", tt.maxReviewIter)
+			if rm.Tasks[0].CommitSHA != lastSHA {
+				t.Errorf("Tasks[0].CommitSHA = %q, want %q (last known HEAD)", rm.Tasks[0].CommitSHA, lastSHA)
 			}
-			if !strings.Contains(err.Error(), tt.wantCountFormat) {
-				t.Errorf("error message: want %q count format, got %q", tt.wantCountFormat, err.Error())
+			// Verify error recorded in metrics
+			if rm.Tasks[0].Errors == nil {
+				t.Fatal("Tasks[0].Errors = nil, want non-nil")
 			}
-			if !strings.Contains(err.Error(), "max review cycles exceeded") {
-				t.Errorf("inner error: want 'max review cycles exceeded' sentinel text, got %q", err.Error())
+			if rm.Tasks[0].Errors.TotalErrors != 1 {
+				t.Errorf("Tasks[0].Errors.TotalErrors = %d, want 1", rm.Tasks[0].Errors.TotalErrors)
 			}
-			if re.count != tt.wantResumeCount {
-				t.Errorf("ResumeExtractFn count = %d, want %d", re.count, tt.wantResumeCount)
+			if len(rm.Tasks[0].Errors.Categories) < 1 || rm.Tasks[0].Errors.Categories[0] != "review_exhaust" {
+				t.Errorf("Tasks[0].Errors.Categories = %v, want [review_exhaust]", rm.Tasks[0].Errors.Categories)
 			}
-			if ts.count != tt.wantSleepCount {
-				t.Errorf("SleepFn count = %d, want %d", ts.count, tt.wantSleepCount)
+			if rm.TasksFailed != 1 {
+				t.Errorf("TasksFailed = %d, want 1", rm.TasksFailed)
 			}
 			if mock.HeadCommitCount != tt.wantHeadCommitCount {
 				t.Errorf("HeadCommitCount = %d, want %d", mock.HeadCommitCount, tt.wantHeadCommitCount)
@@ -2036,7 +2036,7 @@ func TestResumeExtraction_HappyPath(t *testing.T) {
 			}
 
 			kw := &trackingKnowledgeWriter{}
-			err = runner.ResumeExtraction(context.Background(), cfg, kw, tc.sessionID)
+			err = runner.ResumeExtraction(context.Background(), cfg, kw, nil, nil, tc.sessionID)
 			if err != nil {
 				t.Fatalf("ResumeExtraction: unexpected error: %v", err)
 			}
@@ -2137,7 +2137,7 @@ func TestResumeExtraction_ErrorPaths(t *testing.T) {
 				validateLessonsErr: tc.validateLessonsErr,
 			}
 
-			err := runner.ResumeExtraction(context.Background(), cfg, kw, tc.sessionID)
+			err := runner.ResumeExtraction(context.Background(), cfg, kw, nil, nil, tc.sessionID)
 			if err == nil {
 				t.Fatal("ResumeExtraction: want error, got nil")
 			}
@@ -2171,7 +2171,7 @@ func TestResumeExtraction_ParseError(t *testing.T) {
 
 	kw := &trackingKnowledgeWriter{}
 
-	err := runner.ResumeExtraction(context.Background(), cfg, kw, "parse-err-session")
+	err := runner.ResumeExtraction(context.Background(), cfg, kw, nil, nil, "parse-err-session")
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
@@ -2208,7 +2208,7 @@ func TestResumeExtraction_SnapshotDiff(t *testing.T) {
 
 	kw := &trackingKnowledgeWriter{}
 
-	err := runner.ResumeExtraction(context.Background(), cfg, kw, "snap-session")
+	err := runner.ResumeExtraction(context.Background(), cfg, kw, nil, nil, "snap-session")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2246,7 +2246,7 @@ func TestResumeExtraction_NoChanges(t *testing.T) {
 
 	kw := &trackingKnowledgeWriter{}
 
-	err := runner.ResumeExtraction(context.Background(), cfg, kw, "nc-session")
+	err := runner.ResumeExtraction(context.Background(), cfg, kw, nil, nil, "nc-session")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2275,7 +2275,7 @@ func TestResumeExtraction_SnapshotReadError(t *testing.T) {
 
 	kw := &trackingKnowledgeWriter{}
 
-	err := runner.ResumeExtraction(context.Background(), cfg, kw, "snap-read-err")
+	err := runner.ResumeExtraction(context.Background(), cfg, kw, nil, nil, "snap-read-err")
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
@@ -2290,6 +2290,51 @@ func TestResumeExtraction_SnapshotReadError(t *testing.T) {
 	}
 	if kw.validateLessonsCount != 0 {
 		t.Errorf("ValidateNewLessons count = %d, want 0", kw.validateLessonsCount)
+	}
+}
+
+// TestResumeExtraction_RecordsMetrics verifies BUG-11: resume session metrics
+// (tokens, cost) are merged into the current task via MetricsCollector.
+func TestResumeExtraction_RecordsMetrics(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksPath := writeTasksFile(t, tmpDir, threeOpenTasks)
+	_ = tasksPath
+
+	cfg := testConfig(tmpDir, 1)
+	cfg.ModelExecute = "opus"
+
+	_, _ = testutil.SetupMockClaude(t, testutil.Scenario{
+		Name:  "resume-metrics",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "rm-001"},
+		},
+	})
+
+	pricing := map[string]config.Pricing{
+		"opus": {InputPer1M: 15.0, OutputPer1M: 75.0, CachePer1M: 1.5},
+	}
+	mc := runner.NewMetricsCollector("run-resume-metrics", pricing)
+	mc.StartTask("task-with-resume")
+
+	kw := &trackingKnowledgeWriter{}
+	err := runner.ResumeExtraction(context.Background(), cfg, kw, nil, mc, "resume-session")
+	if err != nil {
+		t.Fatalf("ResumeExtraction: unexpected error: %v", err)
+	}
+
+	mc.FinishTask("completed", "abc123")
+	rm := mc.Finish()
+
+	if len(rm.Tasks) != 1 {
+		t.Fatalf("Tasks count = %d, want 1", len(rm.Tasks))
+	}
+	// Resume session should have been recorded — Sessions >= 1
+	if rm.Tasks[0].Sessions < 1 {
+		t.Errorf("Tasks[0].Sessions = %d, want >= 1 (resume session recorded)", rm.Tasks[0].Sessions)
+	}
+	// Run-level sessions should also reflect the resume
+	if rm.TotalSessions < 1 {
+		t.Errorf("TotalSessions = %d, want >= 1", rm.TotalSessions)
 	}
 }
 
@@ -5675,7 +5720,7 @@ func TestRunner_Execute_GatePromptIncludesCost(t *testing.T) {
 		Steps: []testutil.ScenarioStep{
 			{Type: "execute", ExitCode: 0, SessionID: "gc-1",
 				Model: "claude-sonnet-4-20250514",
-				Usage: map[string]int{"input_tokens": 1000, "output_tokens": 500, "cache_read_tokens": 200}},
+				Usage: map[string]int{"input_tokens": 1000, "output_tokens": 500, "cache_read_input_tokens": 200}},
 		},
 	}
 	git := &testutil.MockGitClient{

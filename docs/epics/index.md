@@ -16,5 +16,6 @@
   - [Epic 5: Human Gates & Control — Stories](#epic-5-human-gates-control-stories)
   - [Epic 6: Knowledge Management & Polish — Stories](#epic-6-knowledge-management-polish-stories)
   - [Epic 7: Observability & Metrics — Stories](epic-7-observability-metrics-stories.md)
+  - [Epic 8: Serena Memory Sync — Stories](epic-8-serena-memory-sync-stories.md)
   - [FR Coverage Matrix](#fr-coverage-matrix)
   - [Summary](#summary)
