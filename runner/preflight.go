@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/bmad-ralph/bmad-ralph/config"
 )
 
 // TaskHash returns the first 6 hex characters of the SHA-256 hash of the task description.
@@ -56,4 +58,36 @@ func PreFlightCheck(ctx context.Context, git GitClient, taskText, projectRoot st
 	}
 
 	return true, fmt.Sprintf("commit found, no findings (%s)", marker)
+}
+
+// SmartMergeStatus preserves [x] status from oldContent when regenerating sprint-tasks.md.
+// Tasks are matched by TaskHash. Non-task lines in newContent pass through unchanged.
+// Returns newContent unmodified if oldContent is empty.
+func SmartMergeStatus(oldContent, newContent string) string {
+	if oldContent == "" {
+		return newContent
+	}
+
+	// Build map of done task hashes from old content.
+	doneHashes := map[string]bool{}
+	for _, line := range strings.Split(oldContent, "\n") {
+		if strings.HasPrefix(line, config.TaskDone+" ") {
+			h := TaskHash(line)
+			doneHashes[h] = true
+		}
+	}
+
+	// Process new content: transfer [x] where hash matches.
+	var result []string
+	for _, line := range strings.Split(newContent, "\n") {
+		if strings.HasPrefix(line, config.TaskOpen+" ") {
+			h := TaskHash(line)
+			if doneHashes[h] {
+				line = strings.Replace(line, config.TaskOpen, config.TaskDone, 1)
+			}
+		}
+		result = append(result, line)
+	}
+
+	return strings.Join(result, "\n")
 }

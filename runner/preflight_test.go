@@ -172,3 +172,79 @@ func TestPreFlightCheck_GitError(t *testing.T) {
 		t.Errorf("reason should contain 'git log error', got %q", reason)
 	}
 }
+
+// TestSmartMergeStatus_Scenarios verifies [x] preservation across merge scenarios (AC#1-#6).
+func TestSmartMergeStatus_Scenarios(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		old  string
+		new  string
+		want string
+	}{
+		{
+			name: "preserves done and keeps open unchanged (AC#1)",
+			old:  "- [x] Add validation\n- [ ] Fix bug",
+			new:  "- [ ] Add validation\n- [ ] Fix bug\n- [ ] New task",
+			want: "- [x] Add validation\n- [ ] Fix bug\n- [ ] New task",
+		},
+		{
+			name: "matches by hash (AC#2)",
+			old:  "- [x] Add user validation with tests",
+			new:  "- [ ] Add user validation with tests",
+			want: "- [x] Add user validation with tests",
+		},
+		{
+			name: "ignores reordering (AC#3)",
+			old:  "- [x] Task A\n- [ ] Task B",
+			new:  "- [ ] Task B\n- [ ] Task A",
+			want: "- [ ] Task B\n- [x] Task A",
+		},
+		{
+			name: "removed tasks silently dropped (AC#4)",
+			old:  "- [x] Task A\n- [x] Task B",
+			new:  "- [ ] Task A",
+			want: "- [x] Task A",
+		},
+		{
+			name: "non-task lines preserved from new (AC#5)",
+			old:  "- [x] Task A",
+			new:  "## Section\n\n- [ ] Task A\n\n## Another",
+			want: "## Section\n\n- [x] Task A\n\n## Another",
+		},
+		{
+			name: "empty old returns new unchanged (AC#6)",
+			old:  "",
+			new:  "- [ ] Task A\n- [ ] Task B",
+			want: "- [ ] Task A\n- [ ] Task B",
+		},
+		{
+			name: "both empty",
+			old:  "",
+			new:  "",
+			want: "",
+		},
+		{
+			name: "no done tasks in old",
+			old:  "- [ ] Task A\n- [ ] Task B",
+			new:  "- [ ] Task A\n- [ ] Task B",
+			want: "- [ ] Task A\n- [ ] Task B",
+		},
+		{
+			name: "multiple done tasks preserved",
+			old:  "- [x] Task A\n- [x] Task B\n- [ ] Task C",
+			new:  "- [ ] Task A\n- [ ] Task B\n- [ ] Task C",
+			want: "- [x] Task A\n- [x] Task B\n- [ ] Task C",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := SmartMergeStatus(tc.old, tc.new)
+			if got != tc.want {
+				t.Errorf("SmartMergeStatus:\n  got:  %q\n  want: %q", got, tc.want)
+			}
+		})
+	}
+}
