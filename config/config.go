@@ -17,36 +17,36 @@ var defaultsYAML []byte
 // Parsed once at startup, passed by pointer, NEVER mutated at runtime.
 // Exception: RunID is set once by cmd/ralph before entering the runner (pre-run initialization).
 type Config struct {
-	ClaudeCommand       string `yaml:"claude_command"`
-	MaxTurns            int    `yaml:"max_turns"`
-	MaxIterations       int    `yaml:"max_iterations"`
-	MaxReviewIterations int    `yaml:"max_review_iterations"`
-	GatesEnabled        bool   `yaml:"gates_enabled"`
-	GatesCheckpoint     int    `yaml:"gates_checkpoint"`
-	ReviewEvery         int    `yaml:"review_every"`
-	ModelExecute         string `yaml:"model_execute"`
-	ModelReview          string `yaml:"model_review"`
-	ModelReviewLight     string `yaml:"model_review_light"`
-	ReviewLightMaxFiles  int    `yaml:"review_light_max_files"`
-	ReviewLightMaxLines  int    `yaml:"review_light_max_lines"`
-	ReviewMinSeverity    string `yaml:"review_min_severity"`
-	AlwaysExtract       bool   `yaml:"always_extract"`
-	SerenaEnabled       bool   `yaml:"serena_enabled"`
-	SerenaSyncEnabled   bool   `yaml:"serena_sync_enabled"`
-	SerenaSyncMaxTurns  int    `yaml:"serena_sync_max_turns"`
-	SerenaSyncTrigger   string `yaml:"serena_sync_trigger"`
-	LearningsBudget int  `yaml:"learnings_budget"`
-	DistillCooldown int  `yaml:"distill_cooldown"`
-	DistillTimeout  int  `yaml:"distill_timeout"`
-	StuckThreshold    int     `yaml:"stuck_threshold"`
-	SimilarityWindow  int     `yaml:"similarity_window"`
-	SimilarityWarn    float64 `yaml:"similarity_warn"`
-	SimilarityHard    float64 `yaml:"similarity_hard"`
-	BudgetMaxUSD      float64 `yaml:"budget_max_usd"`
-	BudgetWarnPct     int     `yaml:"budget_warn_pct"`
-	TaskBudgetMaxUSD   float64 `yaml:"task_budget_max_usd"`
-	ContextWarnPct     int     `yaml:"context_warn_pct"`
-	ContextCriticalPct int     `yaml:"context_critical_pct"`
+	ClaudeCommand       string             `yaml:"claude_command"`
+	MaxTurns            int                `yaml:"max_turns"`
+	MaxIterations       int                `yaml:"max_iterations"`
+	MaxReviewIterations int                `yaml:"max_review_iterations"`
+	GatesEnabled        bool               `yaml:"gates_enabled"`
+	GatesCheckpoint     int                `yaml:"gates_checkpoint"`
+	ReviewEvery         int                `yaml:"review_every"`
+	ModelExecute        string             `yaml:"model_execute"`
+	ModelReview         string             `yaml:"model_review"`
+	ModelReviewLight    string             `yaml:"model_review_light"`
+	ReviewLightMaxFiles int                `yaml:"review_light_max_files"`
+	ReviewLightMaxLines int                `yaml:"review_light_max_lines"`
+	ReviewMinSeverity   string             `yaml:"review_min_severity"`
+	AlwaysExtract       bool               `yaml:"always_extract"`
+	SerenaEnabled       bool               `yaml:"serena_enabled"`
+	SerenaSyncEnabled   bool               `yaml:"serena_sync_enabled"`
+	SerenaSyncMaxTurns  int                `yaml:"serena_sync_max_turns"`
+	SerenaSyncTrigger   string             `yaml:"serena_sync_trigger"`
+	LearningsBudget     int                `yaml:"learnings_budget"`
+	DistillCooldown     int                `yaml:"distill_cooldown"`
+	DistillTimeout      int                `yaml:"distill_timeout"`
+	StuckThreshold      int                `yaml:"stuck_threshold"`
+	SimilarityWindow    int                `yaml:"similarity_window"`
+	SimilarityWarn      float64            `yaml:"similarity_warn"`
+	SimilarityHard      float64            `yaml:"similarity_hard"`
+	BudgetMaxUSD        float64            `yaml:"budget_max_usd"`
+	BudgetWarnPct       int                `yaml:"budget_warn_pct"`
+	TaskBudgetMaxUSD    float64            `yaml:"task_budget_max_usd"`
+	ContextWarnPct      int                `yaml:"context_warn_pct"`
+	ContextCriticalPct  int                `yaml:"context_critical_pct"`
 	ModelPricing        map[string]Pricing `yaml:"model_pricing"`
 	LogDir              string             `yaml:"log_dir"`
 	StoriesDir          string             `yaml:"stories_dir"`

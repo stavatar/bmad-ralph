@@ -230,7 +230,7 @@ func TestConfig_Load_EmptyFile(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cfg.MaxTurns != 15 {
-		t.Errorf("MaxTurns = %d, want 50 (default)", cfg.MaxTurns)
+		t.Errorf("MaxTurns = %d, want 15 (default)", cfg.MaxTurns)
 	}
 	if !cfg.SerenaEnabled {
 		t.Error("SerenaEnabled should be true (default)")
@@ -510,7 +510,7 @@ func TestConfig_Load_GitFallbackRoot(t *testing.T) {
 		t.Errorf("ProjectRoot = %q, want %q", cfg.ProjectRoot, dir)
 	}
 	if cfg.MaxTurns != 15 {
-		t.Errorf("MaxTurns = %d, want 50 (default)", cfg.MaxTurns)
+		t.Errorf("MaxTurns = %d, want 15 (default)", cfg.MaxTurns)
 	}
 }
 
@@ -665,7 +665,7 @@ func TestConfig_Load_CascadeThreeLevels(t *testing.T) {
 		wantBool bool     // expected GatesEnabled
 		wantStr  string   // expected ModelExecute
 	}{
-		// int cascade (MaxTurns: embedded=50)
+		// int cascade (MaxTurns: embedded=15)
 		{
 			name:    "int/CLI overrides config",
 			yaml:    "max_turns: 75\n",
