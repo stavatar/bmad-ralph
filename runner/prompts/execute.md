@@ -65,6 +65,16 @@ Violation of any rule is grounds for immediate session termination.
 - Write clear commit messages describing what changed and why.
 - The `[GATE]` tag in tasks is a signal for the orchestrator (Ralph), NOT for you. Do NOT pause or wait when you see `[GATE]`. Implement the task, run tests, and commit normally.
 
+## SCOPE BOUNDARY (MANDATORY)
+
+Реализуй ТОЛЬКО текущую задачу: __TASK_CONTENT__
+НЕ реализуй другие задачи из sprint-tasks.md, даже если они кажутся связанными.
+Если текущая задача зависит от другой — остановись и сообщи, не делай обе.
+
+Перед коммитом проверь: каждый изменённый файл и каждое изменение
+напрямую связаны с текущей задачей. Если обнаружишь изменения для другой
+задачи — откати их через git checkout.
+
 ## Session Completion
 
 - After you finish implementing and committing ONE task, STOP the session immediately.

@@ -886,6 +886,7 @@ func (r *Runner) execute(ctx context.Context) error {
 				"__FORMAT_CONTRACT__":  config.SprintTasksFormat(),
 				"__FINDINGS_CONTENT__": findingsContent,
 				"__SERENA_HINT__":      serenaHint,
+				"__TASK_CONTENT__":     taskText,
 			}
 			for k, v := range knowledgeReplacements {
 				executeReplacements[k] = v
@@ -1678,8 +1679,10 @@ func RunOnce(ctx context.Context, rc RunConfig) error {
 	}
 	onceHasLearnings := onceKnowledge["__LEARNINGS_CONTENT__"] != ""
 
+	taskText := result.OpenTasks[0].Text
 	onceReplacements := map[string]string{
 		"__FORMAT_CONTRACT__": config.SprintTasksFormat(),
+		"__TASK_CONTENT__":    taskText,
 	}
 	for k, v := range onceKnowledge {
 		onceReplacements[k] = v

@@ -22,6 +22,7 @@ func executeReplacements() map[string]string {
 		"__LEARNINGS_CONTENT__": "",
 		"__FINDINGS_CONTENT__":  "",
 		"__SERENA_HINT__":       "",
+		"__TASK_CONTENT__":      "",
 	}
 }
 
@@ -692,6 +693,7 @@ func TestPrompt_Execute_KnowledgeSections(t *testing.T) {
 		"__RALPH_KNOWLEDGE__":   "Distilled testing patterns here",
 		"__LEARNINGS_CONTENT__": "Recent learning about assertions",
 		"__FINDINGS_CONTENT__":  "",
+		"__TASK_CONTENT__":      "Test task",
 	}
 
 	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
@@ -758,6 +760,7 @@ func TestPrompt_Execute_SelfReview(t *testing.T) {
 				"__FORMAT_CONTRACT__":   config.SprintTasksFormat(),
 				"__RALPH_KNOWLEDGE__":   "",
 				"__LEARNINGS_CONTENT__": "",
+				"__TASK_CONTENT__":      "",
 			}
 
 			got, err := config.AssemblePrompt(executeTemplate, data, replacements)
@@ -785,6 +788,7 @@ func TestPrompt_Execute_NoKnowledge(t *testing.T) {
 		"__FORMAT_CONTRACT__":   config.SprintTasksFormat(),
 		"__RALPH_KNOWLEDGE__":   "",
 		"__LEARNINGS_CONTENT__": "",
+		"__TASK_CONTENT__":      "",
 	}
 
 	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
@@ -1186,6 +1190,91 @@ func TestPrompt_Review_BudgetInstruction(t *testing.T) {
 			}
 			if count := strings.Count(got, tc.wantBudget); count != 1 {
 				t.Errorf("expected prompt to contain %q exactly once, got %d times", tc.wantBudget, count)
+			}
+		})
+	}
+}
+
+// --- Story 9.6: Scope Creep Protection Prompts ---
+
+// TestPrompt_Execute_ScopeBoundarySection verifies execute.md contains
+// SCOPE BOUNDARY section with task text and scope creep prevention (AC#1, AC#2, AC#5).
+func TestPrompt_Execute_ScopeBoundarySection(t *testing.T) {
+	data := config.TemplateData{}
+	replacements := executeReplacements()
+	replacements["__TASK_CONTENT__"] = "Implement login feature"
+
+	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
+	if err != nil {
+		t.Fatalf("AssemblePrompt error: %v", err)
+	}
+
+	// AC#1: section header present
+	if !strings.Contains(got, "## SCOPE BOUNDARY (MANDATORY)") {
+		t.Error("execute prompt missing '## SCOPE BOUNDARY (MANDATORY)' section")
+	}
+	// AC#1: contains task-specific instruction
+	if !strings.Contains(got, "Реализуй ТОЛЬКО текущую задачу: Implement login feature") {
+		t.Error("scope boundary missing task-specific instruction with actual task text")
+	}
+	// AC#1: contains prohibition
+	if !strings.Contains(got, "НЕ реализуй другие задачи из sprint-tasks.md") {
+		t.Error("scope boundary missing prohibition instruction")
+	}
+	// AC#1: contains pre-commit check
+	if !strings.Contains(got, "Перед коммитом проверь") {
+		t.Error("scope boundary missing pre-commit check instruction")
+	}
+	// AC#1: contains rollback instruction
+	if !strings.Contains(got, "git checkout") {
+		t.Error("scope boundary missing git checkout rollback instruction")
+	}
+	// AC#5: uniqueness — SCOPE BOUNDARY appears exactly once
+	if count := strings.Count(got, "SCOPE BOUNDARY"); count != 1 {
+		t.Errorf("SCOPE BOUNDARY should appear once, got %d", count)
+	}
+}
+
+// TestPrompt_Implementation_ScopeCompliance verifies implementation agent
+// contains scope creep check instructions (AC#3).
+func TestPrompt_Implementation_ScopeCompliance(t *testing.T) {
+	// AC#3: contains scope compliance instruction
+	if !strings.Contains(agentImplementationPrompt, "Verify ALL changes in the diff relate to the current task") {
+		t.Error("implementation agent missing scope compliance check instruction")
+	}
+	// AC#3: scope creep as HIGH severity
+	if !strings.Contains(agentImplementationPrompt, "Scope creep") {
+		t.Error("implementation agent missing 'Scope creep' finding format")
+	}
+	if !strings.Contains(agentImplementationPrompt, "Severity: HIGH") {
+		t.Error("implementation agent missing HIGH severity for scope creep")
+	}
+	// AC#3: finding format
+	if !strings.Contains(agentImplementationPrompt, "Scope creep: изменения в") {
+		t.Error("implementation agent missing scope creep finding format")
+	}
+}
+
+// TestPrompt_OtherAgents_NoScopeCreep verifies that quality, simplification,
+// design-principles, and test-coverage agents do NOT contain scope creep
+// check instructions (AC#4).
+func TestPrompt_OtherAgents_NoScopeCreep(t *testing.T) {
+	agents := []struct {
+		name    string
+		content string
+	}{
+		{"quality", agentQualityPrompt},
+		{"simplification", agentSimplificationPrompt},
+		{"design-principles", agentDesignPrinciplesPrompt},
+		{"test-coverage", agentTestCoveragePrompt},
+	}
+	for _, agent := range agents {
+		t.Run(agent.name, func(t *testing.T) {
+			if strings.Contains(agent.content, "Scope creep") {
+				t.Errorf("%s agent should NOT contain 'Scope creep' instructions", agent.name)
+			}
+			if strings.Contains(agent.content, "scope creep") {
+				t.Errorf("%s agent should NOT contain 'scope creep' instructions", agent.name)
 			}
 		})
 	}

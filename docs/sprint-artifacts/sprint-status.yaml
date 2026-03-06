@@ -143,7 +143,7 @@ development_status:
   9-3-scope-lock-effort-escalation: review
   9-4-session-options-env: done
   9-5-filepath-normalization-graceful-degradation: review
-  9-6-scope-creep-protection-prompts: ready-for-dev
+  9-6-scope-creep-protection-prompts: review
   9-7-preflight-taskhash-logoneline: ready-for-dev
   9-8-smart-merge-x-preservation: ready-for-dev
   9-9-agent-stats-review-findings: ready-for-dev
