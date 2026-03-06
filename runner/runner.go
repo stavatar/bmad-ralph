@@ -662,16 +662,16 @@ type RunConfig struct {
 	SerenaHint    string          // Serena MCP prompt hint (empty if unavailable)
 	Knowledge     KnowledgeWriter // records execution progress and validates lessons (nil = skip)
 	Logger        *RunLogger      // session log writer (nil = skip session logging)
-	LastDiffStats  *DiffStats // diff stats from last execute cycle (DESIGN-4: review model routing)
-	IsGate         bool       // true when current task has [GATE] tag (DESIGN-4: forces standard review model)
-	HydraDetected  bool       // true when hydra pattern detected (DESIGN-4: escalates to standard review model)
+	LastDiffStats *DiffStats      // diff stats from last execute cycle (DESIGN-4: review model routing)
+	IsGate        bool            // true when current task has [GATE] tag (DESIGN-4: forces standard review model)
+	HydraDetected bool            // true when hydra pattern detected (DESIGN-4: escalates to standard review model)
 	// Story 9.3: progressive review fields (FR72-FR76)
-	Cycle           int           // current review cycle (1-based)
-	MinSeverity     SeverityLevel // minimum severity threshold for this cycle
-	MaxFindings     int           // findings budget for this cycle
-	IncrementalDiff bool          // true when review should use incremental diff (cycle 3+)
-	HighEffort      bool          // true when extended thinking should be used (cycle 3+)
-	PrevFindings    string        // previous cycle findings text for incremental review context
+	Cycle           int               // current review cycle (1-based)
+	MinSeverity     SeverityLevel     // minimum severity threshold for this cycle
+	MaxFindings     int               // findings budget for this cycle
+	IncrementalDiff bool              // true when review should use incremental diff (cycle 3+)
+	HighEffort      bool              // true when extended thinking should be used (cycle 3+)
+	PrevFindings    string            // previous cycle findings text for incremental review context
 	Env             map[string]string // environment variables passed to review session (e.g., RALPH_COMPACT_COUNTER)
 }
 
@@ -685,19 +685,19 @@ type RunConfig struct {
 type Runner struct {
 	Cfg                   *config.Config
 	Git                   GitClient
-	TasksFile             string              // path to sprint-tasks.md
-	ReviewFn              ReviewFunc          // called after each successful execute with commit
-	GatePromptFn          GatePromptFunc      // called after clean review on [GATE] or checkpoint tasks when gates enabled
-	EmergencyGatePromptFn GatePromptFunc      // called at execute/review exhaustion when gates enabled (Story 5.5)
-	ResumeExtractFn       ResumeExtractFunc   // called before retry to extract session context
-	DistillFn             DistillFunc         // called after clean review when budget+cooldown checks pass (Story 6.5a)
+	TasksFile             string                                                                         // path to sprint-tasks.md
+	ReviewFn              ReviewFunc                                                                     // called after each successful execute with commit
+	GatePromptFn          GatePromptFunc                                                                 // called after clean review on [GATE] or checkpoint tasks when gates enabled
+	EmergencyGatePromptFn GatePromptFunc                                                                 // called at execute/review exhaustion when gates enabled (Story 5.5)
+	ResumeExtractFn       ResumeExtractFunc                                                              // called before retry to extract session context
+	DistillFn             DistillFunc                                                                    // called after clean review when budget+cooldown checks pass (Story 6.5a)
 	SerenaSyncFn          func(ctx context.Context, opts SerenaSyncOpts) (*session.SessionResult, error) // called after execute loop when sync enabled and Serena available
-	SleepFn               func(time.Duration) // injectable sleep for testable backoff
-	Knowledge             KnowledgeWriter     // records execution progress and validates lessons
-	CodeIndexer           CodeIndexerDetector // detects code indexing tools (Serena MCP)
-	Logger                *RunLogger          // structured log writer; nil = NopLogger
-	Metrics               *MetricsCollector   // accumulates session metrics; nil = no collection
-	Similarity            *SimilarityDetector // detects repeating diff patterns; nil = disabled (Story 7.8)
+	SleepFn               func(time.Duration)                                                            // injectable sleep for testable backoff
+	Knowledge             KnowledgeWriter                                                                // records execution progress and validates lessons
+	CodeIndexer           CodeIndexerDetector                                                            // detects code indexing tools (Serena MCP)
+	Logger                *RunLogger                                                                     // structured log writer; nil = NopLogger
+	Metrics               *MetricsCollector                                                              // accumulates session metrics; nil = no collection
+	Similarity            *SimilarityDetector                                                            // detects repeating diff patterns; nil = disabled (Story 7.8)
 }
 
 // logger returns the Runner's logger, falling back to NopLogger when Logger is nil.
@@ -919,7 +919,7 @@ func (r *Runner) execute(ctx context.Context) error {
 
 		// Review cycle loop: per-task counter, resets when clean (AC3, AC4)
 		reviewCycles := 0
-		prevFindingsText := "" // Story 9.3: previous cycle findings for incremental review context
+		prevFindingsText := ""       // Story 9.3: previous cycle findings for incremental review context
 		wasSkipped := false          // Story 5.5: emergency skip exits without completedTasks++ or gate check
 		reviewExhausted := false     // BUG-2: review exhaust continues to next task instead of aborting
 		lastKnownSHA := ""           // Track last HEAD SHA for FinishTask on error paths (MINOR-2)
