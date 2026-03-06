@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bmad-ralph/bmad-ralph/session"
 )
@@ -233,23 +234,24 @@ func TestEnsureCompactHook_Script(t *testing.T) {
 		name            string
 		existingContent string // empty = no file
 		wantContent     string
-		wantCreated     bool
+		wantModified    bool   // true = file should be written/overwritten
 	}{
 		{
-			name:        "fresh creates script",
-			wantContent: compactHookScript,
-			wantCreated: true,
+			name:         "fresh creates script",
+			wantContent:  compactHookScript,
+			wantModified: true,
 		},
 		{
 			name:            "same content skips write",
 			existingContent: compactHookScript,
 			wantContent:     compactHookScript,
+			wantModified:    false,
 		},
 		{
 			name:            "outdated content overwrites",
 			existingContent: "#!/bin/bash\nold stuff\n",
 			wantContent:     compactHookScript,
-			wantCreated:     true,
+			wantModified:    true,
 		},
 	}
 
@@ -265,6 +267,18 @@ func TestEnsureCompactHook_Script(t *testing.T) {
 				if err := os.WriteFile(scriptPath, []byte(tc.existingContent), 0644); err != nil {
 					t.Fatalf("WriteFile: %v", err)
 				}
+			}
+
+			// Capture mtime before call for modification check.
+			var mtimeBefore time.Time
+			if tc.existingContent != "" {
+				info, err := os.Stat(scriptPath)
+				if err != nil {
+					t.Fatalf("Stat before: %v", err)
+				}
+				mtimeBefore = info.ModTime()
+				// Sleep to ensure mtime difference is detectable.
+				time.Sleep(50 * time.Millisecond)
 			}
 
 			if err := EnsureCompactHook(root); err != nil {
@@ -283,6 +297,15 @@ func TestEnsureCompactHook_Script(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Stat script: %v", err)
 			}
+
+			// Verify modification expectation (AC2: same content skips write).
+			if tc.existingContent != "" {
+				modified := info.ModTime().After(mtimeBefore)
+				if modified != tc.wantModified {
+					t.Errorf("file modified = %v, want %v", modified, tc.wantModified)
+				}
+			}
+
 			// WSL/NTFS doesn't support Unix permission bits (always 0666).
 			// Skip permission check on NTFS; CI on Linux will catch regressions.
 			if info.Mode().Perm() != 0666 && info.Mode()&0100 == 0 {
@@ -360,6 +383,14 @@ func TestEnsureCompactHook_SettingsMerge(t *testing.T) {
 				}
 				if !strings.Contains(err.Error(), tc.wantErr) {
 					t.Errorf("error = %q, want containing %q", err.Error(), tc.wantErr)
+				}
+				// AC12: settings.json must not be modified on error.
+				got, readErr := os.ReadFile(settingsPath)
+				if readErr != nil {
+					t.Fatalf("ReadFile settings after error: %v", readErr)
+				}
+				if string(got) != tc.existingSettings {
+					t.Errorf("settings modified on error: got %q, want %q", string(got), tc.existingSettings)
 				}
 				return
 			}
