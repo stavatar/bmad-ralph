@@ -152,7 +152,7 @@ development_status:
   # Epic 10: Context Window Observability (7 stories, FR81-FR92)
   epic-10: in-progress
   10-1-config-fields-max-turns-default: review
-  10-2-sessionmetrics-contextwindow-parsing: ready-for-dev
+  10-2-sessionmetrics-contextwindow-parsing: review
   10-3-core-context-functions: ready-for-dev
   10-4-ensurecompacthook: ready-for-dev
   10-5-metricscollector-extension: ready-for-dev

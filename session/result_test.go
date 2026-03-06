@@ -629,4 +629,87 @@ func TestSessionMetrics_ZeroValue(t *testing.T) {
 	if m.NumTurns != 0 {
 		t.Errorf("zero NumTurns = %d, want 0", m.NumTurns)
 	}
+	if m.ContextWindow != 0 {
+		t.Errorf("zero ContextWindow = %d, want 0", m.ContextWindow)
+	}
+}
+
+func TestParseResult_ContextWindow(t *testing.T) {
+	tests := []struct {
+		name              string
+		file              string
+		json              string
+		wantContextWindow int
+		wantMetrics       bool
+	}{
+		{
+			name:              "golden file with modelUsage",
+			file:              "testdata/result_with_modelusage.json",
+			wantContextWindow: 200000,
+			wantMetrics:       true,
+		},
+		{
+			name:              "golden file with multiple models",
+			file:              "testdata/result_with_modelusage_multi.json",
+			wantContextWindow: 200000,
+			wantMetrics:       true,
+		},
+		{
+			name:              "golden file with empty modelUsage",
+			file:              "testdata/result_with_modelusage_empty.json",
+			wantContextWindow: 0,
+			wantMetrics:       true,
+		},
+		{
+			name:              "existing golden file without modelUsage",
+			file:              "testdata/result_success.json",
+			wantContextWindow: 0,
+			wantMetrics:       false,
+		},
+		{
+			name:              "existing object format without modelUsage",
+			file:              "testdata/result_success_object.json",
+			wantContextWindow: 0,
+			wantMetrics:       false,
+		},
+		{
+			name:              "inline modelUsage only no usage",
+			json:              `{"type":"result","session_id":"s1","result":"ok","modelUsage":{"claude-sonnet-4-6":{"contextWindow":128000}}}`,
+			wantContextWindow: 128000,
+			wantMetrics:       true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var data []byte
+			if tc.file != "" {
+				var err error
+				data, err = os.ReadFile(tc.file)
+				if err != nil {
+					t.Fatalf("ReadFile(%q): %v", tc.file, err)
+				}
+			} else {
+				data = []byte(tc.json)
+			}
+			raw := &RawResult{Stdout: data, ExitCode: 0}
+			result, err := ParseResult(raw, time.Second)
+			if err != nil {
+				t.Fatalf("ParseResult() error = %v, want nil", err)
+			}
+
+			if tc.wantMetrics {
+				if result.Metrics == nil {
+					t.Fatalf("Metrics = nil, want non-nil")
+				}
+				if result.Metrics.ContextWindow != tc.wantContextWindow {
+					t.Errorf("ContextWindow = %d, want %d", result.Metrics.ContextWindow, tc.wantContextWindow)
+				}
+			} else {
+				if result.Metrics != nil && result.Metrics.ContextWindow != tc.wantContextWindow {
+					t.Errorf("ContextWindow = %d, want %d", result.Metrics.ContextWindow, tc.wantContextWindow)
+				}
+			}
+		})
+	}
 }

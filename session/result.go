@@ -32,6 +32,7 @@ type SessionMetrics struct {
 	CacheCreationTokens  int     `json:"cache_creation_input_tokens"`
 	CostUSD              float64 `json:"cost_usd"`
 	NumTurns             int     `json:"num_turns"`
+	ContextWindow        int     `json:"context_window"`
 }
 
 // usageData maps the "usage" object in Claude Code JSON output.
@@ -40,6 +41,18 @@ type usageData struct {
 	OutputTokens        int `json:"output_tokens"`
 	CacheReadTokens     int `json:"cache_read_input_tokens"`
 	CacheCreationTokens int `json:"cache_creation_input_tokens"`
+}
+
+// modelUsageEntry represents per-model usage data from Claude Code's modelUsage field.
+// JSON tags use camelCase (unlike usageData which uses snake_case).
+type modelUsageEntry struct {
+	InputTokens              int     `json:"inputTokens"`
+	OutputTokens             int     `json:"outputTokens"`
+	CacheReadInputTokens     int     `json:"cacheReadInputTokens"`
+	CacheCreationInputTokens int     `json:"cacheCreationInputTokens"`
+	ContextWindow            int     `json:"contextWindow"`
+	MaxOutputTokens          int     `json:"maxOutputTokens"`
+	CostUSD                  float64 `json:"costUSD"`
 }
 
 type jsonResultMessage struct {
@@ -51,7 +64,8 @@ type jsonResultMessage struct {
 	Usage        *usageData `json:"usage"`
 	Model        string     `json:"model"`
 	NumTurns     int        `json:"num_turns"`
-	TotalCostUSD float64    `json:"total_cost_usd"`
+	TotalCostUSD float64                    `json:"total_cost_usd"`
+	ModelUsage   map[string]modelUsageEntry `json:"modelUsage"`
 }
 
 // ParseResult transforms raw Claude CLI output into a structured SessionResult.
@@ -148,6 +162,15 @@ func resultFromMessage(msg *jsonResultMessage, exitCode int, elapsed time.Durati
 			CacheCreationTokens: msg.Usage.CacheCreationTokens,
 			CostUSD:             msg.TotalCostUSD,
 			NumTurns:            msg.NumTurns,
+		}
+	}
+	if len(msg.ModelUsage) > 0 {
+		for _, entry := range msg.ModelUsage {
+			if r.Metrics == nil {
+				r.Metrics = &SessionMetrics{}
+			}
+			r.Metrics.ContextWindow = entry.ContextWindow
+			break
 		}
 	}
 	return r

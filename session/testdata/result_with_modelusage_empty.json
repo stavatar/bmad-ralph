@@ -1,0 +1,4 @@
+[
+  {"type":"system","subtype":"init","session_id":"ctx-empty-test","tools":[],"model":"claude-sonnet-4-6-20250514"},
+  {"type":"result","subtype":"success","session_id":"ctx-empty-test","result":"Done.","is_error":false,"duration_ms":5000,"duration_api_ms":4000,"total_cost_usd":0.05,"num_turns":2,"usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":200,"cache_creation_input_tokens":50},"modelUsage":{}}
+]
