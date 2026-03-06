@@ -44,7 +44,8 @@ type Options struct {
 	OutputJSON                 bool    // --output-format json
 	Resume                     string  // --resume session_id (empty = omit)
 	DangerouslySkipPermissions bool    // --dangerously-skip-permissions
-	AppendSystemPrompt         *string // Channel 1 delivery — critical rules via system prompt (nil = omit)
+	AppendSystemPrompt         *string           // Channel 1 delivery — critical rules via system prompt (nil = omit)
+	Env                        map[string]string // Extra env vars merged into subprocess environment (nil = no extra vars)
 }
 
 // RawResult contains raw output from a Claude CLI invocation.
@@ -66,6 +67,9 @@ func Execute(ctx context.Context, opts Options) (*RawResult, error) {
 	cmd := exec.CommandContext(ctx, opts.Command, args...)
 	cmd.Dir = opts.Dir
 	cmd.Env = os.Environ()
+	if len(opts.Env) > 0 {
+		cmd.Env = append(cmd.Env, envToSlice(opts.Env)...)
+	}
 
 	if opts.Prompt != "" && len(opts.Prompt) > maxPromptArgLen {
 		cmd.Stdin = strings.NewReader(opts.Prompt)
@@ -137,4 +141,13 @@ func buildArgs(opts Options) []string {
 	}
 
 	return args
+}
+
+// envToSlice converts a map of environment variables to a slice of "KEY=VALUE" strings.
+func envToSlice(m map[string]string) []string {
+	s := make([]string, 0, len(m))
+	for k, v := range m {
+		s = append(s, k+"="+v)
+	}
+	return s
 }

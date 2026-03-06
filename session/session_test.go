@@ -43,6 +43,13 @@ func runTestHelper(scenario string) {
 		var buf bytes.Buffer
 		_, _ = buf.ReadFrom(os.Stdin)
 		fmt.Fprint(os.Stdout, buf.String())
+	case "echo_env":
+		// Print requested env var values, one per line.
+		// Caller sets ECHO_ENV_KEYS=KEY1,KEY2 to request specific vars.
+		keys := strings.Split(os.Getenv("ECHO_ENV_KEYS"), ",")
+		for _, k := range keys {
+			fmt.Fprintf(os.Stdout, "%s=%s\n", k, os.Getenv(k))
+		}
 	case "json_success":
 		fmt.Fprint(os.Stdout, `[{"type":"system","subtype":"init","session_id":"integ-test-001","tools":[],"model":"claude-sonnet-4-5-20250514"},{"type":"result","subtype":"success","session_id":"integ-test-001","result":"Integration test output.","is_error":false,"duration_ms":1000,"num_turns":1}]`)
 	case "resume_json":
@@ -426,5 +433,134 @@ func TestExecute_EmptyPromptNoStdin(t *testing.T) {
 	// No stdin written — subprocess reads empty stdin, outputs nothing.
 	if got := string(result.Stdout); got != "" {
 		t.Errorf("stdout = %q, want empty when no prompt", got)
+	}
+}
+
+// --- envToSlice unit tests ---
+
+func TestEnvToSlice_AllCases(t *testing.T) {
+	tests := []struct {
+		name string
+		m    map[string]string
+		want int // expected length
+	}{
+		{"nil map", nil, 0},
+		{"empty map", map[string]string{}, 0},
+		{"single entry", map[string]string{"KEY": "val"}, 1},
+		{"multiple entries", map[string]string{"A": "1", "B": "2", "C": "3"}, 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := envToSlice(tt.m)
+			if len(got) != tt.want {
+				t.Fatalf("envToSlice() returned %d entries, want %d: %v", len(got), tt.want, got)
+			}
+			// Verify KEY=VALUE format for non-empty maps.
+			for _, entry := range got {
+				if !strings.Contains(entry, "=") {
+					t.Errorf("entry %q missing '=' separator", entry)
+				}
+			}
+			// Verify all keys present.
+			for k, v := range tt.m {
+				found := false
+				expected := k + "=" + v
+				for _, entry := range got {
+					if entry == expected {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected %q in result, got %v", expected, got)
+				}
+			}
+		})
+	}
+}
+
+// --- Execute Env integration tests ---
+
+func TestExecute_EnvSingleVar(t *testing.T) {
+	t.Setenv("SESSION_TEST_HELPER", "echo_env")
+	t.Setenv("ECHO_ENV_KEYS", "CLAUDE_CODE_EFFORT_LEVEL")
+	dir := t.TempDir()
+
+	result, err := Execute(context.Background(), Options{
+		Command: os.Args[0],
+		Dir:     dir,
+		Env:     map[string]string{"CLAUDE_CODE_EFFORT_LEVEL": "high"},
+	})
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+	got := string(result.Stdout)
+	if !strings.Contains(got, "CLAUDE_CODE_EFFORT_LEVEL=high") {
+		t.Errorf("stdout = %q, want containing %q", got, "CLAUDE_CODE_EFFORT_LEVEL=high")
+	}
+}
+
+func TestExecute_EnvMultipleVars(t *testing.T) {
+	t.Setenv("SESSION_TEST_HELPER", "echo_env")
+	t.Setenv("ECHO_ENV_KEYS", "KEY1,KEY2")
+	dir := t.TempDir()
+
+	result, err := Execute(context.Background(), Options{
+		Command: os.Args[0],
+		Dir:     dir,
+		Env:     map[string]string{"KEY1": "val1", "KEY2": "val2"},
+	})
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+	got := string(result.Stdout)
+	if !strings.Contains(got, "KEY1=val1") {
+		t.Errorf("stdout = %q, want containing %q", got, "KEY1=val1")
+	}
+	if !strings.Contains(got, "KEY2=val2") {
+		t.Errorf("stdout = %q, want containing %q", got, "KEY2=val2")
+	}
+}
+
+func TestExecute_EnvNilPreservesExisting(t *testing.T) {
+	t.Setenv("SESSION_TEST_HELPER", "echo_env")
+	t.Setenv("ECHO_ENV_KEYS", "HOME")
+	dir := t.TempDir()
+
+	result, err := Execute(context.Background(), Options{
+		Command: os.Args[0],
+		Dir:     dir,
+		Env:     nil,
+	})
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+	got := string(result.Stdout)
+	// HOME should still be present from os.Environ().
+	if !strings.Contains(got, "HOME=") {
+		t.Errorf("stdout = %q, want containing HOME= (from os.Environ)", got)
+	}
+}
+
+func TestExecute_EnvOverridesExisting(t *testing.T) {
+	t.Setenv("SESSION_TEST_HELPER", "echo_env")
+	t.Setenv("ECHO_ENV_KEYS", "CLAUDE_CODE_EFFORT_LEVEL")
+	// Set an existing value that should be overridden.
+	t.Setenv("CLAUDE_CODE_EFFORT_LEVEL", "low")
+	dir := t.TempDir()
+
+	result, err := Execute(context.Background(), Options{
+		Command: os.Args[0],
+		Dir:     dir,
+		Env:     map[string]string{"CLAUDE_CODE_EFFORT_LEVEL": "high"},
+	})
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+	got := string(result.Stdout)
+	// Last value wins — appended after os.Environ(), so "high" should be the effective value.
+	if !strings.Contains(got, "CLAUDE_CODE_EFFORT_LEVEL=high") {
+		t.Errorf("stdout = %q, want containing %q (override)", got, "CLAUDE_CODE_EFFORT_LEVEL=high")
 	}
 }
