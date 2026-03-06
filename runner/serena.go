@@ -354,7 +354,7 @@ func RealSerenaSync(ctx context.Context, cfg *config.Config, opts SerenaSyncOpts
 	raw, err := session.Execute(ctx, sessOpts)
 	elapsed := time.Since(t0)
 	if logger != nil {
-		logger.SaveSession("sync", raw, raw.ExitCode, elapsed)
+		logger.SaveSession("sync", raw, raw.ExitCode, elapsed, 0, 0.0)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("runner: serena sync: %w", err)

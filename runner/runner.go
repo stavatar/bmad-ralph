@@ -228,7 +228,7 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 	raw, execErr := session.Execute(ctx, opts)
 	elapsed := time.Since(start)
 	if rc.Logger != nil {
-		rc.Logger.SaveSession("review", raw, raw.ExitCode, elapsed)
+		rc.Logger.SaveSession("review", raw, raw.ExitCode, elapsed, 0, 0.0)
 	}
 
 	var reviewMetrics *session.SessionMetrics
@@ -522,7 +522,7 @@ func ResumeExtraction(ctx context.Context, cfg *config.Config, kw KnowledgeWrite
 	raw, execErr := session.Execute(ctx, opts)
 	elapsed := time.Since(start)
 	if logger != nil {
-		logger.SaveSession("resume", raw, raw.ExitCode, elapsed)
+		logger.SaveSession("resume", raw, raw.ExitCode, elapsed, 0, 0.0)
 	}
 
 	if execErr != nil {
@@ -1017,7 +1017,7 @@ func (r *Runner) execute(ctx context.Context) error {
 				execCompactions := CountCompactions(counterPath)
 				counterCleanup()
 				if r.Logger != nil {
-					r.Logger.SaveSession("execute", raw, raw.ExitCode, elapsed)
+					r.Logger.SaveSession("execute", raw, raw.ExitCode, elapsed, execCompactions, 0.0)
 				}
 				if r.Metrics != nil {
 					r.Metrics.RecordLatency(LatencyBreakdown{SessionMs: elapsed.Milliseconds()})
@@ -1803,7 +1803,7 @@ func RunOnce(ctx context.Context, rc RunConfig) error {
 	raw, execErr := session.Execute(ctx, opts)
 	elapsed := time.Since(start)
 	if rc.Logger != nil {
-		rc.Logger.SaveSession("once", raw, raw.ExitCode, elapsed)
+		rc.Logger.SaveSession("once", raw, raw.ExitCode, elapsed, 0, 0.0)
 	}
 
 	if execErr != nil {
@@ -1933,7 +1933,7 @@ func RunReview(ctx context.Context, rc RunConfig) error {
 	raw, execErr := session.Execute(ctx, opts)
 	elapsed := time.Since(start)
 	if rc.Logger != nil {
-		rc.Logger.SaveSession("once-review", raw, raw.ExitCode, elapsed)
+		rc.Logger.SaveSession("once-review", raw, raw.ExitCode, elapsed, 0, 0.0)
 	}
 
 	if execErr != nil {

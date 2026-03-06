@@ -512,7 +512,8 @@ func TestLogContextWarnings_Cases(t *testing.T) {
 		criticalPct int
 		wantWarn    []string // substrings expected in log at WARN level
 		wantError   []string // substrings expected in log at ERROR level
-		wantSilent  bool     // true = no log output expected
+		wantSilent     bool // true = no log output expected
+		wantErrorCount int  // minimum count of ERROR lines expected
 	}{
 		{
 			name:        "silent below warn",
@@ -557,7 +558,8 @@ func TestLogContextWarnings_Cases(t *testing.T) {
 			maxTurns:    15,
 			warnPct:     55,
 			criticalPct: 65,
-			wantError:   []string{"context fill 70.0%", "1 compaction(s) detected"},
+			wantError:      []string{"context fill 70.0%", "1 compaction(s) detected"},
+			wantErrorCount: 2,
 		},
 	}
 
@@ -606,6 +608,12 @@ func TestLogContextWarnings_Cases(t *testing.T) {
 			if len(tc.wantError) > 0 {
 				if !strings.Contains(content, "ERROR") {
 					t.Errorf("log missing ERROR level\ngot: %s", content)
+				}
+			}
+			// AC5: "both" case must produce 2 ERROR lines (fill + compaction).
+			if tc.wantErrorCount > 0 {
+				if count := strings.Count(content, "ERROR"); count < tc.wantErrorCount {
+					t.Errorf("expected >= %d ERROR messages, got %d\n%s", tc.wantErrorCount, count, content)
 				}
 			}
 		})

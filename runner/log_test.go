@@ -543,7 +543,7 @@ func TestRunLogger_SaveSession_WritesFile(t *testing.T) {
 		Stderr:   []byte("session stderr"),
 		ExitCode: 0,
 	}
-	l.SaveSession("execute", raw, 0, 10*time.Second)
+	l.SaveSession("execute", raw, 0, 10*time.Second, 0, 0.0)
 
 	sessDir := filepath.Join(dir, ".ralph/logs/sessions/test-run-id")
 	entries, readErr := os.ReadDir(sessDir)
@@ -558,7 +558,7 @@ func TestRunLogger_SaveSession_WritesFile(t *testing.T) {
 	}
 
 	// Second call should increment seq
-	l.SaveSession("review", raw, 0, 5*time.Second)
+	l.SaveSession("review", raw, 0, 5*time.Second, 0, 0.0)
 	entries, _ = os.ReadDir(sessDir)
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 session logs, got %d", len(entries))
@@ -571,5 +571,5 @@ func TestRunLogger_SaveSession_NopLogger(t *testing.T) {
 	l := runner.NopLogger()
 	raw := &session.RawResult{Stdout: []byte("x"), Stderr: []byte("y")}
 	// Should not panic — NopLogger has empty sessDir so SaveSession returns early.
-	l.SaveSession("execute", raw, 0, time.Second)
+	l.SaveSession("execute", raw, 0, time.Second, 0, 0.0)
 }

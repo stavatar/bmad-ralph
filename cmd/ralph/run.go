@@ -1,17 +1,19 @@
 package main
+
 import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"github.com/bmad-ralph/bmad-ralph/config"
+	"github.com/bmad-ralph/bmad-ralph/runner"
+	"github.com/fatih/color"
+	"github.com/spf13/cobra"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
-	"github.com/bmad-ralph/bmad-ralph/config"
-	"github.com/bmad-ralph/bmad-ralph/runner"
 )
+
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Execute tasks from sprint-tasks.md",
@@ -20,6 +22,7 @@ Each task is executed in a fresh Claude Code session, reviewed,
 and retried if findings are found.`,
 	RunE: runRun,
 }
+
 func init() {
 	runCmd.Flags().Int("max-turns", 0, "Max turns per Claude session (0 = use config/default)")
 	runCmd.Flags().Bool("gates", false, "Enable human gates")
@@ -42,6 +45,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 	return runErr
 }
+
 // writeRunReport writes the JSON run report to logDir. Errors are non-fatal (AC6).
 func writeRunReport(cfg *config.Config, m *runner.RunMetrics) {
 	jsonBytes, err := json.MarshalIndent(m, "", "  ")
@@ -147,15 +151,17 @@ func formatTokens(n int) string {
 		return fmt.Sprintf("%d", n)
 	}
 }
+
 // generateRunID returns a UUID v4 string (xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx).
 // Uses crypto/rand for secure random bytes.
 func generateRunID() string {
 	var b [16]byte
-	_, _ = rand.Read(b[:]) // crypto/rand.Read always returns len(p), nil on supported platforms
+	_, _ = rand.Read(b[:])      // crypto/rand.Read always returns len(p), nil on supported platforms
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
+
 // buildCLIFlags converts Cobra flag values to config.CLIFlags.
 // Only flags explicitly set by the user are populated (pointer non-nil).
 func buildCLIFlags(cmd *cobra.Command) config.CLIFlags {

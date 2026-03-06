@@ -215,7 +215,8 @@ func (l *RunLogger) NextSeq() int {
 }
 
 // SaveSession saves a session log file. Write failures are non-fatal: logged as warnings.
-func (l *RunLogger) SaveSession(sessionType string, raw *session.RawResult, exitCode int, elapsed time.Duration) {
+// compactions and maxFillPct are context window metrics recorded in the session header (FR92).
+func (l *RunLogger) SaveSession(sessionType string, raw *session.RawResult, exitCode int, elapsed time.Duration, compactions int, maxFillPct float64) {
 	if l.sessDir == "" {
 		return
 	}
@@ -225,6 +226,8 @@ func (l *RunLogger) SaveSession(sessionType string, raw *session.RawResult, exit
 		Seq:         seq,
 		ExitCode:    exitCode,
 		Elapsed:     elapsed,
+		Compactions: compactions,
+		MaxFillPct:  maxFillPct,
 	}
 	if err := SaveSessionLog(l.sessDir, info, raw); err != nil {
 		l.Warn("session log save failed", "error", err.Error(), "type", sessionType)
