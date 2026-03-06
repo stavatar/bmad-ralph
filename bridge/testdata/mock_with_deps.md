@@ -9,5 +9,5 @@
 - [ ] Implement integration test suite covering all critical endpoints
   source: stories/api-testing.md#AC-2
 
-- [ ] [VERIFY] Run full integration suite and validate coverage thresholds
-  source: stories/api-testing.md#VERIFY
+- [ ] [E2E] Run full integration suite and validate coverage thresholds
+  source: stories/api-testing.md#E2E

@@ -14,3 +14,4 @@
   - [Non-Functional Requirements](#non-functional-requirements)
   - [Observability & Metrics](observability-metrics.md) — Epic 7: token/cost tracking, review enrichment, run summary, problem detection
   - [Serena Memory Sync](serena-memory-sync.md) — Epic 8: автоматическая синхронизация Serena memories после ralph run
+  - [Ralph Run Robustness](ralph-run-robustness.md) — Epic 9: pre-flight проверки, анти-гидра, кросс-платформенные пути, scope creep защита

@@ -88,7 +88,6 @@ Service tasks are infrastructure or validation tasks not directly tied to a user
 | Prefix | Purpose | Example |
 |--------|---------|---------|
 | `[SETUP]` | Environment or infrastructure setup | `- [ ] [SETUP] Initialize database migrations` |
-| `[VERIFY]` | Verification or validation step | `- [ ] [VERIFY] Run integration test suite` |
 | `[E2E]` | End-to-end test or workflow | `- [ ] [E2E] Complete user registration flow` |
 
 Service tasks still follow the same `source:` traceability format:
@@ -96,8 +95,6 @@ Service tasks still follow the same `source:` traceability format:
 ```
 - [ ] [SETUP] Create staging environment
   source: stories/2-1-deployment.md#SETUP
-- [ ] [VERIFY] Validate API contract compliance
-  source: stories/1-3-api-design.md#VERIFY
 - [ ] [E2E] Test checkout flow end-to-end
   source: stories/3-2-checkout.md#E2E
 ```
@@ -130,8 +127,6 @@ When a human gate reviewer provides feedback, it appears as a blockquote prefixe
 
 - [x] [SETUP] Configure API rate limiter
   source: stories/1-5-api-security.md#SETUP
-- [ ] [VERIFY] Validate rate limit thresholds
-  source: stories/1-5-api-security.md#VERIFY
 - [ ] Implement pagination for list endpoints
   source: stories/1-3-api-design.md#AC-2
 > USER FEEDBACK: Use cursor-based pagination, not offset
@@ -159,7 +154,7 @@ User can pay with credit card.
 - Read ALL acceptance criteria (AC) in the story.
 - Classify each AC (see AC Classification below).
 - Group related ACs into tasks by **unit of work** — one task per logical code change, NOT one task per AC.
-- Each task = one Claude Code session. Minimize task count while maintaining full AC coverage.
+- Each task = one Claude Code session. Sessions are isolated — each runs without memory of previous tasks, so every task must be self-contained. Minimize task count while maintaining full AC coverage.
 - Group tasks under epic headers (`## Epic Name`) based on story context.
 - Every task line MUST start with exactly `- [ ]` (open/incomplete).
 - Every task MUST have an indented `source:` field on the next line.
@@ -208,6 +203,42 @@ Story has 7 ACs for enum validation, 5 of which are "verify value X returns 200"
 - Separate tasks for "test invalid value" and "implement validation" ← should be 1 task
 - 5 tasks for 5 manual Docker/VPS checks ← should be 0-1 tasks
 
+### WRONG (over-packed / too complex):
+
+A single task should NOT combine multiple independent concerns. Split when:
+- **Refactoring + new feature**: replacing an existing component AND adding new behavior are separate tasks. E.g., "Replace overlay with WizardSection" is task 1, "Add skip button to hook" is task 2.
+- **Alternatives in description**: if a task says "X or Y" — pick ONE approach and make it the task. Do NOT give Claude a choice inside a task description.
+- **Multiple independent UI/API changes**: "Add endpoint A and refactor component B and update tests for C" — split by independent change unit.
+- **5+ ACs spanning different files/components with independent concerns**: when ACs touch different layers (hook + page + component + API), split by layer boundary. Note: 5+ ACs all modifying one file (e.g., adding 6 validators to one DTO) is still ONE task.
+
+### Complexity ceiling:
+
+Each task should be completable in 1-3 review cycles. Heuristics for "too complex":
+- Task description contains "or" offering alternative approaches → split into the chosen approach only
+- Task touches 4+ unrelated files across different concerns → split by concern
+- Task combines refactoring existing code with writing new code → split: refactor first, then add
+- Task description exceeds ~300 characters → likely over-packed, consider splitting (weakest signal — only split if semantic criteria above also indicate it; long descriptions due to listing test scenarios are fine)
+
+### Signals to keep as ONE task (do not split):
+
+- All changes are in the same file or file+test pair
+- Removing either "half" would break compilation or tests — the parts are not independently verifiable
+- The split would produce a task with no independently testable outcome
+- Multiple Behavioral ACs that test the same Implementation AC
+- Story has 1-2 simple ACs → always 1 task, do not pad the output with extra tasks
+
+### Task ordering:
+
+If task B depends on task A (e.g., B uses a database table created by A's migration, or B imports a module created by A), task A MUST appear before task B in the output.
+
+### Correct (split complex story):
+
+Story BF-2.1 has 5 ACs: remove overlay, add skip, verify accordion, verify skip works, verify sections expand → **2-3 tasks:**
+1. `- [ ] Replace inline wizard overlay in AiSettingsPage with WizardSection component, with test verifying no overlay when wizard completed [GATE]`
+2. `- [ ] Add skip button handling: verify WizardSection onSkip closes wizard and page remains functional, with test for skip and accordion accessibility`
+
+NOT 1 mega-task: `- [ ] Replace overlay (or add skip button), with tests for overlay, skip, and accordion` ← too many concerns, alternative approaches, Claude will thrash
+
 ## Testing Within Tasks
 
 Tests are part of the task description, not separate entries:
@@ -239,11 +270,9 @@ When the story is the first in its epic, mark its FIRST generated task with `[GA
 
 A task is a user-visible milestone if it involves:
 - Deployments to production or staging environments.
-- Feature completions visible to end users.
-- Security-critical changes requiring human sign-off.
-- New UI screens, workflows, or user-facing interactions.
+- Security-critical changes requiring human sign-off (authentication, encryption, access control).
 
-Look for keywords like "deploy", "release", "production", "staging", "visible to user", "user-facing", "launch", "go-live" in story content to identify milestones.
+Look for keywords like "deploy", "release", "production", "staging", "launch", "go-live", "security", "encryption" in story content to identify milestones. Do NOT mark routine feature tasks as milestones — gates should be rare.
 
 ## Service Tasks
 
@@ -321,7 +350,8 @@ An existing sprint-tasks.md is provided below. You MUST merge the new story task
 - If an epic section already exists, add new tasks under it. If not, create a new section.
 - Do NOT duplicate tasks that already exist (match by description + source).
 - MUST NOT change [x] status of completed tasks — this is the most critical merge requirement.
-- Modified tasks: if a task description changed in the updated story, update the description text but PRESERVE the completion status ([x] or [ ]).
+- Modified tasks: if a `- [ ]` (open) task description changed, update the description text.
+- NEW work on completed tasks: if an `[x]` task needs additional work from an updated story, create a NEW `- [ ]` task referencing the same ACs. Do NOT modify the completed task's description — it represents work that was already done.
 
 Existing sprint-tasks.md content:
 

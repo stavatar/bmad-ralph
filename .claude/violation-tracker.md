@@ -72,6 +72,7 @@
 - Epic 8 Story 8.5: 4 findings (0C/0H/3M/1L) — Sync Metrics+Summary, 0 new patterns, all fixed, all match existing: no test for multi-call accumulation (M1: code path coverage), missing line count assertion (M2: assertion quality), weak JSON nested assertions (M3: assertion quality), incomplete struct field verification (L1: assertion quality)
 - Epic 8 Story 8.6: 3 findings (0C/0H/2M/1L) — Per-Task Trigger, 0 new patterns, all fixed, all match existing: duplicate test PartialStatus⊂MultipleCalls (M1: duplicate code), stale runSerenaSync doc "after execute loop" (M2: doc accuracy), missing negative assertion in PerTaskScoping (L1: assertion quality)
 - Epic 8 Story 8.7: 3 findings (0C/0H/2M/1L) — Integration Tests, 0 new patterns, all fixed, all match existing: duplicate MetricsNilWhenDisabled⊂Disabled (M1: duplicate code), misleading FormatSummaryWithSync name+subset of HappyPath (M2: duplicate code+test naming), Unavailable doc promises log assertion without infrastructure (L1: doc accuracy)
+- Epic 9 Story 9.1: 5 findings (0C/0H/3M/2L) — Progressive Review Types, 0 new patterns, all fixed, all match existing: out-of-scope config additions (M1: SRP/YAGNI), TestSeverityLevel_Values not table-driven (M2: duplicate code), missing maxCycles≤0 edge case tests (M3: assertion quality/code path coverage), missing SeverityLevel.String() (L1: API completeness), doc comment boundary asymmetry unexplained (L2: doc accuracy)
 
 ## Update Process
 

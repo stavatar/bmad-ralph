@@ -17,5 +17,6 @@
   - [Epic 6: Knowledge Management & Polish — Stories](#epic-6-knowledge-management-polish-stories)
   - [Epic 7: Observability & Metrics — Stories](epic-7-observability-metrics-stories.md)
   - [Epic 8: Serena Memory Sync — Stories](epic-8-serena-memory-sync-stories.md)
+  - [Epic 9: Ralph Run Robustness — Stories](epic-9-ralph-run-robustness-stories.md)
   - [FR Coverage Matrix](#fr-coverage-matrix)
   - [Summary](#summary)

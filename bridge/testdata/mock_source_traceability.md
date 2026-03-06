@@ -18,8 +18,8 @@
 - [ ] Implement pipeline monitoring dashboard and alerting
   source: stories/data-pipeline.md#AC-5
 
-- [ ] [VERIFY] Run end-to-end pipeline with sample data and validate outputs
-  source: stories/data-pipeline.md#VERIFY
+- [ ] [E2E] Run end-to-end pipeline with sample data and validate outputs
+  source: stories/data-pipeline.md#E2E
 
 - [ ] [E2E] Execute full pipeline integration test from ingestion to monitoring
   source: stories/data-pipeline.md#E2E
