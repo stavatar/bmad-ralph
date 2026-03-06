@@ -1,6 +1,9 @@
 package runner
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // SeverityLevel represents the severity of a review finding.
 // Levels are ordered: SeverityLow < SeverityMedium < SeverityHigh < SeverityCritical.
@@ -16,6 +19,22 @@ const (
 	// SeverityCritical is the highest severity level.
 	SeverityCritical
 )
+
+// String returns the string representation of a SeverityLevel.
+func (s SeverityLevel) String() string {
+	switch s {
+	case SeverityLow:
+		return "LOW"
+	case SeverityMedium:
+		return "MEDIUM"
+	case SeverityHigh:
+		return "HIGH"
+	case SeverityCritical:
+		return "CRITICAL"
+	default:
+		return fmt.Sprintf("SeverityLevel(%d)", int(s))
+	}
+}
 
 // ParseSeverity converts a string to a SeverityLevel.
 // Case-insensitive. Returns SeverityLow for unknown or empty input.
@@ -80,7 +99,7 @@ func ProgressiveParams(cycle, maxCycles int) ProgressiveReviewParams {
 			IncrementalDiff: false,
 			HighEffort:     false,
 		}
-	case position <= 0.50:
+	case position <= 0.50: // 0.50 inclusive to ensure cycle 2 of 3 maps to MEDIUM per AC
 		return ProgressiveReviewParams{
 			MinSeverity:    SeverityMedium,
 			MaxFindings:    3,

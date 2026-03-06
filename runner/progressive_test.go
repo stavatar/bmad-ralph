@@ -15,17 +15,46 @@ func TestSeverityLevel_Ordering(t *testing.T) {
 }
 
 func TestSeverityLevel_Values(t *testing.T) {
-	if SeverityLow != 0 {
-		t.Errorf("SeverityLow = %d, want 0", SeverityLow)
+	tests := []struct {
+		name string
+		got  SeverityLevel
+		want int
+	}{
+		{"SeverityLow", SeverityLow, 0},
+		{"SeverityMedium", SeverityMedium, 1},
+		{"SeverityHigh", SeverityHigh, 2},
+		{"SeverityCritical", SeverityCritical, 3},
 	}
-	if SeverityMedium != 1 {
-		t.Errorf("SeverityMedium = %d, want 1", SeverityMedium)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if int(tt.got) != tt.want {
+				t.Errorf("%s = %d, want %d", tt.name, tt.got, tt.want)
+			}
+		})
 	}
-	if SeverityHigh != 2 {
-		t.Errorf("SeverityHigh = %d, want 2", SeverityHigh)
+}
+
+func TestSeverityLevel_String(t *testing.T) {
+	tests := []struct {
+		name  string
+		level SeverityLevel
+		want  string
+	}{
+		{"LOW", SeverityLow, "LOW"},
+		{"MEDIUM", SeverityMedium, "MEDIUM"},
+		{"HIGH", SeverityHigh, "HIGH"},
+		{"CRITICAL", SeverityCritical, "CRITICAL"},
+		{"unknown", SeverityLevel(99), "SeverityLevel(99)"},
 	}
-	if SeverityCritical != 3 {
-		t.Errorf("SeverityCritical = %d, want 3", SeverityCritical)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.level.String()
+			if got != tt.want {
+				t.Errorf("SeverityLevel(%d).String() = %q, want %q", tt.level, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -146,6 +175,8 @@ func TestProgressiveParams_EdgeCases(t *testing.T) {
 		{"single cycle max", 1, 1, SeverityCritical, 1, true, true},
 		{"negative cycle clamped", -5, 6, SeverityLow, 5, false, false},
 		{"large cycle clamped", 100, 6, SeverityCritical, 1, true, true},
+		{"maxCycles zero", 1, 0, SeverityCritical, 1, true, true},
+		{"maxCycles negative", 1, -1, SeverityCritical, 1, true, true},
 	}
 
 	for _, tt := range tests {
