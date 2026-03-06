@@ -11,8 +11,8 @@ import (
 	"testing"
 )
 
-// TestTaskHash_TableDriven verifies TaskHash strips prefixes and returns deterministic 6-char hex (AC#1, AC#2).
-func TestTaskHash_TableDriven(t *testing.T) {
+// TestTaskHash_Variants verifies TaskHash strips prefixes and returns deterministic 6-char hex (AC#1, AC#2).
+func TestTaskHash_Variants(t *testing.T) {
 	t.Parallel()
 
 	// Pre-compute expected hash for "Add validation"

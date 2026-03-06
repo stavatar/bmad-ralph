@@ -159,6 +159,79 @@ func TestMockGitClient_ZeroValue(t *testing.T) {
 	}
 }
 
+// TestMockGitClient_LogOneline_Sequence verifies indexed return and beyond-length behavior.
+func TestMockGitClient_LogOneline_Sequence(t *testing.T) {
+	lines1 := []string{"abc feat: first", "def feat: second"}
+	lines2 := []string{"ghi fix: third"}
+	m := &MockGitClient{
+		LogOnelineResponses: [][]string{lines1, lines2},
+	}
+	ctx := context.Background()
+
+	// First call returns lines1
+	got, err := m.LogOneline(ctx, 5)
+	if err != nil {
+		t.Fatalf("call 1: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("call 1: len = %d, want 2", len(got))
+	}
+	if got[0] != "abc feat: first" {
+		t.Errorf("call 1: got[0] = %q, want %q", got[0], "abc feat: first")
+	}
+
+	// Second call returns lines2
+	got, err = m.LogOneline(ctx, 5)
+	if err != nil {
+		t.Fatalf("call 2: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("call 2: len = %d, want 1", len(got))
+	}
+	if got[0] != "ghi fix: third" {
+		t.Errorf("call 2: got[0] = %q, want %q", got[0], "ghi fix: third")
+	}
+
+	// Beyond-length: returns last element
+	got, err = m.LogOneline(ctx, 5)
+	if err != nil {
+		t.Fatalf("call 3 (beyond): %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("call 3 (beyond): len = %d, want 1 (last element)", len(got))
+	}
+	if m.LogOnelineCount != 3 {
+		t.Errorf("LogOnelineCount = %d, want 3", m.LogOnelineCount)
+	}
+}
+
+// TestMockGitClient_LogOneline_Error verifies error return from indexed errors.
+func TestMockGitClient_LogOneline_Error(t *testing.T) {
+	m := &MockGitClient{
+		LogOnelineErrors:    []error{nil, fmt.Errorf("mock log error")},
+		LogOnelineResponses: [][]string{{"abc feat: first"}},
+	}
+	ctx := context.Background()
+
+	// First call: no error
+	got, err := m.LogOneline(ctx, 5)
+	if err != nil {
+		t.Fatalf("call 1: unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("call 1: len = %d, want 1", len(got))
+	}
+
+	// Second call: error
+	_, err = m.LogOneline(ctx, 5)
+	if err == nil {
+		t.Fatal("call 2: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "mock log error") {
+		t.Errorf("call 2: error = %q, want containing %q", err.Error(), "mock log error")
+	}
+}
+
 // TestMockGitClient_DiffStats_Sequence verifies indexed return and beyond-length behavior.
 func TestMockGitClient_DiffStats_Sequence(t *testing.T) {
 	stats1 := &runner.DiffStats{FilesChanged: 3, Insertions: 10, Deletions: 2}

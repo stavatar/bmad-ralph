@@ -162,7 +162,7 @@ func (c *ExecGitClient) DiffStats(ctx context.Context, before, after string) (*D
 	return &stats, nil
 }
 
-// LogOneline returns the last n commit subjects via `git log --oneline -<n>`.
+// LogOneline returns the last n commits as one-line strings via `git log --oneline -<n>`.
 // Each line is one commit (abbreviated hash + subject).
 func (e *ExecGitClient) LogOneline(ctx context.Context, n int) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "git", "log", "--oneline", fmt.Sprintf("-%d", n))

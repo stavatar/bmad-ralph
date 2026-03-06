@@ -7429,3 +7429,87 @@ func TestRunner_Execute_ProgressiveReviewParams(t *testing.T) {
 		t.Errorf("cycle 1 should have empty PrevFindings, got: %q", captured[0].PrevFindings)
 	}
 }
+
+// TestRunner_Execute_PreFlightSkip verifies that Execute skips a task when pre-flight
+// finds a matching [task:<hash>] commit and no review-findings.md (AC#9).
+func TestRunner_Execute_PreFlightSkip(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Two tasks: first will be skipped via pre-flight, second executes normally.
+	tasks := "# Sprint Tasks\n\n- [ ] Task one\n- [ ] Task two\n"
+	tasksPath := writeTasksFile(t, tmpDir, tasks)
+
+	// Compute hash for "Task one" to build the marker
+	hash := runner.TaskHash("- [ ] Task one")
+	marker := "[task:" + hash + "]"
+
+	// Only 1 scenario step needed — second task executes, first is skipped.
+	scenario := testutil.Scenario{
+		Name: "preflight-skip",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-001"},
+		},
+	}
+	testutil.SetupMockClaude(t, scenario)
+
+	mock := &testutil.MockGitClient{
+		// LogOneline returns commit with marker for "Task one"
+		LogOnelineResponses: [][]string{
+			{"abc1234 feat: task one " + marker, "def5678 fix: unrelated"},
+			{"abc1234 feat: task one " + marker, "def5678 fix: unrelated"},
+		},
+		// HeadCommit: before + after for the second task only
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+
+	reviewCount := 0
+	cfg := testConfig(tmpDir, 2)
+	r := &runner.Runner{
+		Cfg:       cfg,
+		Git:       mock,
+		TasksFile: tasksPath,
+		ReviewFn: func(ctx context.Context, rc runner.RunConfig) (runner.ReviewResult, error) {
+			reviewCount++
+			return cleanReviewFn(ctx, rc)
+		},
+		ResumeExtractFn: noopResumeExtractFn,
+		SleepFn:         noopSleepFn,
+		Knowledge:       &runner.NoOpKnowledgeWriter{},
+		Metrics:         runner.NewMetricsCollector("test-preflight", nil),
+	}
+
+	rm, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	// Verify: only 1 review (second task), not 2 — first task was skipped.
+	if reviewCount != 1 {
+		t.Errorf("reviewCount = %d, want 1 (first task skipped)", reviewCount)
+	}
+
+	// Verify: first task marked [x] in sprint-tasks.md.
+	data, readErr := os.ReadFile(tasksPath)
+	if readErr != nil {
+		t.Fatalf("read tasks: %v", readErr)
+	}
+	content := string(data)
+	if !strings.Contains(content, "- [x] Task one") {
+		t.Errorf("task one should be marked [x], got:\n%s", content)
+	}
+
+	// Verify: metrics recorded "skipped" for first task.
+	if rm == nil {
+		t.Fatal("RunMetrics is nil")
+	}
+	skippedFound := false
+	for _, tm := range rm.Tasks {
+		if tm.Status == "skipped" {
+			skippedFound = true
+			break
+		}
+	}
+	if !skippedFound {
+		t.Error("expected a task with status 'skipped' in RunMetrics")
+	}
+}
