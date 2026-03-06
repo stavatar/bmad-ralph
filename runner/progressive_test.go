@@ -343,6 +343,46 @@ func TestTruncateFindings_BudgetOne(t *testing.T) {
 	}
 }
 
+func TestTruncateFindings_MaxCountZero(t *testing.T) {
+	findings := []ReviewFinding{
+		{Severity: "HIGH", Description: "issue"},
+	}
+	got := TruncateFindings(findings, 0)
+	if len(got) != 0 {
+		t.Errorf("TruncateFindings(_, 0) returned %d findings, want 0", len(got))
+	}
+}
+
+func TestTruncateFindings_DoesNotModifyInput(t *testing.T) {
+	findings := []ReviewFinding{
+		{Severity: "LOW", Description: "low issue"},
+		{Severity: "CRITICAL", Description: "critical issue"},
+		{Severity: "MEDIUM", Description: "medium issue"},
+	}
+	// Save original order.
+	origFirst := findings[0].Severity
+	origSecond := findings[1].Severity
+	origThird := findings[2].Severity
+
+	got := TruncateFindings(findings, 1)
+	if len(got) != 1 {
+		t.Fatalf("TruncateFindings() returned %d, want 1", len(got))
+	}
+	if got[0].Severity != "CRITICAL" {
+		t.Errorf("got[0].Severity = %q, want CRITICAL", got[0].Severity)
+	}
+	// Input slice must not be reordered.
+	if findings[0].Severity != origFirst {
+		t.Errorf("input[0].Severity mutated: got %q, was %q", findings[0].Severity, origFirst)
+	}
+	if findings[1].Severity != origSecond {
+		t.Errorf("input[1].Severity mutated: got %q, was %q", findings[1].Severity, origSecond)
+	}
+	if findings[2].Severity != origThird {
+		t.Errorf("input[2].Severity mutated: got %q, was %q", findings[2].Severity, origThird)
+	}
+}
+
 // --- writeFilteredFindings tests ---
 
 func TestWriteFilteredFindings_Format(t *testing.T) {

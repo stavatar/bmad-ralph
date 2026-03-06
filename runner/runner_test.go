@@ -7262,6 +7262,11 @@ func TestRunner_Execute_TaskBudgetGateError(t *testing.T) {
 // severity filtering and findings budget to review findings, rewriting review-findings.md.
 // With maxReviewIterations=1, ProgressiveParams(1,1) returns CRITICAL threshold + budget 1.
 // ReviewFn returns 3 findings (CRITICAL, MEDIUM, LOW) → filtered to 1 CRITICAL.
+// TestRunner_Execute_FindingsFiltered verifies the Execute() loop filters findings
+// by severity and truncates to budget (AC#3, AC#5, AC#7).
+// Uses maxReviewIterations=1 which maps to ProgressiveParams(1,1) = CRITICAL/1/true/true,
+// so only CRITICAL findings survive with budget=1.
+// AC#8 (multi-cycle escalation) is covered by TestRunner_Execute_ProgressiveReviewParams.
 func TestRunner_Execute_FindingsFiltered(t *testing.T) {
 	tmpDir := t.TempDir()
 	scenario := testutil.Scenario{

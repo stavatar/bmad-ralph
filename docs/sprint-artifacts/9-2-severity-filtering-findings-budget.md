@@ -153,11 +153,14 @@ Claude Opus 4.6
 ### Completion Notes List
 
 - Task 1: FilterBySeverity — uses ParseSeverity for comparison, returns new slice, nil/empty safe
-- Task 2: TruncateFindings — sort.SliceStable descending by severity, truncate to maxCount, no-op when under budget
+- Task 2: TruncateFindings — sort.SliceStable descending by severity, truncate to maxCount, no-op when under budget; copy-before-sort (review fix M1)
 - Task 3: Integration in Execute() — applies ProgressiveParams after ReviewFn returns, logs below-threshold findings, rewrites review-findings.md with writeFilteredFindings, updates rr.Findings
-- Task 4: 9 test functions covering all ACs: FilterBySeverity (AllThresholds 4 cases, EmptyInput, DoesNotModifyInput), TruncateFindings (SortBySeverity, NoTruncation, ExactBudget, Empty, BudgetOne), writeFilteredFindings (Format, Empty)
+- Task 4: 9+2 test functions covering all ACs: FilterBySeverity (AllThresholds 4 cases, EmptyInput, DoesNotModifyInput), TruncateFindings (SortBySeverity, NoTruncation, ExactBudget, Empty, BudgetOne, DoesNotModifyInput, MaxCountZero), writeFilteredFindings (Format, Empty)
 - Task 5: Integration test TestRunner_Execute_FindingsFiltered — maxReviewIterations=1 triggers CRITICAL threshold, verifies review-findings.md contains only CRITICAL finding
 - All tests pass, no regressions across all packages
+- Review fix H1: runner.go commit included pre-existing scaffold code (selectReviewModel gate/hydra, checkTaskBudget, RunConfig.IsGate/HydraDetected) from DESIGN-4/Story 9.3 prep — staging scope issue, not a code bug. These features are now covered by their respective stories (9.3 committed as ff19112)
+- Review fix M2: writeFilteredFindings doc comment explains intentional File/Line omission
+- Review fix L1: integration test comment clarifies AC#8 mapping
 
 ### Change Log
 

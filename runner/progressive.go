@@ -140,20 +140,26 @@ func FilterBySeverity(findings []ReviewFinding, minSeverity SeverityLevel) []Rev
 
 // TruncateFindings sorts findings by severity descending and returns at most maxCount.
 // If len(findings) <= maxCount, returns the input unchanged.
+// Makes a copy before sorting to avoid mutating the caller's slice.
 // Uses sort.SliceStable to preserve order among equal severities.
 func TruncateFindings(findings []ReviewFinding, maxCount int) []ReviewFinding {
 	if len(findings) <= maxCount {
 		return findings
 	}
-	sort.SliceStable(findings, func(i, j int) bool {
-		return ParseSeverity(findings[i].Severity) > ParseSeverity(findings[j].Severity)
+	copied := make([]ReviewFinding, len(findings))
+	copy(copied, findings)
+	sort.SliceStable(copied, func(i, j int) bool {
+		return ParseSeverity(copied[i].Severity) > ParseSeverity(copied[j].Severity)
 	})
-	return findings[:maxCount]
+	return copied[:maxCount]
 }
 
 // writeFilteredFindings rewrites review-findings.md with only the given findings.
 // Each finding is written as "### [SEVERITY] Description" matching the format
 // parsed by findingSeverityRe in DetermineReviewOutcome.
+// Note: File and Line fields are intentionally omitted — this file is a summary
+// for the execute session which reads the full review-findings.md written by the
+// review session. The filtered file replaces it with severity-prioritized subset.
 func writeFilteredFindings(path string, findings []ReviewFinding) error {
 	var b strings.Builder
 	for _, f := range findings {
