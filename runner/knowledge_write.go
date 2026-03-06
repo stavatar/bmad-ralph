@@ -2,7 +2,9 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -84,8 +86,8 @@ func (f *FileKnowledgeWriter) ValidateNewLessons(_ context.Context, data Lessons
 
 	currentContent, err := os.ReadFile(learningsPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			// File doesn't exist yet — nothing to validate
+		if errors.Is(err, os.ErrNotExist) {
+			log.Printf("WARN: %s not found, skipping", learningsPath)
 			return nil
 		}
 		return fmt.Errorf("runner: validate lessons: %w", err)
@@ -433,7 +435,7 @@ func mergeEntryContent(content string, existing, newEntry *parsedEntry) string {
 func BudgetCheck(_ context.Context, learningsPath string, limit int) (BudgetStatus, error) {
 	content, err := os.ReadFile(learningsPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return BudgetStatus{Limit: limit}, nil
 		}
 		return BudgetStatus{}, fmt.Errorf("runner: budget check: %w", err)

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -387,7 +388,7 @@ func TestTruncateFindings_DoesNotModifyInput(t *testing.T) {
 
 func TestWriteFilteredFindings_Format(t *testing.T) {
 	dir := t.TempDir()
-	path := dir + "/review-findings.md"
+	path := filepath.Join(dir, "review-findings.md")
 	findings := []ReviewFinding{
 		{Severity: "CRITICAL", Description: "null pointer"},
 		{Severity: "HIGH", Description: "buffer overflow"},
@@ -414,7 +415,7 @@ func TestWriteFilteredFindings_Format(t *testing.T) {
 
 func TestWriteFilteredFindings_Empty(t *testing.T) {
 	dir := t.TempDir()
-	path := dir + "/review-findings.md"
+	path := filepath.Join(dir, "review-findings.md")
 	err := writeFilteredFindings(path, nil)
 	if err != nil {
 		t.Fatalf("writeFilteredFindings() error: %v", err)

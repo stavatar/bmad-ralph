@@ -79,15 +79,31 @@ func setupDistillScenario(t *testing.T, outputText string) {
 
 // ===== AutoDistill =====
 
-func TestAutoDistill_ReadLearningsError(t *testing.T) {
+func TestAutoDistill_MissingLearningsGracefulSkip(t *testing.T) {
 	tmpDir := t.TempDir()
-	// No LEARNINGS.md → os.ReadFile fails
+	// No LEARNINGS.md → graceful skip (AC#4: os.ErrNotExist returns nil)
+	cfg := autoDistillCfg(tmpDir)
+	state := &runner.DistillState{Version: 1}
+
+	err := runner.AutoDistill(context.Background(), cfg, state)
+	if err != nil {
+		t.Fatalf("AutoDistill: expected nil for missing LEARNINGS.md, got %v", err)
+	}
+}
+
+func TestAutoDistill_ReadLearningsRealError(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Create LEARNINGS.md as a directory → os.ReadFile returns non-NotExist error (AC#6)
+	learningsDir := filepath.Join(tmpDir, "LEARNINGS.md")
+	if err := os.MkdirAll(learningsDir, 0755); err != nil {
+		t.Fatalf("create dir: %v", err)
+	}
 	cfg := autoDistillCfg(tmpDir)
 	state := &runner.DistillState{Version: 1}
 
 	err := runner.AutoDistill(context.Background(), cfg, state)
 	if err == nil {
-		t.Fatal("AutoDistill: expected error for missing LEARNINGS.md")
+		t.Fatal("AutoDistill: expected error for non-NotExist read failure")
 	}
 	if !strings.Contains(err.Error(), "runner: distill: read learnings:") {
 		t.Errorf("AutoDistill error = %q, want containing %q", err.Error(), "runner: distill: read learnings:")

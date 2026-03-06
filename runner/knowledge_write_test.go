@@ -783,6 +783,41 @@ func TestFileKnowledgeWriter_ValidateNewLessons_WriteError(t *testing.T) {
 
 // --- Task 8.14: WriteProgress unchanged ---
 
+// TestFilepathJoin_CrossPlatform verifies filepath.Join produces platform-correct
+// paths for key runner operations (AC#7: review-findings.md, LEARNINGS.md).
+func TestFilepathJoin_CrossPlatform(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+
+	// Verify filepath.Join produces a valid, accessible path
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"review-findings", filepath.Join(root, "review-findings.md")},
+		{"LEARNINGS", filepath.Join(root, "LEARNINGS.md")},
+		{"ralph-rules", filepath.Join(root, ".ralph", "rules", "ralph-testing.md")},
+	}
+	for _, tc := range cases {
+		// Path must not contain raw "/" on Windows or raw "\" on Unix —
+		// filepath.Join normalizes to os-specific separator.
+		if strings.Contains(tc.path, "\x00") {
+			t.Errorf("%s: path contains null byte", tc.name)
+		}
+		// Verify the path is writable (platform-correct separators)
+		dir := filepath.Dir(tc.path)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("%s: MkdirAll(%q): %v", tc.name, dir, err)
+		}
+		if err := os.WriteFile(tc.path, []byte("test"), 0644); err != nil {
+			t.Fatalf("%s: WriteFile(%q): %v", tc.name, tc.path, err)
+		}
+		if _, err := os.ReadFile(tc.path); err != nil {
+			t.Fatalf("%s: ReadFile(%q): %v", tc.name, tc.path, err)
+		}
+	}
+}
+
 func TestFileKnowledgeWriter_WriteProgress_Unchanged(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()

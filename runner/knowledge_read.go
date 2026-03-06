@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -128,7 +129,7 @@ func buildKnowledgeReplacements(projectRoot string) (map[string]string, *string,
 	// Read LEARNINGS.md → ValidateLearnings → inject validated content
 	learningsPath := filepath.Join(projectRoot, "LEARNINGS.md")
 	learningsData, err := os.ReadFile(learningsPath)
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, nil, fmt.Errorf("runner: build knowledge: read learnings: %w", err)
 	}
 	if err == nil {
