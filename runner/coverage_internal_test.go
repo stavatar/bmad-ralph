@@ -1103,6 +1103,7 @@ func TestSelectReviewModel_Scenarios(t *testing.T) {
 			ds:        &DiffStats{FilesChanged: 1, Insertions: 5, Deletions: 2},
 			wantModel: "claude-sonnet-4-6",
 		},
+		// Backfill from Story 9.2: isGate/hydraDetected coverage
 		{
 			name:      "gate task with small diff forces standard model",
 			cfg:       baseCfg(),
@@ -1168,7 +1169,7 @@ func TestSelectReviewModel_Scenarios(t *testing.T) {
 			hydraDetected: false,
 			wantModel:     "claude-haiku-4-5-20251001",
 		},
-		// Story 9.3: highEffort escalation cases
+		// Story 9.3 AC#6: highEffort escalation cases
 		{
 			name:       "highEffort with small diff forces standard model",
 			cfg:        baseCfg(),

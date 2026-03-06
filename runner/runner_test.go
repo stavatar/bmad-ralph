@@ -7355,6 +7355,9 @@ func TestRunner_Execute_ProgressiveReviewParams(t *testing.T) {
 	r.Cfg.MaxIterations = 5
 
 	// Capture RunConfig per review call.
+	// Note: AC#4 env propagation (CLAUDE_CODE_EFFORT_LEVEL=high) is verified indirectly —
+	// HighEffort=true on RunConfig directly triggers execEnv assignment (runner.go:904-907).
+	// Full env verification would require mock subprocess inspection (out of scope for unit test).
 	type capturedRC struct {
 		Cycle           int
 		MinSeverity     runner.SeverityLevel
@@ -7412,18 +7415,6 @@ func TestRunner_Execute_ProgressiveReviewParams(t *testing.T) {
 				t.Errorf("HighEffort: got %v, want %v", cap.HighEffort, want.HighEffort)
 			}
 		})
-	}
-
-	// AC#5: cycles 1-2 have no effort escalation.
-	if captured[0].HighEffort {
-		t.Error("cycle 1 should NOT have HighEffort")
-	}
-	if captured[1].HighEffort {
-		t.Error("cycle 2 should NOT have HighEffort")
-	}
-	// AC#4: cycle 3+ have effort escalation.
-	if !captured[2].HighEffort {
-		t.Error("cycle 3 should have HighEffort")
 	}
 
 	// AC#2: cycle 3+ have previous findings from prior cycle.

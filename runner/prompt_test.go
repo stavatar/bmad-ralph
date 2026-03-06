@@ -1184,8 +1184,8 @@ func TestPrompt_Review_BudgetInstruction(t *testing.T) {
 			if err != nil {
 				t.Fatalf("AssemblePrompt error: %v", err)
 			}
-			if !strings.Contains(got, tc.wantBudget) {
-				t.Errorf("expected prompt to contain %q", tc.wantBudget)
+			if count := strings.Count(got, tc.wantBudget); count != 1 {
+				t.Errorf("expected prompt to contain %q exactly once, got %d times", tc.wantBudget, count)
 			}
 		})
 	}

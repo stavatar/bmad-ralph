@@ -1366,6 +1366,7 @@ func (r *Runner) execute(ctx context.Context) error {
 			}
 
 			// Story 9.3: capture current findings text for next cycle's incremental review context.
+			// Note: rr.Findings is already filtered by FilterBySeverity+TruncateFindings (line 1313).
 			if len(rr.Findings) > 0 {
 				var fb strings.Builder
 				for _, f := range rr.Findings {

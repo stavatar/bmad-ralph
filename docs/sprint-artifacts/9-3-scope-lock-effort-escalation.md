@@ -193,6 +193,11 @@ Claude Opus 4.6
 - Task 6: RealReview builds progressive TemplateData, adds __PREV_FINDINGS__ replacement, passes HighEffort to selectReviewModel
 - Task 7: 7 test functions covering all AC: selectReviewModel highEffort (3 cases), prompt incremental/full/budget (3 tests), integration (1 test verifying 5 cycles)
 - All tests pass, no regressions across all packages
+- Review fix M1: AC#4 env gap — added doc comment noting HighEffort→execEnv is a direct 3-line assignment, full subprocess env verification out of scope for unit test
+- Review fix M2: prevFindingsText already uses filtered findings (rr.Findings=truncated at line 1313) — added clarifying comment
+- Review fix M3: Added scope annotations to selectReviewModel test cases — "Backfill from Story 9.2" for gate/hydra, "Story 9.3 AC#6" for highEffort
+- Review fix L1: Removed duplicate standalone HighEffort assertions (already verified in loop via ProgressiveParams)
+- Review fix L2: BudgetInstruction test uses strings.Count==1 instead of strings.Contains
 
 ### Change Log
 
