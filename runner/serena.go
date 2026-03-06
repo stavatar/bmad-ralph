@@ -342,6 +342,10 @@ func RealSerenaSync(ctx context.Context, cfg *config.Config, opts SerenaSyncOpts
 		return nil, fmt.Errorf("runner: serena sync: %w", err)
 	}
 
+	// Story 10.6 AC8: compaction counter for sync session.
+	syncCounterPath, syncCounterCleanup := CreateCompactCounter()
+	defer syncCounterCleanup()
+
 	sessOpts := session.Options{
 		Command:                    cfg.ClaudeCommand,
 		Dir:                        opts.ProjectRoot,
@@ -349,6 +353,9 @@ func RealSerenaSync(ctx context.Context, cfg *config.Config, opts SerenaSyncOpts
 		MaxTurns:                   opts.MaxTurns,
 		OutputJSON:                 true,
 		DangerouslySkipPermissions: true,
+	}
+	if syncCounterPath != "" {
+		sessOpts.Env = map[string]string{"RALPH_COMPACT_COUNTER": syncCounterPath}
 	}
 	t0 := time.Now()
 	raw, err := session.Execute(ctx, sessOpts)

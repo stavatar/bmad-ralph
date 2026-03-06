@@ -207,6 +207,13 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 		DangerouslySkipPermissions: true,
 		AppendSystemPrompt:         reviewAppendSys,
 	}
+	// Story 10.6 AC6: pass environment variables from RunConfig to session.
+	for k, v := range rc.Env {
+		if opts.Env == nil {
+			opts.Env = make(map[string]string)
+		}
+		opts.Env[k] = v
+	}
 
 	// Story 6.4: snapshot LEARNINGS.md before review session for post-validation diff
 	learningsPath := filepath.Join(rc.Cfg.ProjectRoot, "LEARNINGS.md")
@@ -493,6 +500,10 @@ func ResumeExtraction(ctx context.Context, cfg *config.Config, kw KnowledgeWrite
 		return fmt.Errorf("runner: resume extraction: snapshot: %w", readErr)
 	}
 
+	// Story 10.6 AC7: compaction counter for resume session.
+	resumeCounterPath, resumeCounterCleanup := CreateCompactCounter()
+	defer resumeCounterCleanup()
+
 	opts := session.Options{
 		Command:                    cfg.ClaudeCommand,
 		Dir:                        cfg.ProjectRoot,
@@ -502,6 +513,9 @@ func ResumeExtraction(ctx context.Context, cfg *config.Config, kw KnowledgeWrite
 		Model:                      cfg.ModelExecute,
 		OutputJSON:                 true,
 		DangerouslySkipPermissions: true,
+	}
+	if resumeCounterPath != "" {
+		opts.Env = map[string]string{"RALPH_COMPACT_COUNTER": resumeCounterPath}
 	}
 
 	start := time.Now()
@@ -521,8 +535,10 @@ func ResumeExtraction(ctx context.Context, cfg *config.Config, kw KnowledgeWrite
 	}
 
 	// BUG-11: merge resume session metrics into the current task
+	resumeCompactions := CountCompactions(resumeCounterPath)
+	resumeFillPct := EstimateMaxContextFill(sr.Metrics, DefaultContextWindow)
 	if mc != nil {
-		mc.RecordSession(sr.Metrics, cfg.ModelExecute, "resume", elapsed.Milliseconds(), 0, 0.0)
+		mc.RecordSession(sr.Metrics, cfg.ModelExecute, "resume", elapsed.Milliseconds(), resumeCompactions, resumeFillPct)
 	}
 
 	if err := kw.WriteProgress(ctx, ProgressData{SessionID: sr.SessionID}); err != nil {
@@ -656,6 +672,7 @@ type RunConfig struct {
 	IncrementalDiff bool          // true when review should use incremental diff (cycle 3+)
 	HighEffort      bool          // true when extended thinking should be used (cycle 3+)
 	PrevFindings    string        // previous cycle findings text for incremental review context
+	Env             map[string]string // environment variables passed to review session (e.g., RALPH_COMPACT_COUNTER)
 }
 
 // Runner orchestrates the execute-review loop with injectable dependencies.
@@ -772,6 +789,12 @@ func (r *Runner) execute(ctx context.Context) error {
 	// M7: Recover interrupted distillation BEFORE git state recovery
 	if err := RecoverDistillation(r.Cfg.ProjectRoot); err != nil {
 		return fmt.Errorf("runner: startup: %w", err)
+	}
+
+	// Story 10.6 AC1: ensure compact hook is installed once per run.
+	// Error is non-fatal: log warning and continue.
+	if hookErr := EnsureCompactHook(r.Cfg.ProjectRoot); hookErr != nil {
+		log.Warn("compact hook setup failed", "error", hookErr.Error())
 	}
 
 	recovered, err := RecoverDirtyState(ctx, r.Git)
@@ -977,9 +1000,22 @@ func (r *Runner) execute(ctx context.Context) error {
 					"execute_attempt", fmt.Sprintf("%d", executeAttempts+1),
 				)
 
+				// Story 10.6 AC3: compaction counter lifecycle per execute attempt.
+				counterPath, counterCleanup := CreateCompactCounter()
+				if counterPath != "" {
+					if opts.Env == nil {
+						opts.Env = make(map[string]string)
+					}
+					opts.Env["RALPH_COMPACT_COUNTER"] = counterPath
+				}
+
 				start := time.Now()
 				raw, execErr := session.Execute(ctx, opts)
 				elapsed := time.Since(start)
+
+				// Read compactions before cleanup.
+				execCompactions := CountCompactions(counterPath)
+				counterCleanup()
 				if r.Logger != nil {
 					r.Logger.SaveSession("execute", raw, raw.ExitCode, elapsed)
 				}
@@ -1005,8 +1041,9 @@ func (r *Runner) execute(ctx context.Context) error {
 						// Try to parse for sessionID and metrics despite error
 						if sr, parseErr := session.ParseResult(raw, elapsed); parseErr == nil {
 							sessionID = sr.SessionID
+							execFillPct := EstimateMaxContextFill(sr.Metrics, DefaultContextWindow)
 							if r.Metrics != nil {
-								resolved := r.Metrics.RecordSession(sr.Metrics, sr.Model, "execute", elapsed.Milliseconds(), 0, 0.0)
+								resolved := r.Metrics.RecordSession(sr.Metrics, sr.Model, "execute", elapsed.Milliseconds(), execCompactions, execFillPct)
 								if resolved != sr.Model {
 									log.Warn("unknown model pricing", "model", sr.Model, "fallback", resolved)
 								}
@@ -1044,8 +1081,9 @@ func (r *Runner) execute(ctx context.Context) error {
 						return fmt.Errorf("runner: parse result: %w", parseErr)
 					}
 					sessionID = sr.SessionID
+					execFillPct := EstimateMaxContextFill(sr.Metrics, DefaultContextWindow)
 					if r.Metrics != nil {
-						resolved := r.Metrics.RecordSession(sr.Metrics, sr.Model, "execute", elapsed.Milliseconds(), 0, 0.0)
+						resolved := r.Metrics.RecordSession(sr.Metrics, sr.Model, "execute", elapsed.Milliseconds(), execCompactions, execFillPct)
 						if resolved != sr.Model {
 							log.Warn("unknown model pricing", "model", sr.Model, "fallback", resolved)
 						}
@@ -1265,10 +1303,22 @@ func (r *Runner) execute(ctx context.Context) error {
 			rc.HighEffort = progParams.HighEffort
 			rc.PrevFindings = prevFindingsText
 
+			// Story 10.6 AC5: compaction counter for review session.
+			reviewCounterPath, reviewCounterCleanup := CreateCompactCounter()
+			reviewEnv := map[string]string{}
+			if reviewCounterPath != "" {
+				reviewEnv["RALPH_COMPACT_COUNTER"] = reviewCounterPath
+			}
+			rc.Env = reviewEnv
+
 			log.Info("review session started", "task", taskText, "isGate", fmt.Sprintf("%v", rc.IsGate), "hydra", fmt.Sprintf("%v", hydraDetected))
 			reviewStart := time.Now()
 			rr, err := r.ReviewFn(ctx, rc)
 			reviewElapsed := time.Since(reviewStart)
+
+			// Read compactions before cleanup.
+			reviewCompactions := CountCompactions(reviewCounterPath)
+			reviewCounterCleanup()
 			if r.Metrics != nil {
 				r.Metrics.RecordLatency(LatencyBreakdown{ReviewMs: reviewElapsed.Milliseconds()})
 			}
@@ -1279,8 +1329,9 @@ func (r *Runner) execute(ctx context.Context) error {
 				return fmt.Errorf("runner: review: %w", err)
 			}
 			// AC5: record review session cost (tokens + model from RealReview)
+			reviewFillPct := EstimateMaxContextFill(rr.SessionMetrics, DefaultContextWindow)
 			if r.Metrics != nil && rr.SessionMetrics != nil {
-				resolved := r.Metrics.RecordSession(rr.SessionMetrics, rr.Model, "review", reviewElapsed.Milliseconds(), 0, 0.0)
+				resolved := r.Metrics.RecordSession(rr.SessionMetrics, rr.Model, "review", reviewElapsed.Milliseconds(), reviewCompactions, reviewFillPct)
 				if resolved != rr.Model {
 					log.Warn("unknown model pricing", "model", rr.Model, "fallback", resolved)
 				}
