@@ -22,8 +22,8 @@ func executeReplacements() map[string]string {
 		"__LEARNINGS_CONTENT__": "",
 		"__FINDINGS_CONTENT__":  "",
 		"__SERENA_HINT__":       "",
-		"__TASK_CONTENT__":      "",
-		"__TASK_HASH__":         "",
+		"__TASK_CONTENT__":      "example task",
+		"__TASK_HASH__":         "abc123",
 	}
 }
 
@@ -1229,8 +1229,8 @@ func TestPrompt_Execute_ScopeBoundarySection(t *testing.T) {
 	if !strings.Contains(got, "Перед коммитом проверь") {
 		t.Error("scope boundary missing pre-commit check instruction")
 	}
-	// AC#1: contains rollback instruction
-	if !strings.Contains(got, "git checkout") {
+	// AC#1: contains rollback instruction (section-scoped phrase)
+	if !strings.Contains(got, "откати их через git checkout") {
 		t.Error("scope boundary missing git checkout rollback instruction")
 	}
 	// AC#5: uniqueness — SCOPE BOUNDARY appears exactly once
@@ -1253,9 +1253,15 @@ func TestPrompt_Implementation_ScopeCompliance(t *testing.T) {
 	if !strings.Contains(agentImplementationPrompt, "Severity: HIGH") {
 		t.Error("implementation agent missing HIGH severity for scope creep")
 	}
-	// AC#3: finding format
+	// AC#3: finding format — verify full template
 	if !strings.Contains(agentImplementationPrompt, "Scope creep: изменения в") {
-		t.Error("implementation agent missing scope creep finding format")
+		t.Error("implementation agent missing scope creep finding format prefix")
+	}
+	if !strings.Contains(agentImplementationPrompt, "реализуют задачу") {
+		t.Error("implementation agent missing 'реализуют задачу' in finding format")
+	}
+	if !strings.Contains(agentImplementationPrompt, "а не текущую") {
+		t.Error("implementation agent missing 'а не текущую' in finding format")
 	}
 }
 

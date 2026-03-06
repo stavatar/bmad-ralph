@@ -26,8 +26,8 @@ Do NOT report findings in these areas — they are handled by dedicated agents:
 1. Review ONLY the diff (changes for the current task). Do NOT criticize pre-existing code that was not modified in this task.
 2. Read the story's acceptance criteria carefully.
 3. For each AC, verify that the implementation satisfies it completely.
-4. Verify the diff does not touch files outside the task's scope — flag any out-of-scope file modifications.
-5. Verify ALL changes in the diff relate to the current task's acceptance criteria. If changes implement a different task from sprint-tasks.md — this is a scope creep finding:
+4. Verify the diff does not touch files outside the task's scope (file-level) — flag any out-of-scope file modifications.
+5. Verify ALL changes in the diff relate to the current task's acceptance criteria (task-level). If changes implement a different task from sprint-tasks.md — this is a scope creep finding:
    - Severity: HIGH
    - Format: "Scope creep: изменения в <файл> реализуют задачу '<другая задача>', а не текущую"
 6. For each finding, report:

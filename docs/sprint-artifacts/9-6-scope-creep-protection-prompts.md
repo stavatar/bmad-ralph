@@ -127,7 +127,7 @@ Add to Instructions section in implementation.md after point 4 (out-of-scope fil
 
 - Validator correction: story said `__TASK__` but real placeholder is `__TASK_CONTENT__` (runner.go:165)
 - Added `__TASK_CONTENT__` to execute replacements map in Runner.Execute() (line 888) and RunOnce() (line 1684) — required because execute.md now references it in SCOPE BOUNDARY
-- Updated golden files for execute and implementation agent prompts
+- Updated golden files for execute and implementation agent prompts (golden files include pre-existing format.md changes captured during regeneration)
 - Implementation agent instructions renumbered: new point 5 (scope compliance), existing 5-7 became 6-8
 
 ### File List
