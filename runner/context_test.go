@@ -43,12 +43,31 @@ func TestCreateCompactCounter_CleanupIdempotent(t *testing.T) {
 	}
 }
 
+func TestCreateCompactCounter_Error(t *testing.T) {
+	// Point TMPDIR at a file (not directory) to make os.CreateTemp fail.
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	t.Setenv("TMPDIR", blocker)
+	t.Setenv("TMP", blocker)
+	t.Setenv("TEMP", blocker)
+
+	path, cleanup := CreateCompactCounter()
+	if path != "" {
+		t.Errorf("path = %q, want empty on error", path)
+	}
+	// Cleanup should be no-op, not panic.
+	cleanup()
+}
+
 func TestCountCompactions_Cases(t *testing.T) {
 	tests := []struct {
-		name    string
-		content string // "" means use missing file; "EMPTY" means empty file
-		missing bool
-		want    int
+		name      string
+		content   string // file content; ignored when missing or emptyPath
+		missing   bool
+		emptyPath bool
+		want      int
 	}{
 		{
 			name:    "empty file",
@@ -71,10 +90,9 @@ func TestCountCompactions_Cases(t *testing.T) {
 			want:    0,
 		},
 		{
-			name:    "empty path",
-			content: "", // won't be used
-			missing: true,
-			want:    0,
+			name:      "empty path",
+			emptyPath: true,
+			want:      0,
 		},
 		{
 			name:    "corrupt with blank lines",
@@ -86,7 +104,7 @@ func TestCountCompactions_Cases(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var path string
-			if tc.name == "empty path" {
+			if tc.emptyPath {
 				path = ""
 			} else if tc.missing {
 				path = filepath.Join(t.TempDir(), "nonexistent")
