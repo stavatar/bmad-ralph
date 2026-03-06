@@ -66,6 +66,7 @@ var ErrNoCommit = errors.New("no commit detected")
 var findingSeverityRe = regexp.MustCompile(`(?m)^###\s*\[(\w+)\]\s*(.+)$`)
 
 // findingAgentRe parses the agent field from a finding block: - **Агент**: <agent_name>
+// Matches Russian field name as specified in the Findings Write output format section of review.md.
 var findingAgentRe = regexp.MustCompile(`(?m)^\s*-\s*\*\*Агент\*\*:\s*(\S+)`)
 
 // ReviewResult holds the outcome of a review step.
@@ -306,6 +307,7 @@ func DetermineReviewOutcome(tasksFile, currentTaskText, projectRoot string) (Rev
 	var findings []ReviewFinding
 	if findingsNonEmpty {
 		text := string(findingsData)
+		// Two passes for clarity: indexes for block boundaries, matches for captured groups.
 		severityIndexes := findingSeverityRe.FindAllStringSubmatchIndex(text, -1)
 		severityMatches := findingSeverityRe.FindAllStringSubmatch(text, -1)
 		for i, m := range severityMatches {

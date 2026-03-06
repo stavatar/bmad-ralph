@@ -2749,9 +2749,13 @@ func TestDetermineReviewOutcome_AgentParsing(t *testing.T) {
 	}
 
 	wantAgents := []string{"quality", "implementation", "design-principles"}
+	wantSeverities := []string{"HIGH", "MEDIUM", "LOW"}
 	for i, want := range wantAgents {
 		if rr.Findings[i].Agent != want {
 			t.Errorf("Findings[%d].Agent = %q, want %q", i, rr.Findings[i].Agent, want)
+		}
+		if rr.Findings[i].Severity != wantSeverities[i] {
+			t.Errorf("Findings[%d].Severity = %q, want %q", i, rr.Findings[i].Severity, wantSeverities[i])
 		}
 	}
 }

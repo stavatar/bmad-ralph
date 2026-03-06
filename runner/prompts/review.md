@@ -86,7 +86,7 @@ Each CONFIRMED finding MUST include exactly 5 fields:
 2. **Location** — file path and line range where the issue exists
 3. **Reasoning** — why this is a problem (impact, risk, or violation)
 4. **Recommendation** — how to fix it (actionable suggestion)
-5. **Agent** — which sub-agent reported this finding (e.g., quality, implementation)
+5. **Agent** (Агент) — which sub-agent reported this finding (e.g., quality, implementation)
 
 All 5 fields are mandatory for every CONFIRMED finding.
 

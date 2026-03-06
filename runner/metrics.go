@@ -379,6 +379,9 @@ func (mc *MetricsCollector) RecordAgentFinding(agent, severity string) {
 		stats.Medium++
 	case "LOW":
 		stats.Low++
+	default:
+		// Unknown severities (e.g., "INFO") are intentionally ignored —
+		// only CRITICAL/HIGH/MEDIUM/LOW are tracked per FR78.
 	}
 }
 
