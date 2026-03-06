@@ -2723,6 +2723,69 @@ func TestDetermineReviewOutcome_MalformedFindings(t *testing.T) {
 // BackwardCompat canary removed: identical to CleanNoFindings (M1 review finding).
 
 // =============================================================================
+// Story 9.9: Agent Stats in Review Findings (AC: #1-#10)
+// =============================================================================
+
+// TestDetermineReviewOutcome_AgentParsing verifies Agent field parsing from findings (AC#4).
+func TestDetermineReviewOutcome_AgentParsing(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksFile := writeTasksFile(t, tmpDir, "# Sprint Tasks\n\n- [ ] Task one\n")
+
+	fixtureData, err := os.ReadFile("testdata/review-findings-with-agent.md")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	findingsPath := filepath.Join(tmpDir, "review-findings.md")
+	if err := os.WriteFile(findingsPath, fixtureData, 0644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+
+	rr, err := runner.DetermineReviewOutcome(tasksFile, "- [ ] Task one", tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rr.Findings) != 3 {
+		t.Fatalf("len(Findings) = %d, want 3", len(rr.Findings))
+	}
+
+	wantAgents := []string{"quality", "implementation", "design-principles"}
+	for i, want := range wantAgents {
+		if rr.Findings[i].Agent != want {
+			t.Errorf("Findings[%d].Agent = %q, want %q", i, rr.Findings[i].Agent, want)
+		}
+	}
+}
+
+// TestDetermineReviewOutcome_AgentBackwardCompat verifies Agent="" for old format (AC#5).
+func TestDetermineReviewOutcome_AgentBackwardCompat(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksFile := writeTasksFile(t, tmpDir, "# Sprint Tasks\n\n- [ ] Task one\n")
+
+	// Use existing fixture without agent fields
+	fixtureData, err := os.ReadFile("testdata/review-findings-with-severity.md")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	findingsPath := filepath.Join(tmpDir, "review-findings.md")
+	if err := os.WriteFile(findingsPath, fixtureData, 0644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+
+	rr, err := runner.DetermineReviewOutcome(tasksFile, "- [ ] Task one", tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rr.Findings) != 5 {
+		t.Fatalf("len(Findings) = %d, want 5", len(rr.Findings))
+	}
+	for i, f := range rr.Findings {
+		if f.Agent != "" {
+			t.Errorf("Findings[%d].Agent = %q, want empty (backward compat)", i, f.Agent)
+		}
+	}
+}
+
+// =============================================================================
 // Story 5.2: Gate Detection in Runner (AC: #1-#8)
 // =============================================================================
 

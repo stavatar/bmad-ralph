@@ -80,14 +80,15 @@ Only CONFIRMED findings are written to the findings file. When writing results, 
 
 ## Finding Structure
 
-Each CONFIRMED finding MUST include exactly 4 fields:
+Each CONFIRMED finding MUST include exactly 5 fields:
 
 1. **Description** — what is wrong (clear statement of the issue)
 2. **Location** — file path and line range where the issue exists
 3. **Reasoning** — why this is a problem (impact, risk, or violation)
 4. **Recommendation** — how to fix it (actionable suggestion)
+5. **Agent** — which sub-agent reported this finding (e.g., quality, implementation)
 
-All 4 fields are mandatory for every CONFIRMED finding.
+All 5 fields are mandatory for every CONFIRMED finding.
 
 ---
 
@@ -122,6 +123,7 @@ For each CONFIRMED finding:
 - **ГДЕ в коде** — file path and line range (where in the code)
 - **ПОЧЕМУ это проблема** — reasoning and impact (why it matters)
 - **КАК исправить** — actionable recommendation (how to fix)
+- **Агент**: <agent_name> — which sub-agent reported this finding
 
 Overwrite review-findings.md completely — previous content is fully replaced, never appended. The file contains ONLY current task findings — no historical data from previous tasks.
 

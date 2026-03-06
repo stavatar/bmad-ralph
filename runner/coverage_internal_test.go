@@ -1205,3 +1205,40 @@ func TestSelectReviewModel_Scenarios(t *testing.T) {
 		})
 	}
 }
+
+// TestFindingAgentRe_Patterns verifies findingAgentRe regex matching (AC#10).
+func TestFindingAgentRe_Patterns(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		input     string
+		wantMatch bool
+		wantAgent string
+	}{
+		{"standard agent", "- **Агент**: implementation", true, "implementation"},
+		{"design-principles with hyphen", "- **Агент**: design-principles", true, "design-principles"},
+		{"quality agent", "- **Агент**: quality", true, "quality"},
+		{"test-coverage agent", "- **Агент**: test-coverage", true, "test-coverage"},
+		{"leading whitespace", "  - **Агент**: simplification", true, "simplification"},
+		{"no match plain text", "Some random text", false, ""},
+		{"severity header not agent", "### [HIGH] Finding title", false, ""},
+		{"partial match no value", "- **Агент**:", false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := findingAgentRe.FindStringSubmatch(tc.input)
+			if tc.wantMatch {
+				if m == nil {
+					t.Fatalf("expected match for %q, got nil", tc.input)
+				}
+				if m[1] != tc.wantAgent {
+					t.Errorf("captured agent = %q, want %q", m[1], tc.wantAgent)
+				}
+			} else {
+				if m != nil {
+					t.Errorf("expected no match for %q, got %v", tc.input, m)
+				}
+			}
+		})
+	}
+}

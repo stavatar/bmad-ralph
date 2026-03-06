@@ -22,6 +22,15 @@ type ReviewFinding struct {
 	Description string `json:"description"`
 	File        string `json:"file"`
 	Line        int    `json:"line"`
+	Agent       string `json:"agent,omitempty"`
+}
+
+// AgentFindingStats holds per-agent severity counts aggregated across a run.
+type AgentFindingStats struct {
+	Critical int `json:"critical"`
+	High     int `json:"high"`
+	Medium   int `json:"medium"`
+	Low      int `json:"low"`
 }
 
 // LatencyBreakdown tracks time spent in different phases.
@@ -99,8 +108,9 @@ type RunMetrics struct {
 	TotalSessions  int           `json:"total_sessions"`
 	TasksCompleted int           `json:"tasks_completed"`
 	TasksFailed    int           `json:"tasks_failed"`
-	TasksSkipped   int                `json:"tasks_skipped"`
-	SerenaSync     *SerenaSyncMetrics `json:"serena_sync,omitempty"`
+	TasksSkipped   int                          `json:"tasks_skipped"`
+	AgentStats     map[string]*AgentFindingStats `json:"agent_stats,omitempty"`
+	SerenaSync     *SerenaSyncMetrics            `json:"serena_sync,omitempty"`
 }
 
 // taskAccumulator is internal mutable state for the current task.
@@ -140,6 +150,7 @@ type MetricsCollector struct {
 	totalCost          float64
 	totalTurns    int
 	totalSessions int
+	agentStats          map[string]*AgentFindingStats
 	serenaSync          *SerenaSyncMetrics
 	serenaSyncCount     int
 	serenaSyncFailCount int
@@ -286,6 +297,7 @@ func (mc *MetricsCollector) Finish() RunMetrics {
 		TasksCompleted:      completed,
 		TasksFailed:         failed,
 		TasksSkipped:        skipped,
+		AgentStats:          mc.agentStats,
 		SerenaSync:          mc.serenaSync,
 	}
 }
@@ -339,6 +351,35 @@ func (mc *MetricsCollector) RecordReview(findings []ReviewFinding) {
 		return
 	}
 	mc.current.findings = append(mc.current.findings, findings...)
+}
+
+// RecordAgentFinding increments the severity count for the given agent.
+// Empty agent is recorded under "unknown". Nil receiver is a no-op.
+func (mc *MetricsCollector) RecordAgentFinding(agent, severity string) {
+	if mc == nil {
+		return
+	}
+	if agent == "" {
+		agent = "unknown"
+	}
+	if mc.agentStats == nil {
+		mc.agentStats = make(map[string]*AgentFindingStats)
+	}
+	stats := mc.agentStats[agent]
+	if stats == nil {
+		stats = &AgentFindingStats{}
+		mc.agentStats[agent] = stats
+	}
+	switch strings.ToUpper(severity) {
+	case "CRITICAL":
+		stats.Critical++
+	case "HIGH":
+		stats.High++
+	case "MEDIUM":
+		stats.Medium++
+	case "LOW":
+		stats.Low++
+	}
 }
 
 // RecordFindingsCycle appends the findings count for a review cycle to the
@@ -447,4 +488,13 @@ func (mc *MetricsCollector) CumulativeCost() float64 {
 		return mc.totalCost + mc.current.costUSD
 	}
 	return mc.totalCost
+}
+
+// CurrentTaskCost returns the cost accumulated for the in-progress task.
+// Returns 0 if no task is in progress.
+func (mc *MetricsCollector) CurrentTaskCost() float64 {
+	if mc.current != nil {
+		return mc.current.costUSD
+	}
+	return 0
 }

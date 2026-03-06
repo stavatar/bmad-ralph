@@ -65,6 +65,9 @@ var ErrNoCommit = errors.New("no commit detected")
 // findingSeverityRe parses review findings with severity headers: ### [SEVERITY] Description
 var findingSeverityRe = regexp.MustCompile(`(?m)^###\s*\[(\w+)\]\s*(.+)$`)
 
+// findingAgentRe parses the agent field from a finding block: - **Агент**: <agent_name>
+var findingAgentRe = regexp.MustCompile(`(?m)^\s*-\s*\*\*Агент\*\*:\s*(\S+)`)
+
 // ReviewResult holds the outcome of a review step.
 type ReviewResult struct {
 	Clean          bool                    // true when review found no actionable findings
@@ -269,8 +272,10 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 // If task not marked done but no findings: NOT clean (review session may have failed).
 //
 // When findings file has content, parses severity headers via findingSeverityRe
-// (### [SEVERITY] Description) into ReviewResult.Findings. Returns nil Findings
+// (### [SEVERITY] Description) and agent fields via findingAgentRe
+// (- **Агент**: <name>) into ReviewResult.Findings. Returns nil Findings
 // when clean or when content has no parseable severity headers.
+// Findings without an agent field get Agent="" (backward compatible).
 func DetermineReviewOutcome(tasksFile, currentTaskText, projectRoot string) (ReviewResult, error) {
 	content, err := os.ReadFile(tasksFile)
 	if err != nil {
@@ -297,14 +302,30 @@ func DetermineReviewOutcome(tasksFile, currentTaskText, projectRoot string) (Rev
 	clean := taskMarkedDone && !findingsNonEmpty
 
 	// Parse severity findings when findings file has content and review is not clean.
+	// For each finding, extract agent name from the block between ### headers.
 	var findings []ReviewFinding
 	if findingsNonEmpty {
-		matches := findingSeverityRe.FindAllStringSubmatch(string(findingsData), -1)
-		for _, m := range matches {
-			findings = append(findings, ReviewFinding{
+		text := string(findingsData)
+		severityIndexes := findingSeverityRe.FindAllStringSubmatchIndex(text, -1)
+		severityMatches := findingSeverityRe.FindAllStringSubmatch(text, -1)
+		for i, m := range severityMatches {
+			// Extract the block from this ### to the next ### (or end of text).
+			blockStart := severityIndexes[i][0]
+			blockEnd := len(text)
+			if i+1 < len(severityIndexes) {
+				blockEnd = severityIndexes[i+1][0]
+			}
+			block := text[blockStart:blockEnd]
+
+			f := ReviewFinding{
 				Severity:    m[1],
 				Description: strings.TrimSpace(m[2]),
-			})
+			}
+			// Parse agent field from within the finding block.
+			if agentMatch := findingAgentRe.FindStringSubmatch(block); agentMatch != nil {
+				f.Agent = agentMatch[1]
+			}
+			findings = append(findings, f)
 		}
 	}
 
@@ -1352,6 +1373,9 @@ func (r *Runner) execute(ctx context.Context) error {
 				)
 				if r.Metrics != nil {
 					r.Metrics.RecordReview(rr.Findings)
+					for _, f := range rr.Findings {
+						r.Metrics.RecordAgentFinding(f.Agent, f.Severity)
+					}
 				}
 			}
 

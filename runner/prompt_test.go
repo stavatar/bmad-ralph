@@ -348,7 +348,7 @@ func TestPrompt_Review(t *testing.T) {
 		{"finding field location", "**Location**", true},
 		{"finding field reasoning", "**Reasoning**", true},
 		{"finding field recommendation", "**Recommendation**", true},
-		{"finding fields mandatory", "All 4 fields are mandatory", true},
+		{"finding fields mandatory", "All 5 fields are mandatory", true},
 		// Sub-agent names via file paths (AC1 orchestration)
 		{"sub-agent quality path", "runner/prompts/agents/quality.md", true},
 		{"sub-agent implementation path", "runner/prompts/agents/implementation.md", true},
@@ -1287,6 +1287,45 @@ func TestPrompt_OtherAgents_NoScopeCreep(t *testing.T) {
 				t.Errorf("%s agent should NOT contain 'scope creep' instructions", agent.name)
 			}
 		})
+	}
+}
+
+// --- Story 9.9: Agent Stats in Review Findings ---
+
+// TestPrompt_SubAgents_AgentField verifies all 5 sub-agent prompts contain correct agent name (AC#3).
+func TestPrompt_SubAgents_AgentField(t *testing.T) {
+	t.Parallel()
+	agents := []struct {
+		name   string
+		prompt string
+		want   string
+	}{
+		{"quality", agentQualityPrompt, "- **Агент**: quality"},
+		{"implementation", agentImplementationPrompt, "- **Агент**: implementation"},
+		{"simplification", agentSimplificationPrompt, "- **Агент**: simplification"},
+		{"design-principles", agentDesignPrinciplesPrompt, "- **Агент**: design-principles"},
+		{"test-coverage", agentTestCoveragePrompt, "- **Агент**: test-coverage"},
+	}
+	for _, a := range agents {
+		t.Run(a.name, func(t *testing.T) {
+			if !strings.Contains(a.prompt, a.want) {
+				t.Errorf("%s agent missing %q", a.name, a.want)
+			}
+		})
+	}
+}
+
+// TestPrompt_Review_AgentFieldInFormat verifies review.md includes Agent field in findings format (AC#2).
+func TestPrompt_Review_AgentFieldInFormat(t *testing.T) {
+	t.Parallel()
+	if !strings.Contains(reviewTemplate, "**Агент**") {
+		t.Error("review.md missing **Агент** field in findings format")
+	}
+	if !strings.Contains(reviewTemplate, "<agent_name>") {
+		t.Error("review.md missing <agent_name> placeholder")
+	}
+	if !strings.Contains(reviewTemplate, "5 fields") {
+		t.Error("review.md should mention 5 fields (was 4)")
 	}
 }
 

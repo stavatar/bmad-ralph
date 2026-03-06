@@ -34,4 +34,5 @@ Do NOT report findings in these areas — they are handled by dedicated agents:
    - **WHY**: How the missing or weak test creates a coverage gap
    - **HOW**: The specific test that should be added or how the existing test should be improved
 7. Classify each finding by severity: HIGH (AC without any test), MED (AC with weak test), or LOW (test quality improvement).
-8. If all ACs have adequate test coverage, explicitly state: "All acceptance criteria have test coverage."
+8. Include `- **Агент**: test-coverage` in every finding you report.
+9. If all ACs have adequate test coverage, explicitly state: "All acceptance criteria have test coverage."

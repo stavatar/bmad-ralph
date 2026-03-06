@@ -31,4 +31,5 @@ Do NOT report findings in these areas — they are handled by dedicated agents:
    - **WHY**: How the simpler alternative improves readability or reduces code
    - **HOW**: The specific simpler replacement code
 3. Classify each finding by severity: HIGH (significant complexity), MED (moderate verbosity), or LOW (minor style improvement).
-4. If the code is already clean and concise, explicitly state: "No simplification findings."
+4. Include `- **Агент**: simplification` in every finding you report.
+5. If the code is already clean and concise, explicitly state: "No simplification findings."

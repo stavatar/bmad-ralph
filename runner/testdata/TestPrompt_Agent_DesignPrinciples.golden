@@ -30,4 +30,5 @@ Do NOT report findings in these areas — they are handled by dedicated agents:
    - **WHY**: How this violation impacts maintainability, testability, or comprehension
    - **HOW**: A specific refactoring suggestion (e.g., "extract shared helper", "merge into single function", "split struct into two")
 3. Classify each finding by severity: HIGH (significant architectural issue), MED (moderate duplication or complexity), or LOW (minor structural improvement).
-4. If no DRY/KISS/SRP violations are found, explicitly state: "No design principles findings."
+4. Include `- **Агент**: design-principles` in every finding you report.
+5. If no DRY/KISS/SRP violations are found, explicitly state: "No design principles findings."

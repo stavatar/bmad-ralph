@@ -274,6 +274,44 @@ func TestMetricsCollector_CumulativeCost(t *testing.T) {
 	}
 }
 
+// TestMetricsCollector_CurrentTaskCost_NoTask verifies CurrentTaskCost returns 0 with no task.
+func TestMetricsCollector_CurrentTaskCost_NoTask(t *testing.T) {
+	mc := NewMetricsCollector("run-task-cost", nil)
+	if cost := mc.CurrentTaskCost(); cost != 0.0 {
+		t.Errorf("CurrentTaskCost() = %f, want 0.0", cost)
+	}
+}
+
+// TestMetricsCollector_CurrentTaskCost_WithSessions verifies CurrentTaskCost accumulates per-task.
+func TestMetricsCollector_CurrentTaskCost_WithSessions(t *testing.T) {
+	pricing := map[string]config.Pricing{
+		"sonnet": {InputPer1M: 1.0, OutputPer1M: 0, CachePer1M: 0},
+	}
+	mc := NewMetricsCollector("run-task-cost2", pricing)
+
+	// First task: 2 sessions
+	mc.StartTask("task-1")
+	mc.RecordSession(&session.SessionMetrics{InputTokens: 1000}, "sonnet", "execute", 1000)
+	mc.RecordSession(&session.SessionMetrics{InputTokens: 2000}, "sonnet", "review", 2000)
+	// task-1 cost = (1000+2000) * 1.0 / 1_000_000 = 0.003
+	taskCost := mc.CurrentTaskCost()
+	wantCost := 0.003
+	if taskCost != wantCost {
+		t.Errorf("CurrentTaskCost() = %f, want %f", taskCost, wantCost)
+	}
+
+	// Finish task-1 and start task-2: cost resets
+	mc.FinishTask("completed", "abc")
+	mc.StartTask("task-2")
+	mc.RecordSession(&session.SessionMetrics{InputTokens: 500}, "sonnet", "execute", 500)
+	// task-2 cost = 500 * 1.0 / 1_000_000 = 0.0005
+	taskCost2 := mc.CurrentTaskCost()
+	wantCost2 := 0.0005
+	if taskCost2 != wantCost2 {
+		t.Errorf("CurrentTaskCost() after new task = %f, want %f", taskCost2, wantCost2)
+	}
+}
+
 // TestMetricsCollector_CostCalculation verifies cost is calculated from pricing table.
 func TestMetricsCollector_CostCalculation(t *testing.T) {
 	pricing := map[string]config.Pricing{
@@ -1289,4 +1327,217 @@ func TestMetricsCollector_RecordCycleDuration_NoTask(t *testing.T) {
 	mc := NewMetricsCollector("run-no-task", nil)
 	// Should not panic when no task started
 	mc.RecordCycleDuration(1000)
+}
+
+// TestReviewFinding_JSON_AgentOmitempty verifies Agent field JSON serialization (AC#1).
+func TestReviewFinding_JSON_AgentOmitempty(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		finding   ReviewFinding
+		wantAgent bool
+		wantValue string
+	}{
+		{
+			name:      "agent present in JSON",
+			finding:   ReviewFinding{Severity: "HIGH", Description: "test", Agent: "quality"},
+			wantAgent: true,
+			wantValue: "quality",
+		},
+		{
+			name:      "agent omitted when empty",
+			finding:   ReviewFinding{Severity: "LOW", Description: "test"},
+			wantAgent: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := json.Marshal(tc.finding)
+			if err != nil {
+				t.Fatalf("json.Marshal: %v", err)
+			}
+			s := string(data)
+			if tc.wantAgent {
+				if !strings.Contains(s, `"agent"`) {
+					t.Errorf("JSON missing agent field: %s", s)
+				}
+				if !strings.Contains(s, tc.wantValue) {
+					t.Errorf("JSON missing agent value %q: %s", tc.wantValue, s)
+				}
+			} else {
+				if strings.Contains(s, `"agent"`) {
+					t.Errorf("JSON should omit empty agent: %s", s)
+				}
+			}
+		})
+	}
+}
+
+// TestAgentFindingStats_JSON verifies JSON tags on AgentFindingStats (AC#6).
+func TestAgentFindingStats_JSON(t *testing.T) {
+	t.Parallel()
+	stats := AgentFindingStats{Critical: 1, High: 2, Medium: 3, Low: 4}
+	data, err := json.Marshal(stats)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	s := string(data)
+	for _, key := range []string{`"critical":1`, `"high":2`, `"medium":3`, `"low":4`} {
+		if !strings.Contains(s, key) {
+			t.Errorf("JSON missing %s: %s", key, s)
+		}
+	}
+}
+
+// TestMetricsCollector_RecordAgentFinding_Accumulation verifies per-agent severity counting (AC#8).
+func TestMetricsCollector_RecordAgentFinding_Accumulation(t *testing.T) {
+	t.Parallel()
+	mc := NewMetricsCollector("run-agent", nil)
+
+	mc.RecordAgentFinding("implementation", "HIGH")
+	mc.RecordAgentFinding("implementation", "HIGH")
+	mc.RecordAgentFinding("implementation", "HIGH")
+	mc.RecordAgentFinding("quality", "MEDIUM")
+	mc.RecordAgentFinding("quality", "MEDIUM")
+	mc.RecordAgentFinding("quality", "LOW")
+	mc.RecordAgentFinding("test-coverage", "CRITICAL")
+
+	// Verify implementation stats
+	impl := mc.agentStats["implementation"]
+	if impl == nil {
+		t.Fatal("agentStats[\"implementation\"] is nil")
+	}
+	if impl.High != 3 {
+		t.Errorf("implementation.High = %d, want 3", impl.High)
+	}
+	if impl.Critical != 0 || impl.Medium != 0 || impl.Low != 0 {
+		t.Errorf("implementation unexpected: C=%d M=%d L=%d", impl.Critical, impl.Medium, impl.Low)
+	}
+
+	// Verify quality stats
+	qual := mc.agentStats["quality"]
+	if qual == nil {
+		t.Fatal("agentStats[\"quality\"] is nil")
+	}
+	if qual.Medium != 2 {
+		t.Errorf("quality.Medium = %d, want 2", qual.Medium)
+	}
+	if qual.Low != 1 {
+		t.Errorf("quality.Low = %d, want 1", qual.Low)
+	}
+
+	// Verify test-coverage stats
+	tc := mc.agentStats["test-coverage"]
+	if tc == nil {
+		t.Fatal("agentStats[\"test-coverage\"] is nil")
+	}
+	if tc.Critical != 1 {
+		t.Errorf("test-coverage.Critical = %d, want 1", tc.Critical)
+	}
+}
+
+// TestMetricsCollector_RecordAgentFinding_EmptyAgent verifies empty agent -> "unknown" (AC#9).
+func TestMetricsCollector_RecordAgentFinding_EmptyAgent(t *testing.T) {
+	t.Parallel()
+	mc := NewMetricsCollector("run-unknown", nil)
+
+	mc.RecordAgentFinding("", "HIGH")
+	mc.RecordAgentFinding("", "MEDIUM")
+
+	unk := mc.agentStats["unknown"]
+	if unk == nil {
+		t.Fatal("agentStats[\"unknown\"] is nil")
+	}
+	if unk.High != 1 {
+		t.Errorf("unknown.High = %d, want 1", unk.High)
+	}
+	if unk.Medium != 1 {
+		t.Errorf("unknown.Medium = %d, want 1", unk.Medium)
+	}
+}
+
+// TestMetricsCollector_RecordAgentFinding_NilReceiver verifies nil receiver no-op.
+func TestMetricsCollector_RecordAgentFinding_NilReceiver(t *testing.T) {
+	t.Parallel()
+	var mc *MetricsCollector
+	// Should not panic
+	mc.RecordAgentFinding("quality", "HIGH")
+}
+
+// TestMetricsCollector_RecordAgentFinding_CaseInsensitive verifies severity case handling.
+func TestMetricsCollector_RecordAgentFinding_CaseInsensitive(t *testing.T) {
+	t.Parallel()
+	mc := NewMetricsCollector("run-case", nil)
+	mc.RecordAgentFinding("agent", "high")
+	mc.RecordAgentFinding("agent", "Medium")
+	mc.RecordAgentFinding("agent", "low")
+	mc.RecordAgentFinding("agent", "CRITICAL")
+
+	s := mc.agentStats["agent"]
+	if s == nil {
+		t.Fatal("agentStats[\"agent\"] is nil")
+	}
+	if s.Critical != 1 {
+		t.Errorf("Critical = %d, want 1", s.Critical)
+	}
+	if s.High != 1 {
+		t.Errorf("High = %d, want 1", s.High)
+	}
+	if s.Medium != 1 {
+		t.Errorf("Medium = %d, want 1", s.Medium)
+	}
+	if s.Low != 1 {
+		t.Errorf("Low = %d, want 1", s.Low)
+	}
+}
+
+// TestMetricsCollector_Finish_AgentStats verifies AgentStats in Finish() output (AC#7).
+func TestMetricsCollector_Finish_AgentStats(t *testing.T) {
+	t.Parallel()
+	mc := NewMetricsCollector("run-finish-agents", nil)
+
+	mc.RecordAgentFinding("quality", "HIGH")
+	mc.RecordAgentFinding("quality", "MEDIUM")
+	mc.RecordAgentFinding("implementation", "LOW")
+
+	mc.StartTask("task-1")
+	mc.FinishTask("completed", "abc")
+
+	rm := mc.Finish()
+
+	if rm.AgentStats == nil {
+		t.Fatal("AgentStats is nil")
+	}
+	if len(rm.AgentStats) != 2 {
+		t.Fatalf("len(AgentStats) = %d, want 2", len(rm.AgentStats))
+	}
+	qual := rm.AgentStats["quality"]
+	if qual == nil {
+		t.Fatal("AgentStats[\"quality\"] is nil")
+	}
+	if qual.High != 1 {
+		t.Errorf("quality.High = %d, want 1", qual.High)
+	}
+	if qual.Medium != 1 {
+		t.Errorf("quality.Medium = %d, want 1", qual.Medium)
+	}
+	impl := rm.AgentStats["implementation"]
+	if impl == nil {
+		t.Fatal("AgentStats[\"implementation\"] is nil")
+	}
+	if impl.Low != 1 {
+		t.Errorf("implementation.Low = %d, want 1", impl.Low)
+	}
+}
+
+// TestMetricsCollector_Finish_AgentStats_Nil verifies nil AgentStats when no findings (omitempty).
+func TestMetricsCollector_Finish_AgentStats_Nil(t *testing.T) {
+	t.Parallel()
+	mc := NewMetricsCollector("run-no-agents", nil)
+	mc.StartTask("task-1")
+	mc.FinishTask("completed", "abc")
+	rm := mc.Finish()
+	if rm.AgentStats != nil {
+		t.Errorf("AgentStats = %v, want nil", rm.AgentStats)
+	}
 }

@@ -36,4 +36,5 @@ Do NOT report findings in these areas — they are handled by dedicated agents:
    - **WHY**: How the current implementation fails to meet the AC
    - **HOW**: What specific changes would satisfy the AC
 7. Classify each finding by severity: HIGH (AC not met), MED (AC partially met), or LOW (AC met but edge case missing).
-8. If all ACs are satisfied, explicitly state: "All acceptance criteria satisfied."
+8. Include `- **Агент**: implementation` in every finding you report.
+9. If all ACs are satisfied, explicitly state: "All acceptance criteria satisfied."
