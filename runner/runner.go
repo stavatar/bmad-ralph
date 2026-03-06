@@ -91,12 +91,12 @@ type GatePromptFunc func(ctx context.Context, taskText string) (*config.GateDeci
 type ResumeExtractFunc func(ctx context.Context, rc RunConfig, sessionID string) error
 
 // selectReviewModel returns the light model if the diff is small enough,
-// otherwise the standard review model. If isGate or hydraDetected is true,
-// always returns the standard model to avoid Haiku scope expansion.
+// otherwise the standard review model. If isGate, hydraDetected, or highEffort
+// is true, always returns the standard model to ensure thorough review.
 // If diffStats is nil (e.g., first review cycle or diff stats failed),
 // falls back to the standard model.
-func selectReviewModel(cfg *config.Config, ds *DiffStats, isGate bool, hydraDetected bool) string {
-	if isGate || hydraDetected || ds == nil || cfg.ModelReviewLight == "" {
+func selectReviewModel(cfg *config.Config, ds *DiffStats, isGate bool, hydraDetected bool, highEffort bool) string {
+	if isGate || hydraDetected || highEffort || ds == nil || cfg.ModelReviewLight == "" {
 		return cfg.ModelReview
 	}
 	totalLines := ds.Insertions + ds.Deletions
@@ -165,13 +165,24 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 		"__TASK_CONTENT__": currentTaskText,
 		"__SERENA_HINT__":  rc.SerenaHint,
 	}
+	// Story 9.3: add previous findings for incremental review context.
+	if rc.IncrementalDiff {
+		reviewReplacements["__PREV_FINDINGS__"] = rc.PrevFindings
+	}
 	for k, v := range reviewKnowledge {
 		reviewReplacements[k] = v
 	}
 
+	// Story 9.3: build template data with progressive review fields.
+	td := buildTemplateData(rc.Cfg, rc.SerenaHint, false, false)
+	td.IncrementalDiff = rc.IncrementalDiff
+	td.Cycle = rc.Cycle
+	td.MinSeverityLabel = rc.MinSeverity.String()
+	td.MaxFindings = rc.MaxFindings
+
 	prompt, err := config.AssemblePrompt(
 		reviewTemplate,
-		buildTemplateData(rc.Cfg, rc.SerenaHint, false, false),
+		td,
 		reviewReplacements,
 	)
 	if err != nil {
@@ -179,8 +190,8 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 	}
 
 	// DESIGN-4: select review model based on diff size (without mutating Config)
-	// GATE tasks and hydra escalation always use standard model.
-	reviewModel := selectReviewModel(rc.Cfg, rc.LastDiffStats, rc.IsGate, rc.HydraDetected)
+	// GATE tasks, hydra escalation, and high-effort cycles always use standard model.
+	reviewModel := selectReviewModel(rc.Cfg, rc.LastDiffStats, rc.IsGate, rc.HydraDetected, rc.HighEffort)
 
 	opts := session.Options{
 		Command:                    rc.Cfg.ClaudeCommand,
@@ -615,6 +626,13 @@ type RunConfig struct {
 	LastDiffStats  *DiffStats // diff stats from last execute cycle (DESIGN-4: review model routing)
 	IsGate         bool       // true when current task has [GATE] tag (DESIGN-4: forces standard review model)
 	HydraDetected  bool       // true when hydra pattern detected (DESIGN-4: escalates to standard review model)
+	// Story 9.3: progressive review fields (FR72-FR76)
+	Cycle           int           // current review cycle (1-based)
+	MinSeverity     SeverityLevel // minimum severity threshold for this cycle
+	MaxFindings     int           // findings budget for this cycle
+	IncrementalDiff bool          // true when review should use incremental diff (cycle 3+)
+	HighEffort      bool          // true when extended thinking should be used (cycle 3+)
+	PrevFindings    string        // previous cycle findings text for incremental review context
 }
 
 // Runner orchestrates the execute-review loop with injectable dependencies.
@@ -842,12 +860,16 @@ func (r *Runner) execute(ctx context.Context) error {
 
 		// Review cycle loop: per-task counter, resets when clean (AC3, AC4)
 		reviewCycles := 0
+		prevFindingsText := "" // Story 9.3: previous cycle findings for incremental review context
 		wasSkipped := false          // Story 5.5: emergency skip exits without completedTasks++ or gate check
 		reviewExhausted := false     // BUG-2: review exhaust continues to next task instead of aborting
 		lastKnownSHA := ""           // Track last HEAD SHA for FinishTask on error paths (MINOR-2)
 		var lastDiffStats *DiffStats // DESIGN-4: last execute diff stats for review model selection
 		for {
 			cycleStart := time.Now() // MINOR-7: track full cycle duration
+
+			// Story 9.3: compute progressive params for this cycle (FR72-FR76).
+			progParams := ProgressiveParams(reviewCycles+1, r.Cfg.MaxReviewIterations)
 
 			// Read findings file: absent = empty (normal first-execute case)
 			findingsContent := ""
@@ -878,6 +900,12 @@ func (r *Runner) execute(ctx context.Context) error {
 				return fmt.Errorf("runner: assemble prompt: %w", err)
 			}
 
+			// Story 9.3: effort escalation via CLAUDE_CODE_EFFORT_LEVEL env (FR76).
+			var execEnv map[string]string
+			if progParams.HighEffort {
+				execEnv = map[string]string{"CLAUDE_CODE_EFFORT_LEVEL": "high"}
+			}
+
 			opts := session.Options{
 				Command:                    r.Cfg.ClaudeCommand,
 				Dir:                        r.Cfg.ProjectRoot,
@@ -887,6 +915,7 @@ func (r *Runner) execute(ctx context.Context) error {
 				OutputJSON:                 true,
 				DangerouslySkipPermissions: true,
 				AppendSystemPrompt:         appendSysPrompt,
+				Env:                        execEnv,
 			}
 			// Per-review-cycle retry loop: executeAttempts resets each cycle
 			executeAttempts := 0
@@ -1190,6 +1219,13 @@ func (r *Runner) execute(ctx context.Context) error {
 			rc.LastDiffStats = lastDiffStats
 			rc.IsGate = result.OpenTasks[0].HasGate
 			rc.HydraDetected = hydraDetected
+			// Story 9.3: progressive review fields (FR72-FR76)
+			rc.Cycle = reviewCycles + 1
+			rc.MinSeverity = progParams.MinSeverity
+			rc.MaxFindings = progParams.MaxFindings
+			rc.IncrementalDiff = progParams.IncrementalDiff
+			rc.HighEffort = progParams.HighEffort
+			rc.PrevFindings = prevFindingsText
 
 			log.Info("review session started", "task", taskText, "isGate", fmt.Sprintf("%v", rc.IsGate), "hydra", fmt.Sprintf("%v", hydraDetected))
 			reviewStart := time.Now()
@@ -1327,6 +1363,15 @@ func (r *Runner) execute(ctx context.Context) error {
 			// MINOR-7: record full cycle duration
 			if r.Metrics != nil {
 				r.Metrics.RecordCycleDuration(time.Since(cycleStart).Milliseconds())
+			}
+
+			// Story 9.3: capture current findings text for next cycle's incremental review context.
+			if len(rr.Findings) > 0 {
+				var fb strings.Builder
+				for _, f := range rr.Findings {
+					fmt.Fprintf(&fb, "### [%s] %s\n", f.Severity, f.Description)
+				}
+				prevFindingsText = fb.String()
 			}
 
 			reviewCycles++

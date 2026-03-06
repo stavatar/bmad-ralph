@@ -4,6 +4,21 @@ Review the code changes for the following task.
 
 Task:
 __TASK_CONTENT__
+{{- if .IncrementalDiff}}
+
+---
+
+## Incremental Review (Cycle {{.Cycle}})
+
+Это инкрементальный review. Проверяй ТОЛЬКО изменения последнего коммита (`git diff HEAD~1..HEAD`).
+
+Предыдущие замечания:
+__PREV_FINDINGS__
+
+Инструкция: проверь корректность исправлений и отсутствие новых проблем уровня {{.MinSeverityLabel}}+.
+
+Найди НЕ БОЛЕЕ {{.MaxFindings}} самых важных замечаний. Приоритизируй по severity.
+{{- end}}
 
 ---
 

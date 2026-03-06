@@ -1077,3 +1077,116 @@ func TestAssembleSyncPrompt_Instructions(t *testing.T) {
 		t.Error("output should mention delete_memory in constraints")
 	}
 }
+
+// --- Story 9.3: Progressive review prompt tests ---
+
+// TestPrompt_Review_IncrementalMode verifies incremental diff section appears when IncrementalDiff=true (AC#2).
+func TestPrompt_Review_IncrementalMode(t *testing.T) {
+	prevFindings := "### [HIGH] Missing error handling\n"
+	data := config.TemplateData{
+		IncrementalDiff:  true,
+		Cycle:            3,
+		MinSeverityLabel: "MEDIUM",
+		MaxFindings:      3,
+	}
+	replacements := reviewReplacements()
+	replacements["__TASK_CONTENT__"] = "Fix authentication bug"
+	replacements["__PREV_FINDINGS__"] = prevFindings
+
+	got, err := config.AssemblePrompt(reviewTemplate, data, replacements)
+	if err != nil {
+		t.Fatalf("AssemblePrompt error: %v", err)
+	}
+
+	checks := []struct {
+		name    string
+		substr  string
+		present bool
+	}{
+		// AC#2: incremental diff instruction
+		{"incremental diff instruction", "git diff HEAD~1..HEAD", true},
+		{"incremental review header", "Incremental Review (Cycle 3)", true},
+		{"previous findings injected", "Missing error handling", true},
+		{"severity threshold instruction", "уровня MEDIUM+", true},
+		// AC#7: findings budget instruction
+		{"budget instruction", "НЕ БОЛЕЕ 3", true},
+		{"prioritize instruction", "Приоритизируй по severity", true},
+		// Placeholders replaced
+		{"no prev findings placeholder", "__PREV_FINDINGS__", false},
+	}
+	for _, c := range checks {
+		t.Run(c.name, func(t *testing.T) {
+			found := strings.Contains(got, c.substr)
+			if c.present && !found {
+				t.Errorf("expected prompt to contain %q, but it does not", c.substr)
+			}
+			if !c.present && found {
+				t.Errorf("expected prompt NOT to contain %q, but it does", c.substr)
+			}
+		})
+	}
+}
+
+// TestPrompt_Review_FullDiffMode verifies incremental section absent when IncrementalDiff=false (AC#3).
+func TestPrompt_Review_FullDiffMode(t *testing.T) {
+	data := config.TemplateData{
+		IncrementalDiff: false,
+	}
+	replacements := reviewReplacements()
+	replacements["__TASK_CONTENT__"] = "Implement feature X"
+
+	got, err := config.AssemblePrompt(reviewTemplate, data, replacements)
+	if err != nil {
+		t.Fatalf("AssemblePrompt error: %v", err)
+	}
+
+	checks := []struct {
+		name   string
+		substr string
+	}{
+		{"no incremental header", "Incremental Review"},
+		{"no git diff instruction", "git diff HEAD~1..HEAD"},
+		{"no prev findings placeholder", "__PREV_FINDINGS__"},
+		{"no budget instruction", "НЕ БОЛЕЕ"},
+	}
+	for _, c := range checks {
+		t.Run(c.name, func(t *testing.T) {
+			if strings.Contains(got, c.substr) {
+				t.Errorf("full diff mode should NOT contain %q", c.substr)
+			}
+		})
+	}
+}
+
+// TestPrompt_Review_BudgetInstruction verifies different budget values render correctly (AC#7).
+func TestPrompt_Review_BudgetInstruction(t *testing.T) {
+	cases := []struct {
+		name        string
+		maxFindings int
+		wantBudget  string
+	}{
+		{"budget 1", 1, "НЕ БОЛЕЕ 1"},
+		{"budget 5", 5, "НЕ БОЛЕЕ 5"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := config.TemplateData{
+				IncrementalDiff:  true,
+				Cycle:            4,
+				MinSeverityLabel: "HIGH",
+				MaxFindings:      tc.maxFindings,
+			}
+			replacements := reviewReplacements()
+			replacements["__TASK_CONTENT__"] = "Fix bug"
+			replacements["__PREV_FINDINGS__"] = "prev"
+
+			got, err := config.AssemblePrompt(reviewTemplate, data, replacements)
+			if err != nil {
+				t.Fatalf("AssemblePrompt error: %v", err)
+			}
+			if !strings.Contains(got, tc.wantBudget) {
+				t.Errorf("expected prompt to contain %q", tc.wantBudget)
+			}
+		})
+	}
+}

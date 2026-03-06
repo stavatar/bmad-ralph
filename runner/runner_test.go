@@ -7319,3 +7319,117 @@ func TestRunner_Execute_FindingsFiltered(t *testing.T) {
 		t.Errorf("review-findings.md: want 1 finding header, got %d in: %q", count, content)
 	}
 }
+
+// TestRunner_Execute_ProgressiveReviewParams verifies Execute() populates RunConfig progressive fields
+// per cycle according to ProgressiveParams (AC#1, AC#4, AC#5, AC#8).
+func TestRunner_Execute_ProgressiveReviewParams(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Need enough mock execute sessions for 5 review cycles (each cycle = 1 execute + 1 review).
+	scenario := testutil.Scenario{
+		Name: "progressive-params",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-001"},
+			{Type: "execute", ExitCode: 0, SessionID: "exec-002"},
+			{Type: "execute", ExitCode: 0, SessionID: "exec-003"},
+			{Type: "execute", ExitCode: 0, SessionID: "exec-004"},
+			{Type: "execute", ExitCode: 0, SessionID: "exec-005"},
+		},
+	}
+	// 5 pairs for 5 execute cycles (before/after per execute).
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs(
+			[2]string{"aaa", "bbb"},
+			[2]string{"bbb", "ccc"},
+			[2]string{"ccc", "ddd"},
+			[2]string{"ddd", "eee"},
+			[2]string{"eee", "fff"},
+		),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, mock)
+	r.Cfg.MaxReviewIterations = 5
+	r.Cfg.MaxIterations = 5
+
+	// Capture RunConfig per review call.
+	type capturedRC struct {
+		Cycle           int
+		MinSeverity     runner.SeverityLevel
+		MaxFindings     int
+		IncrementalDiff bool
+		HighEffort      bool
+		PrevFindings    string
+	}
+	var captured []capturedRC
+
+	r.ReviewFn = func(_ context.Context, rc runner.RunConfig) (runner.ReviewResult, error) {
+		captured = append(captured, capturedRC{
+			Cycle:           rc.Cycle,
+			MinSeverity:     rc.MinSeverity,
+			MaxFindings:     rc.MaxFindings,
+			IncrementalDiff: rc.IncrementalDiff,
+			HighEffort:      rc.HighEffort,
+			PrevFindings:    rc.PrevFindings,
+		})
+		// Return findings to continue looping (not clean).
+		return runner.ReviewResult{
+			Clean: false,
+			Findings: []runner.ReviewFinding{
+				{Severity: "HIGH", Description: "issue cycle " + fmt.Sprintf("%d", len(captured))},
+			},
+		}, nil
+	}
+
+	// Execute returns error (review cycles exhausted) — expected.
+	_, _ = r.Execute(context.Background())
+
+	// Verify we got 5 review calls.
+	if len(captured) != 5 {
+		t.Fatalf("expected 5 review calls, got %d", len(captured))
+	}
+
+	// AC#8: verify progressive params per cycle using ProgressiveParams(cycle, 5).
+	for i, cap := range captured {
+		cycle := i + 1
+		want := runner.ProgressiveParams(cycle, 5)
+		t.Run(fmt.Sprintf("cycle_%d", cycle), func(t *testing.T) {
+			if cap.Cycle != cycle {
+				t.Errorf("Cycle: got %d, want %d", cap.Cycle, cycle)
+			}
+			if cap.MinSeverity != want.MinSeverity {
+				t.Errorf("MinSeverity: got %v, want %v", cap.MinSeverity, want.MinSeverity)
+			}
+			if cap.MaxFindings != want.MaxFindings {
+				t.Errorf("MaxFindings: got %d, want %d", cap.MaxFindings, want.MaxFindings)
+			}
+			if cap.IncrementalDiff != want.IncrementalDiff {
+				t.Errorf("IncrementalDiff: got %v, want %v", cap.IncrementalDiff, want.IncrementalDiff)
+			}
+			if cap.HighEffort != want.HighEffort {
+				t.Errorf("HighEffort: got %v, want %v", cap.HighEffort, want.HighEffort)
+			}
+		})
+	}
+
+	// AC#5: cycles 1-2 have no effort escalation.
+	if captured[0].HighEffort {
+		t.Error("cycle 1 should NOT have HighEffort")
+	}
+	if captured[1].HighEffort {
+		t.Error("cycle 2 should NOT have HighEffort")
+	}
+	// AC#4: cycle 3+ have effort escalation.
+	if !captured[2].HighEffort {
+		t.Error("cycle 3 should have HighEffort")
+	}
+
+	// AC#2: cycle 3+ have previous findings from prior cycle.
+	if captured[2].PrevFindings == "" {
+		t.Error("cycle 3 should have PrevFindings from cycle 2")
+	}
+	if !strings.Contains(captured[2].PrevFindings, "issue cycle 2") {
+		t.Errorf("cycle 3 PrevFindings should reference cycle 2 findings, got: %q", captured[2].PrevFindings)
+	}
+	// AC#3: cycle 1 has empty PrevFindings.
+	if captured[0].PrevFindings != "" {
+		t.Errorf("cycle 1 should have empty PrevFindings, got: %q", captured[0].PrevFindings)
+	}
+}

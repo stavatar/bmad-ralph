@@ -1054,10 +1054,13 @@ func TestSelectReviewModel_Scenarios(t *testing.T) {
 	}
 
 	cases := []struct {
-		name      string
-		cfg       *config.Config
-		ds        *DiffStats
-		wantModel string
+		name          string
+		cfg           *config.Config
+		ds            *DiffStats
+		isGate        bool
+		hydraDetected bool
+		highEffort    bool
+		wantModel     string
 	}{
 		{
 			name:      "nil diff stats falls back to standard",
@@ -1100,11 +1103,100 @@ func TestSelectReviewModel_Scenarios(t *testing.T) {
 			ds:        &DiffStats{FilesChanged: 1, Insertions: 5, Deletions: 2},
 			wantModel: "claude-sonnet-4-6",
 		},
+		{
+			name:      "gate task with small diff forces standard model",
+			cfg:       baseCfg(),
+			ds:        &DiffStats{FilesChanged: 1, Insertions: 5, Deletions: 2},
+			isGate:    true,
+			wantModel: "claude-sonnet-4-6",
+		},
+		{
+			name:      "gate task with large diff uses standard model",
+			cfg:       baseCfg(),
+			ds:        &DiffStats{FilesChanged: 10, Insertions: 200, Deletions: 100},
+			isGate:    true,
+			wantModel: "claude-sonnet-4-6",
+		},
+		{
+			name:      "gate task with nil diff stats uses standard model",
+			cfg:       baseCfg(),
+			ds:        nil,
+			isGate:    true,
+			wantModel: "claude-sonnet-4-6",
+		},
+		{
+			name:      "non-gate task with small diff uses light model",
+			cfg:       baseCfg(),
+			ds:        &DiffStats{FilesChanged: 2, Insertions: 10, Deletions: 5},
+			isGate:    false,
+			wantModel: "claude-haiku-4-5-20251001",
+		},
+		// DESIGN-4: hydra escalation cases
+		{
+			name:          "hydra with small diff forces standard model",
+			cfg:           baseCfg(),
+			ds:            &DiffStats{FilesChanged: 1, Insertions: 5, Deletions: 2},
+			hydraDetected: true,
+			wantModel:     "claude-sonnet-4-6",
+		},
+		{
+			name:          "hydra with large diff uses standard model",
+			cfg:           baseCfg(),
+			ds:            &DiffStats{FilesChanged: 10, Insertions: 200, Deletions: 100},
+			hydraDetected: true,
+			wantModel:     "claude-sonnet-4-6",
+		},
+		{
+			name:          "hydra with nil diff stats uses standard model",
+			cfg:           baseCfg(),
+			ds:            nil,
+			hydraDetected: true,
+			wantModel:     "claude-sonnet-4-6",
+		},
+		{
+			name:          "hydra and gate both true uses standard model",
+			cfg:           baseCfg(),
+			ds:            &DiffStats{FilesChanged: 1, Insertions: 5, Deletions: 2},
+			isGate:        true,
+			hydraDetected: true,
+			wantModel:     "claude-sonnet-4-6",
+		},
+		{
+			name:          "no hydra no gate small diff uses light model",
+			cfg:           baseCfg(),
+			ds:            &DiffStats{FilesChanged: 2, Insertions: 10, Deletions: 5},
+			hydraDetected: false,
+			wantModel:     "claude-haiku-4-5-20251001",
+		},
+		// Story 9.3: highEffort escalation cases
+		{
+			name:       "highEffort with small diff forces standard model",
+			cfg:        baseCfg(),
+			ds:         &DiffStats{FilesChanged: 1, Insertions: 5, Deletions: 2},
+			highEffort: true,
+			wantModel:  "claude-sonnet-4-6",
+		},
+		{
+			name:       "highEffort false with small diff uses light model",
+			cfg:        baseCfg(),
+			ds:         &DiffStats{FilesChanged: 2, Insertions: 10, Deletions: 5},
+			highEffort: false,
+			wantModel:  "claude-haiku-4-5-20251001",
+		},
+		{
+			name:          "highEffort and hydra and gate all true uses standard",
+			cfg:           baseCfg(),
+			ds:            &DiffStats{FilesChanged: 1, Insertions: 5, Deletions: 2},
+			isGate:        true,
+			hydraDetected: true,
+			highEffort:    true,
+			wantModel:     "claude-sonnet-4-6",
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := selectReviewModel(tc.cfg, tc.ds)
+			got := selectReviewModel(tc.cfg, tc.ds, tc.isGate, tc.hydraDetected, tc.highEffort)
 			if got != tc.wantModel {
 				t.Errorf("selectReviewModel() = %q, want %q", got, tc.wantModel)
 			}

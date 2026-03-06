@@ -35,6 +35,12 @@ type TemplateData struct {
 	HasLearnings      bool // true when validated LEARNINGS.md content is non-empty
 	HasCompletedTasks bool // true when completed tasks text is non-empty
 
+	// Story 9.3: progressive review conditionals (FR72-FR76)
+	IncrementalDiff  bool // true for incremental review mode (cycle 3+)
+	Cycle            int  // current review cycle number (1-based)
+	MinSeverityLabel string // severity label for review instructions (e.g., "HIGH")
+	MaxFindings      int    // findings budget for review instructions
+
 	// Stage 2: string fields for caller convenience / type grouping.
 	// Injected via replacements map, NOT via {{.FieldName}} in templates.
 	TaskContent          string
