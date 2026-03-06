@@ -10,10 +10,10 @@ import (
 // SessionResult contains parsed output from a Claude CLI session.
 // Created by ParseResult from a RawResult after Execute completes.
 type SessionResult struct {
-	SessionID string        // From JSON "session_id" field
-	ExitCode  int           // From process exit code (RawResult.ExitCode)
-	Output    string        // From JSON "result" field (or raw stdout for non-JSON)
-	Duration  time.Duration // Measured wall-clock time by caller
+	SessionID string          // From JSON "session_id" field
+	ExitCode  int             // From process exit code (RawResult.ExitCode)
+	Output    string          // From JSON "result" field (or raw stdout for non-JSON)
+	Duration  time.Duration   // Measured wall-clock time by caller
 	Metrics   *SessionMetrics // Token usage metrics; nil when usage data absent
 	Model     string          // Model name from JSON; empty when absent
 	Truncated bool            // True when is_error=true with exit_code=0 (e.g. error_max_turns)
@@ -26,13 +26,13 @@ type SessionResult struct {
 // SessionMetrics holds token usage and turn count extracted from Claude Code JSON output.
 // CostUSD is populated from Claude CLI's total_cost_usd when available; zero otherwise.
 type SessionMetrics struct {
-	InputTokens          int     `json:"input_tokens"`
-	OutputTokens         int     `json:"output_tokens"`
-	CacheReadTokens      int     `json:"cache_read_input_tokens"`
-	CacheCreationTokens  int     `json:"cache_creation_input_tokens"`
-	CostUSD              float64 `json:"cost_usd"`
-	NumTurns             int     `json:"num_turns"`
-	ContextWindow        int     `json:"context_window"`
+	InputTokens         int     `json:"input_tokens"`
+	OutputTokens        int     `json:"output_tokens"`
+	CacheReadTokens     int     `json:"cache_read_input_tokens"`
+	CacheCreationTokens int     `json:"cache_creation_input_tokens"`
+	CostUSD             float64 `json:"cost_usd"`
+	NumTurns            int     `json:"num_turns"`
+	ContextWindow       int     `json:"context_window"`
 }
 
 // usageData maps the "usage" object in Claude Code JSON output.
@@ -56,14 +56,14 @@ type modelUsageEntry struct {
 }
 
 type jsonResultMessage struct {
-	Type         string     `json:"type"`
-	Subtype      string     `json:"subtype"`
-	SessionID    string     `json:"session_id"`
-	Result       string     `json:"result"`
-	IsError      bool       `json:"is_error"`
-	Usage        *usageData `json:"usage"`
-	Model        string     `json:"model"`
-	NumTurns     int        `json:"num_turns"`
+	Type         string                     `json:"type"`
+	Subtype      string                     `json:"subtype"`
+	SessionID    string                     `json:"session_id"`
+	Result       string                     `json:"result"`
+	IsError      bool                       `json:"is_error"`
+	Usage        *usageData                 `json:"usage"`
+	Model        string                     `json:"model"`
+	NumTurns     int                        `json:"num_turns"`
 	TotalCostUSD float64                    `json:"total_cost_usd"`
 	ModelUsage   map[string]modelUsageEntry `json:"modelUsage"`
 }
@@ -142,7 +142,7 @@ func ParseResult(raw *RawResult, elapsed time.Duration) (*SessionResult, error) 
 }
 
 // resultFromMessage builds a SessionResult from a parsed jsonResultMessage.
-// Populates Metrics only when usage data is present (graceful degradation).
+// Populates Metrics when usage data or modelUsage is present (graceful degradation).
 // Sets Truncated=true when is_error=true and exit_code=0 (e.g. error_max_turns).
 func resultFromMessage(msg *jsonResultMessage, exitCode int, elapsed time.Duration) *SessionResult {
 	r := &SessionResult{
