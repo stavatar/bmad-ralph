@@ -2,6 +2,8 @@ package runner
 
 import (
 	"fmt"
+	"os"
+	"sort"
 	"strings"
 )
 
@@ -121,4 +123,41 @@ func ProgressiveParams(cycle, maxCycles int) ProgressiveReviewParams {
 			HighEffort:     true,
 		}
 	}
+}
+
+// FilterBySeverity returns findings with severity >= minSeverity.
+// Uses ParseSeverity to convert finding.Severity strings.
+// Returns a new slice; the input is not modified.
+func FilterBySeverity(findings []ReviewFinding, minSeverity SeverityLevel) []ReviewFinding {
+	var result []ReviewFinding
+	for _, f := range findings {
+		if ParseSeverity(f.Severity) >= minSeverity {
+			result = append(result, f)
+		}
+	}
+	return result
+}
+
+// TruncateFindings sorts findings by severity descending and returns at most maxCount.
+// If len(findings) <= maxCount, returns the input unchanged.
+// Uses sort.SliceStable to preserve order among equal severities.
+func TruncateFindings(findings []ReviewFinding, maxCount int) []ReviewFinding {
+	if len(findings) <= maxCount {
+		return findings
+	}
+	sort.SliceStable(findings, func(i, j int) bool {
+		return ParseSeverity(findings[i].Severity) > ParseSeverity(findings[j].Severity)
+	})
+	return findings[:maxCount]
+}
+
+// writeFilteredFindings rewrites review-findings.md with only the given findings.
+// Each finding is written as "### [SEVERITY] Description" matching the format
+// parsed by findingSeverityRe in DetermineReviewOutcome.
+func writeFilteredFindings(path string, findings []ReviewFinding) error {
+	var b strings.Builder
+	for _, f := range findings {
+		fmt.Fprintf(&b, "### [%s] %s\n\n", f.Severity, f.Description)
+	}
+	return os.WriteFile(path, []byte(b.String()), 0644)
 }

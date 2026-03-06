@@ -1,6 +1,10 @@
 package runner
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 func TestSeverityLevel_Ordering(t *testing.T) {
 	if SeverityLow >= SeverityMedium {
@@ -195,5 +199,191 @@ func TestProgressiveParams_EdgeCases(t *testing.T) {
 				t.Errorf("HighEffort = %v, want %v", got.HighEffort, tt.wantHighEffort)
 			}
 		})
+	}
+}
+
+// --- FilterBySeverity tests ---
+
+func TestFilterBySeverity_AllThresholds(t *testing.T) {
+	findings := []ReviewFinding{
+		{Severity: "LOW", Description: "low issue", File: "a.go", Line: 1},
+		{Severity: "MEDIUM", Description: "medium issue", File: "b.go", Line: 2},
+		{Severity: "HIGH", Description: "high issue", File: "c.go", Line: 3},
+		{Severity: "CRITICAL", Description: "critical issue", File: "d.go", Line: 4},
+	}
+
+	tests := []struct {
+		name         string
+		minSeverity  SeverityLevel
+		wantCount    int
+		wantSeverities []string
+	}{
+		{"LOW threshold passes all", SeverityLow, 4, []string{"LOW", "MEDIUM", "HIGH", "CRITICAL"}},
+		{"MEDIUM threshold", SeverityMedium, 3, []string{"MEDIUM", "HIGH", "CRITICAL"}},
+		{"HIGH threshold", SeverityHigh, 2, []string{"HIGH", "CRITICAL"}},
+		{"CRITICAL threshold", SeverityCritical, 1, []string{"CRITICAL"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FilterBySeverity(findings, tt.minSeverity)
+			if len(got) != tt.wantCount {
+				t.Fatalf("FilterBySeverity() returned %d findings, want %d", len(got), tt.wantCount)
+			}
+			for i, f := range got {
+				if f.Severity != tt.wantSeverities[i] {
+					t.Errorf("finding[%d].Severity = %q, want %q", i, f.Severity, tt.wantSeverities[i])
+				}
+				if f.Description == "" {
+					t.Errorf("finding[%d].Description is empty", i)
+				}
+				if f.File == "" {
+					t.Errorf("finding[%d].File is empty", i)
+				}
+				if f.Line == 0 {
+					t.Errorf("finding[%d].Line is 0", i)
+				}
+			}
+		})
+	}
+}
+
+func TestFilterBySeverity_EmptyInput(t *testing.T) {
+	got := FilterBySeverity(nil, SeverityMedium)
+	if len(got) != 0 {
+		t.Errorf("FilterBySeverity(nil) returned %d findings, want 0", len(got))
+	}
+	got = FilterBySeverity([]ReviewFinding{}, SeverityLow)
+	if len(got) != 0 {
+		t.Errorf("FilterBySeverity([]) returned %d findings, want 0", len(got))
+	}
+}
+
+func TestFilterBySeverity_DoesNotModifyInput(t *testing.T) {
+	original := []ReviewFinding{
+		{Severity: "LOW", Description: "low"},
+		{Severity: "HIGH", Description: "high"},
+	}
+	_ = FilterBySeverity(original, SeverityHigh)
+	if len(original) != 2 {
+		t.Fatalf("input slice modified: len = %d, want 2", len(original))
+	}
+	if original[0].Severity != "LOW" {
+		t.Errorf("input[0].Severity changed to %q", original[0].Severity)
+	}
+}
+
+// --- TruncateFindings tests ---
+
+func TestTruncateFindings_SortBySeverity(t *testing.T) {
+	findings := []ReviewFinding{
+		{Severity: "LOW", Description: "low issue"},
+		{Severity: "CRITICAL", Description: "critical issue"},
+		{Severity: "MEDIUM", Description: "medium issue"},
+	}
+	got := TruncateFindings(findings, 2)
+	if len(got) != 2 {
+		t.Fatalf("TruncateFindings() returned %d findings, want 2", len(got))
+	}
+	if got[0].Severity != "CRITICAL" {
+		t.Errorf("got[0].Severity = %q, want CRITICAL", got[0].Severity)
+	}
+	if got[0].Description != "critical issue" {
+		t.Errorf("got[0].Description = %q, want %q", got[0].Description, "critical issue")
+	}
+	if got[1].Severity != "MEDIUM" {
+		t.Errorf("got[1].Severity = %q, want MEDIUM", got[1].Severity)
+	}
+	if got[1].Description != "medium issue" {
+		t.Errorf("got[1].Description = %q, want %q", got[1].Description, "medium issue")
+	}
+}
+
+func TestTruncateFindings_NoTruncationWhenUnderBudget(t *testing.T) {
+	findings := []ReviewFinding{
+		{Severity: "HIGH", Description: "high"},
+		{Severity: "LOW", Description: "low"},
+	}
+	got := TruncateFindings(findings, 5)
+	if len(got) != 2 {
+		t.Fatalf("TruncateFindings() returned %d findings, want 2", len(got))
+	}
+}
+
+func TestTruncateFindings_ExactBudget(t *testing.T) {
+	findings := []ReviewFinding{
+		{Severity: "HIGH", Description: "high"},
+		{Severity: "LOW", Description: "low"},
+	}
+	got := TruncateFindings(findings, 2)
+	if len(got) != 2 {
+		t.Fatalf("TruncateFindings() returned %d findings, want 2", len(got))
+	}
+}
+
+func TestTruncateFindings_EmptyInput(t *testing.T) {
+	got := TruncateFindings(nil, 3)
+	if len(got) != 0 {
+		t.Errorf("TruncateFindings(nil) returned %d findings, want 0", len(got))
+	}
+}
+
+func TestTruncateFindings_BudgetOne(t *testing.T) {
+	findings := []ReviewFinding{
+		{Severity: "LOW", Description: "low"},
+		{Severity: "CRITICAL", Description: "critical"},
+		{Severity: "MEDIUM", Description: "medium"},
+	}
+	got := TruncateFindings(findings, 1)
+	if len(got) != 1 {
+		t.Fatalf("TruncateFindings() returned %d findings, want 1", len(got))
+	}
+	if got[0].Severity != "CRITICAL" {
+		t.Errorf("got[0].Severity = %q, want CRITICAL (highest severity kept)", got[0].Severity)
+	}
+}
+
+// --- writeFilteredFindings tests ---
+
+func TestWriteFilteredFindings_Format(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/review-findings.md"
+	findings := []ReviewFinding{
+		{Severity: "CRITICAL", Description: "null pointer"},
+		{Severity: "HIGH", Description: "buffer overflow"},
+	}
+	err := writeFilteredFindings(path, findings)
+	if err != nil {
+		t.Fatalf("writeFilteredFindings() error: %v", err)
+	}
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error: %v", readErr)
+	}
+	content := string(data)
+	if !strings.Contains(content, "### [CRITICAL] null pointer") {
+		t.Errorf("content missing CRITICAL finding: %q", content)
+	}
+	if !strings.Contains(content, "### [HIGH] buffer overflow") {
+		t.Errorf("content missing HIGH finding: %q", content)
+	}
+	if strings.Count(content, "### [") != 2 {
+		t.Errorf("expected 2 findings headers, got %d in: %q", strings.Count(content, "### ["), content)
+	}
+}
+
+func TestWriteFilteredFindings_Empty(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/review-findings.md"
+	err := writeFilteredFindings(path, nil)
+	if err != nil {
+		t.Fatalf("writeFilteredFindings() error: %v", err)
+	}
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error: %v", readErr)
+	}
+	if len(data) != 0 {
+		t.Errorf("expected empty file, got %q", string(data))
 	}
 }

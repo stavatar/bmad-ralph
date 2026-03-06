@@ -91,10 +91,12 @@ type GatePromptFunc func(ctx context.Context, taskText string) (*config.GateDeci
 type ResumeExtractFunc func(ctx context.Context, rc RunConfig, sessionID string) error
 
 // selectReviewModel returns the light model if the diff is small enough,
-// otherwise the standard review model. If diffStats is nil (e.g., first review
-// cycle or diff stats failed), falls back to the standard model.
-func selectReviewModel(cfg *config.Config, ds *DiffStats) string {
-	if ds == nil || cfg.ModelReviewLight == "" {
+// otherwise the standard review model. If isGate or hydraDetected is true,
+// always returns the standard model to avoid Haiku scope expansion.
+// If diffStats is nil (e.g., first review cycle or diff stats failed),
+// falls back to the standard model.
+func selectReviewModel(cfg *config.Config, ds *DiffStats, isGate bool, hydraDetected bool) string {
+	if isGate || hydraDetected || ds == nil || cfg.ModelReviewLight == "" {
 		return cfg.ModelReview
 	}
 	totalLines := ds.Insertions + ds.Deletions
@@ -106,7 +108,9 @@ func selectReviewModel(cfg *config.Config, ds *DiffStats) string {
 
 // RealReview runs a review session and determines the outcome from file state.
 // It reads the current task, assembles the review prompt, launches a fresh Claude
-// session with ModelReview, then checks sprint-tasks.md and review-findings.md
+// session with the selected review model (standard or light, based on diff size,
+// gate flag, and hydra escalation via selectReviewModel), then checks
+// sprint-tasks.md and review-findings.md
 // to compute ReviewResult. On success, populates SessionMetrics and Model for
 // cost tracking (AC5). On ExitError or parse failure, these fields are nil/empty.
 // Story 6.4: on non-clean review, post-validates LEARNINGS.md via snapshot-diff
@@ -132,7 +136,7 @@ func selectReviewModel(cfg *config.Config, ds *DiffStats) string {
 //   - SessionError_ExitError: *exec.ExitError → proceed to file-state check
 //   - SessionError_Fatal: non-ExitError → return wrapped error
 //   - FreshSession: verify opts has no Resume field
-//   - UsesModelReview: opts.Model == cfg.ModelReview (NOT ModelExecute)
+//   - UsesSelectedReviewModel: opts.Model set via selectReviewModel (NOT ModelExecute)
 func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 	content, err := os.ReadFile(rc.TasksFile)
 	if err != nil {
@@ -175,7 +179,8 @@ func RealReview(ctx context.Context, rc RunConfig) (ReviewResult, error) {
 	}
 
 	// DESIGN-4: select review model based on diff size (without mutating Config)
-	reviewModel := selectReviewModel(rc.Cfg, rc.LastDiffStats)
+	// GATE tasks and hydra escalation always use standard model.
+	reviewModel := selectReviewModel(rc.Cfg, rc.LastDiffStats, rc.IsGate, rc.HydraDetected)
 
 	opts := session.Options{
 		Command:                    rc.Cfg.ClaudeCommand,
@@ -360,6 +365,52 @@ func (r *Runner) checkBudget(ctx context.Context, taskText string, budgetWarned 
 		}
 	}
 	return nil
+}
+
+// checkTaskBudget checks current task cost against TaskBudgetMaxUSD after each RecordSession.
+// Returns nil if task budget is disabled (0), under threshold, or user chose to continue (retry).
+// Returns errBudgetSkip if user chose to skip or no gates available (SkipTask already called).
+// Returns other error for quit or gate errors.
+func (r *Runner) checkTaskBudget(ctx context.Context, taskText string) error {
+	if r.Cfg.TaskBudgetMaxUSD <= 0 || r.Metrics == nil {
+		return nil
+	}
+	taskCost := r.Metrics.CurrentTaskCost()
+	taskMax := r.Cfg.TaskBudgetMaxUSD
+	if taskCost < taskMax {
+		return nil
+	}
+	log := r.logger()
+	log.Error("task budget exceeded",
+		"task", taskText,
+		"cost", fmt.Sprintf("%.2f", taskCost),
+		"task_budget", fmt.Sprintf("%.2f", taskMax),
+	)
+	if r.Cfg.GatesEnabled && r.EmergencyGatePromptFn != nil {
+		emergencyText := fmt.Sprintf("task budget exceeded ($%.2f/$%.2f) for %q", taskCost, taskMax, taskText)
+		decision, gateErr := r.EmergencyGatePromptFn(ctx, emergencyText)
+		if gateErr != nil {
+			return fmt.Errorf("runner: task budget gate: %w", gateErr)
+		}
+		if decision.Action == config.ActionQuit {
+			return fmt.Errorf("runner: task budget exceeded ($%.2f/$%.2f): %w", taskCost, taskMax, decision)
+		}
+		if decision.Action == config.ActionSkip {
+			taskDesc := taskDescription(taskText)
+			if err := SkipTask(r.TasksFile, taskDesc); err != nil {
+				return err
+			}
+			return errBudgetSkip
+		}
+		// retry: continue execution despite exceeded task budget
+		return nil
+	}
+	// No gates: auto-skip the task
+	taskDesc := taskDescription(taskText)
+	if err := SkipTask(r.TasksFile, taskDesc); err != nil {
+		return err
+	}
+	return errBudgetSkip
 }
 
 // recordGateDecision logs a structured "gate decision" event and records GateStats
@@ -561,7 +612,9 @@ type RunConfig struct {
 	SerenaHint    string          // Serena MCP prompt hint (empty if unavailable)
 	Knowledge     KnowledgeWriter // records execution progress and validates lessons (nil = skip)
 	Logger        *RunLogger      // session log writer (nil = skip session logging)
-	LastDiffStats *DiffStats      // diff stats from last execute cycle (DESIGN-4: review model routing)
+	LastDiffStats  *DiffStats // diff stats from last execute cycle (DESIGN-4: review model routing)
+	IsGate         bool       // true when current task has [GATE] tag (DESIGN-4: forces standard review model)
+	HydraDetected  bool       // true when hydra pattern detected (DESIGN-4: escalates to standard review model)
 }
 
 // Runner orchestrates the execute-review loop with injectable dependencies.
@@ -768,7 +821,8 @@ func (r *Runner) execute(ctx context.Context) error {
 
 		taskText := result.OpenTasks[0].Text
 		taskStart = time.Now()
-		budgetWarned := false // Story 7.7: budget warning logged once per task
+		budgetWarned := false  // Story 7.7: budget warning logged once per task
+		hydraDetected := false // DESIGN-4: hydra escalation flag, reset per task (AC2)
 		if r.Metrics != nil {
 			r.Metrics.StartTask(taskText)
 		}
@@ -900,6 +954,15 @@ func (r *Runner) execute(ctx context.Context) error {
 							}
 							return budgetErr
 						}
+						// DESIGN-4: per-task budget check after execute session (error path)
+						if budgetErr := r.checkTaskBudget(ctx, taskText); budgetErr != nil {
+							if errors.Is(budgetErr, errBudgetSkip) {
+								skipTask = true
+								wasSkipped = true
+								break
+							}
+							return budgetErr
+						}
 					} else {
 						return fmt.Errorf("runner: execute: %w", execErr)
 					}
@@ -922,6 +985,15 @@ func (r *Runner) execute(ctx context.Context) error {
 					}
 					// Story 7.7: budget check after execute session (success path)
 					if budgetErr := r.checkBudget(ctx, taskText, &budgetWarned); budgetErr != nil {
+						if errors.Is(budgetErr, errBudgetSkip) {
+							skipTask = true
+							wasSkipped = true
+							break
+						}
+						return budgetErr
+					}
+					// DESIGN-4: per-task budget check after execute session (success path)
+					if budgetErr := r.checkTaskBudget(ctx, taskText); budgetErr != nil {
 						if errors.Is(budgetErr, errBudgetSkip) {
 							skipTask = true
 							wasSkipped = true
@@ -1113,11 +1185,13 @@ func (r *Runner) execute(ctx context.Context) error {
 				break
 			}
 
-			// DESIGN-4: pass diff stats to ReviewFn via RunConfig for model routing
+			// DESIGN-4: pass diff stats, gate flag, and hydra state to ReviewFn via RunConfig for model routing
+			// selectReviewModel is called once inside RealReview; we log the inputs here.
 			rc.LastDiffStats = lastDiffStats
-			reviewModel := selectReviewModel(r.Cfg, lastDiffStats)
+			rc.IsGate = result.OpenTasks[0].HasGate
+			rc.HydraDetected = hydraDetected
 
-			log.Info("review session started", "task", taskText, "model", reviewModel)
+			log.Info("review session started", "task", taskText, "isGate", fmt.Sprintf("%v", rc.IsGate), "hydra", fmt.Sprintf("%v", hydraDetected))
 			reviewStart := time.Now()
 			rr, err := r.ReviewFn(ctx, rc)
 			reviewElapsed := time.Since(reviewStart)
@@ -1145,6 +1219,14 @@ func (r *Runner) execute(ctx context.Context) error {
 				}
 				return budgetErr
 			}
+			// DESIGN-4: per-task budget check after review session
+			if budgetErr := r.checkTaskBudget(ctx, taskText); budgetErr != nil {
+				if errors.Is(budgetErr, errBudgetSkip) {
+					wasSkipped = true
+					break
+				}
+				return budgetErr
+			}
 			if rr.Clean {
 				if r.Metrics != nil {
 					r.Metrics.RecordFindingsCycle(0)
@@ -1161,6 +1243,39 @@ func (r *Runner) execute(ctx context.Context) error {
 				"clean", "false",
 				"findings", "true",
 			)
+
+			// Story 9.2: progressive severity filtering + findings budget.
+			// Apply BEFORE logging/metrics so only filtered findings are counted.
+			if len(rr.Findings) > 0 {
+				params := ProgressiveParams(reviewCycles+1, r.Cfg.MaxReviewIterations)
+				beforeCount := len(rr.Findings)
+				filtered := FilterBySeverity(rr.Findings, params.MinSeverity)
+				truncated := TruncateFindings(filtered, params.MaxFindings)
+
+				if len(truncated) < beforeCount {
+					// Log filtered-out findings for traceability.
+					for _, f := range rr.Findings {
+						if ParseSeverity(f.Severity) < params.MinSeverity {
+							log.Info("finding below threshold",
+								"severity", f.Severity,
+								"description", f.Description,
+							)
+						}
+					}
+					// Rewrite review-findings.md with only filtered findings.
+					rewritePath := filepath.Join(r.Cfg.ProjectRoot, "review-findings.md")
+					if err := writeFilteredFindings(rewritePath, truncated); err != nil {
+						return fmt.Errorf("runner: write filtered findings: %w", err)
+					}
+					log.Info("findings filtered",
+						"before", fmt.Sprintf("%d", beforeCount),
+						"after", fmt.Sprintf("%d", len(truncated)),
+						"min_severity", params.MinSeverity.String(),
+						"max_budget", fmt.Sprintf("%d", params.MaxFindings),
+					)
+				}
+				rr.Findings = truncated
+			}
 
 			// Story 7.4: log severity breakdown and record findings in metrics.
 			if len(rr.Findings) > 0 {
@@ -1199,6 +1314,13 @@ func (r *Runner) execute(ctx context.Context) error {
 						"count", fmt.Sprintf("%d", findingsCount),
 						"cycle", fmt.Sprintf("%d", reviewCycles+1),
 					)
+					// DESIGN-4: escalate to standard review model on hydra detection
+					if !hydraDetected {
+						hydraDetected = true
+						log.Warn("hydra escalation: switching to full review model",
+							"task", taskText,
+						)
+					}
 				}
 			}
 

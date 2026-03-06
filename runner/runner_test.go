@@ -7043,3 +7043,279 @@ func TestRunner_Execute_BudgetWarningNotRepeated(t *testing.T) {
 		t.Errorf("budget warning count = %d, want 1 (once per task), tasks content:\n%s", count, capturedContent)
 	}
 }
+
+// --- DESIGN-4: Per-task budget cap tests ---
+
+// TestRunner_Execute_TaskBudgetDisabled verifies that TaskBudgetMaxUSD==0 (default)
+// produces no task budget skip even with high per-task cost.
+func TestRunner_Execute_TaskBudgetDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "task-budget-disabled",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "tbd-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 100}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.TaskBudgetMaxUSD = 0 // disabled (default)
+	r.Cfg.RunID = "task-budget-disabled-run"
+	r.Metrics = runner.NewMetricsCollector("task-budget-disabled-run", budgetPricing())
+
+	r.ReviewFn = func(_ context.Context, rc runner.RunConfig) (runner.ReviewResult, error) {
+		_ = os.WriteFile(rc.TasksFile, []byte(allDoneTasks), 0644) // Error ignored: test helper
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+}
+
+// TestRunner_Execute_TaskBudgetExceededNoGates verifies that per-task cost exceeding
+// TaskBudgetMaxUSD without gates auto-skips the task.
+func TestRunner_Execute_TaskBudgetExceededNoGates(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Session costs $10 (10 input tokens). TaskBudgetMaxUSD=5 → exceeded after first session.
+	scenario := testutil.Scenario{
+		Name: "task-budget-exceeded",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "tbe-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 10}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.TaskBudgetMaxUSD = 5.0
+	r.Cfg.GatesEnabled = false
+	r.Cfg.RunID = "task-budget-exceeded-run"
+	r.Metrics = runner.NewMetricsCollector("task-budget-exceeded-run", budgetPricing())
+
+	_, err := r.Execute(context.Background())
+	// Task should be skipped (no error), not hard error — unlike run budget
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v (expected skip, not error)", err)
+	}
+
+	// Verify task was marked as done (SkipTask marks [x]) in file
+	data, _ := os.ReadFile(r.TasksFile)
+	content := string(data)
+	if !strings.Contains(content, "[x]") {
+		t.Errorf("task not marked as done (skipped) in tasks file, content:\n%s", content)
+	}
+}
+
+// TestRunner_Execute_TaskBudgetExceededWithGatesQuit verifies that per-task budget exceeded
+// with gates triggers emergency gate, and quit action returns error.
+func TestRunner_Execute_TaskBudgetExceededWithGatesQuit(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "task-budget-gate-quit",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "tbgq-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 10}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.TaskBudgetMaxUSD = 5.0
+	r.Cfg.GatesEnabled = true
+	r.Cfg.RunID = "task-budget-gate-quit-run"
+	r.Metrics = runner.NewMetricsCollector("task-budget-gate-quit-run", budgetPricing())
+	r.EmergencyGatePromptFn = func(_ context.Context, text string) (*config.GateDecision, error) {
+		if !strings.Contains(text, "task budget exceeded") {
+			t.Errorf("emergency text = %q, want containing 'task budget exceeded'", text)
+		}
+		return &config.GateDecision{Action: config.ActionQuit}, nil
+	}
+
+	_, err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "task budget exceeded") {
+		t.Errorf("error = %q, want containing 'task budget exceeded'", err.Error())
+	}
+}
+
+// TestRunner_Execute_TaskBudgetExceededWithGatesSkip verifies that per-task budget exceeded
+// with gates and skip action skips the task.
+func TestRunner_Execute_TaskBudgetExceededWithGatesSkip(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "task-budget-gate-skip",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "tbgs-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 10}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.TaskBudgetMaxUSD = 5.0
+	r.Cfg.GatesEnabled = true
+	r.Cfg.RunID = "task-budget-gate-skip-run"
+	r.Metrics = runner.NewMetricsCollector("task-budget-gate-skip-run", budgetPricing())
+	r.EmergencyGatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		return &config.GateDecision{Action: config.ActionSkip}, nil
+	}
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+}
+
+// TestRunner_Execute_TaskBudgetExceededWithGatesRetry verifies that per-task budget exceeded
+// with gates and retry action continues execution.
+func TestRunner_Execute_TaskBudgetExceededWithGatesRetry(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "task-budget-gate-retry",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "tbgr-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 10}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.TaskBudgetMaxUSD = 5.0
+	r.Cfg.GatesEnabled = true
+	r.Cfg.RunID = "task-budget-gate-retry-run"
+	r.Metrics = runner.NewMetricsCollector("task-budget-gate-retry-run", budgetPricing())
+	r.EmergencyGatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		return &config.GateDecision{Action: config.ActionRetry}, nil
+	}
+
+	r.ReviewFn = func(_ context.Context, rc runner.RunConfig) (runner.ReviewResult, error) {
+		_ = os.WriteFile(rc.TasksFile, []byte(allDoneTasks), 0644) // Error ignored: test helper
+		return runner.ReviewResult{Clean: true}, nil
+	}
+
+	_, err := r.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+}
+
+// TestRunner_Execute_TaskBudgetGateError verifies that gate prompt I/O failure
+// during task budget check propagates as wrapped error.
+func TestRunner_Execute_TaskBudgetGateError(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "task-budget-gate-error",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "tbge-001",
+				Model: "test-model",
+				Usage: map[string]int{"input_tokens": 10}},
+		},
+	}
+	git := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, git)
+	r.Cfg.MaxIterations = 1
+	r.Cfg.TaskBudgetMaxUSD = 5.0
+	r.Cfg.GatesEnabled = true
+	r.Cfg.RunID = "task-budget-gate-error-run"
+	r.Metrics = runner.NewMetricsCollector("task-budget-gate-error-run", budgetPricing())
+	r.EmergencyGatePromptFn = func(_ context.Context, _ string) (*config.GateDecision, error) {
+		return nil, fmt.Errorf("gate prompt failed")
+	}
+
+	_, err := r.Execute(context.Background())
+	if err == nil {
+		t.Fatal("Execute: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "runner: task budget gate:") {
+		t.Errorf("error = %q, want containing 'runner: task budget gate:'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "gate prompt failed") {
+		t.Errorf("error = %q, want containing 'gate prompt failed'", err.Error())
+	}
+}
+
+// --- Story 9.2: Progressive severity filtering integration ---
+
+// TestRunner_Execute_FindingsFiltered verifies that Execute() applies progressive
+// severity filtering and findings budget to review findings, rewriting review-findings.md.
+// With maxReviewIterations=1, ProgressiveParams(1,1) returns CRITICAL threshold + budget 1.
+// ReviewFn returns 3 findings (CRITICAL, MEDIUM, LOW) → filtered to 1 CRITICAL.
+func TestRunner_Execute_FindingsFiltered(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenario := testutil.Scenario{
+		Name: "findings-filtered",
+		Steps: []testutil.ScenarioStep{
+			{Type: "execute", ExitCode: 0, SessionID: "exec-001"},
+		},
+	}
+	mock := &testutil.MockGitClient{
+		HeadCommits: headCommitPairs([2]string{"aaa", "bbb"}),
+	}
+	r, _ := setupRunnerIntegration(t, tmpDir, oneOpenTask, scenario, mock)
+
+	// Override: maxReviewIterations=1 → ProgressiveParams(1,1) = CRITICAL/1/true/true
+	r.Cfg.MaxReviewIterations = 1
+
+	// ReviewFn returns mixed-severity findings (not clean).
+	r.ReviewFn = func(_ context.Context, _ runner.RunConfig) (runner.ReviewResult, error) {
+		return runner.ReviewResult{
+			Clean: false,
+			Findings: []runner.ReviewFinding{
+				{Severity: "CRITICAL", Description: "null pointer deref", File: "a.go", Line: 10},
+				{Severity: "MEDIUM", Description: "unused variable", File: "b.go", Line: 20},
+				{Severity: "LOW", Description: "naming convention", File: "c.go", Line: 30},
+			},
+		}, nil
+	}
+
+	_, err := r.Execute(context.Background())
+	// Review cycles exhausted (1/1) is expected — Execute returns error for exhausted cycles.
+	// We care about the filtering side effect, not the error itself.
+	_ = err
+
+	// Verify review-findings.md was rewritten with only CRITICAL finding.
+	findingsPath := filepath.Join(tmpDir, "review-findings.md")
+	data, readErr := os.ReadFile(findingsPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile(review-findings.md): %v", readErr)
+	}
+	content := string(data)
+
+	// Must contain the CRITICAL finding.
+	if !strings.Contains(content, "### [CRITICAL] null pointer deref") {
+		t.Errorf("review-findings.md missing CRITICAL finding, got: %q", content)
+	}
+	// Must NOT contain MEDIUM or LOW findings.
+	if strings.Contains(content, "MEDIUM") {
+		t.Errorf("review-findings.md should not contain MEDIUM, got: %q", content)
+	}
+	if strings.Contains(content, "LOW") {
+		t.Errorf("review-findings.md should not contain LOW, got: %q", content)
+	}
+	// Must have exactly 1 finding header.
+	if count := strings.Count(content, "### ["); count != 1 {
+		t.Errorf("review-findings.md: want 1 finding header, got %d in: %q", count, content)
+	}
+}
