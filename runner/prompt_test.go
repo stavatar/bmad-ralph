@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"text/template"
 
 	"github.com/bmad-ralph/bmad-ralph/config"
 )
@@ -21,6 +22,8 @@ func executeReplacements() map[string]string {
 		"__LEARNINGS_CONTENT__": "",
 		"__FINDINGS_CONTENT__":  "",
 		"__SERENA_HINT__":       "",
+		"__TASK_CONTENT__":      "example task",
+		"__TASK_HASH__":         "abc123",
 	}
 }
 
@@ -86,7 +89,7 @@ func TestPrompt_Execute_WithFindings(t *testing.T) {
 		{"source story context instruction", "source:` field, open the referenced file", true},
 		{"source fallback on missing file", "file is missing, proceed with the task description", true},
 		{"mutation asymmetry", "Mutation Asymmetry", true},
-		{"commit on green only", "Commit ONLY when ALL tests pass", true},
+		{"commit on green only", "when ALL tests pass (green)", true},
 		// Format contract injection (AC #1 item 8)
 		{"format contract title", "Sprint Tasks Format Specification", true},
 		// Findings section present (AC #2)
@@ -117,6 +120,16 @@ func TestPrompt_Execute_WithFindings(t *testing.T) {
 		{"mutation no modify markers", "MUST NOT modify task status markers", true},
 		// Commit rules (FR8)
 		{"commit never with failing", "NEVER commit with failing tests", true},
+		// Session completion (BUG-6)
+		{"session completion section", "Session Completion", true},
+		{"session stop after one task", "STOP the session immediately", true},
+		{"session one task only", "exactly one task", true},
+		// Rule 10 (BUG-6)
+		{"rule 10 no extra tasks", "Do NOT work on tasks you did not select", true},
+		// Task scope (DESIGN-2)
+		{"task scope section", "Task Scope", true},
+		{"task scope only required files", "directly required by the current task", true},
+		{"task scope no drive-by", "no drive-by refactoring", true},
 	}
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) {
@@ -159,7 +172,7 @@ func TestPrompt_Execute_WithoutFindings(t *testing.T) {
 		{"source story context instruction", "source:` field, open the referenced file", true},
 		{"source fallback on missing file", "file is missing, proceed with the task description", true},
 		{"mutation asymmetry", "Mutation Asymmetry", true},
-		{"commit on green only", "Commit ONLY when ALL tests pass", true},
+		{"commit on green only", "when ALL tests pass (green)", true},
 		{"format contract title", "Sprint Tasks Format Specification", true},
 		// No findings section (AC #3)
 		{"no findings header", "Review Findings", false},
@@ -171,6 +184,14 @@ func TestPrompt_Execute_WithoutFindings(t *testing.T) {
 		{"no findings placeholder", "__FINDINGS_CONTENT__", false},
 		// Gates absent by default
 		{"no gates section", "GATES ARE ENABLED", false},
+		// Session completion (BUG-6)
+		{"session completion section", "Session Completion", true},
+		{"session stop after one task", "STOP the session immediately", true},
+		// Rule 10 (BUG-6)
+		{"rule 10 no extra tasks", "Do NOT work on tasks you did not select", true},
+		// Task scope (DESIGN-2)
+		{"task scope section", "Task Scope", true},
+		{"task scope only required files", "directly required by the current task", true},
 	}
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) {
@@ -239,7 +260,7 @@ func TestPrompt_Execute_WithGates(t *testing.T) {
 		present bool
 	}{
 		{"gates section present", "GATES ARE ENABLED", true},
-		{"gates pause instruction", "pause execution and report status", true},
+		{"gates pause instruction", "pause AFTER your session", true},
 		{"gates GATE tag reference", "[GATE]", true},
 		// Core sections still present with gates
 		{"999-rules still present", "999-Rules Guardrails", true},
@@ -327,7 +348,7 @@ func TestPrompt_Review(t *testing.T) {
 		{"finding field location", "**Location**", true},
 		{"finding field reasoning", "**Reasoning**", true},
 		{"finding field recommendation", "**Recommendation**", true},
-		{"finding fields mandatory", "All 4 fields are mandatory", true},
+		{"finding fields mandatory", "All 5 fields are mandatory", true},
 		// Sub-agent names via file paths (AC1 orchestration)
 		{"sub-agent quality path", "runner/prompts/agents/quality.md", true},
 		{"sub-agent implementation path", "runner/prompts/agents/implementation.md", true},
@@ -373,6 +394,9 @@ func TestPrompt_Review(t *testing.T) {
 		{"knowledge citation format", "category: topic [review, file:line]", true},
 		// CLAUDE.md/config protection (Story 6.4)
 		{"invariant no claude.md write", "MUST NOT write to CLAUDE.md", true},
+		// Diff-only review instruction (DESIGN-5)
+		{"diff-only review instruction", "ONLY the diff", true},
+		{"diff-only no pre-existing", "Pre-existing code", true},
 	}
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) {
@@ -632,7 +656,7 @@ func TestPrompt_Agent_DetectionStructure(t *testing.T) {
 		instructionKeywords []string
 	}{
 		{"quality", agentQualityPrompt, []string{"security", "performance"}},
-		{"implementation", agentImplementationPrompt, []string{"acceptance criteria", "satisfies"}},
+		{"implementation", agentImplementationPrompt, []string{"acceptance criteria", "satisfies", "outside the task's scope"}},
 		{"simplification", agentSimplificationPrompt, []string{"verbose", "simpler"}},
 		{"design-principles", agentDesignPrinciplesPrompt, []string{"DRY", "KISS", "SRP"}},
 		{"test-coverage", agentTestCoveragePrompt, []string{"test coverage", "skip", "t.Errorf"}},
@@ -649,6 +673,11 @@ func TestPrompt_Agent_DetectionStructure(t *testing.T) {
 				assertContains(t, instructions, kw,
 					c.name+" Instructions section detection keyword")
 			}
+			// DESIGN-5: all agents must have diff-only review instruction
+			assertContains(t, instructions, "ONLY the diff",
+				c.name+" Instructions diff-only review instruction")
+			assertContains(t, instructions, "Do NOT criticize pre-existing",
+				c.name+" Instructions no pre-existing code criticism")
 		})
 	}
 }
@@ -665,6 +694,8 @@ func TestPrompt_Execute_KnowledgeSections(t *testing.T) {
 		"__RALPH_KNOWLEDGE__":   "Distilled testing patterns here",
 		"__LEARNINGS_CONTENT__": "Recent learning about assertions",
 		"__FINDINGS_CONTENT__":  "",
+		"__TASK_CONTENT__":      "Test task",
+		"__TASK_HASH__":         "",
 	}
 
 	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
@@ -731,6 +762,8 @@ func TestPrompt_Execute_SelfReview(t *testing.T) {
 				"__FORMAT_CONTRACT__":   config.SprintTasksFormat(),
 				"__RALPH_KNOWLEDGE__":   "",
 				"__LEARNINGS_CONTENT__": "",
+				"__TASK_CONTENT__":      "",
+				"__TASK_HASH__":         "",
 			}
 
 			got, err := config.AssemblePrompt(executeTemplate, data, replacements)
@@ -758,6 +791,8 @@ func TestPrompt_Execute_NoKnowledge(t *testing.T) {
 		"__FORMAT_CONTRACT__":   config.SprintTasksFormat(),
 		"__RALPH_KNOWLEDGE__":   "",
 		"__LEARNINGS_CONTENT__": "",
+		"__TASK_CONTENT__":      "",
+		"__TASK_HASH__":         "",
 	}
 
 	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
@@ -876,5 +911,452 @@ func TestPrompt_Review_InvariantUpdated(t *testing.T) {
 	// New invariant: "MAY write to LEARNINGS.md"
 	if !strings.Contains(got, "MAY write to LEARNINGS.md") {
 		t.Errorf("review prompt should contain new invariant 'MAY write to LEARNINGS.md'")
+	}
+}
+
+// --- Story 8.2: Sync prompt template tests ---
+
+// TestSyncPrompt_TemplateParse verifies serena-sync.md compiles as a Go template (AC#1).
+func TestSyncPrompt_TemplateParse(t *testing.T) {
+	if serenaSyncTemplate == "" {
+		t.Fatal("serenaSyncTemplate is empty — go:embed failed")
+	}
+
+	// AC#1: Template compiles via text/template.Parse
+	_, err := template.New("sync").Parse(serenaSyncTemplate)
+	if err != nil {
+		t.Fatalf("template.Parse failed: %v", err)
+	}
+
+	// Verify template contains expected Stage 2 placeholders
+	placeholders := []string{
+		"__DIFF_SUMMARY__",
+		"__LEARNINGS_CONTENT__",
+		"__COMPLETED_TASKS__",
+		"__PROJECT_ROOT__",
+		"__MAX_TURNS__",
+	}
+	for _, ph := range placeholders {
+		if !strings.Contains(serenaSyncTemplate, ph) {
+			t.Errorf("sync template missing placeholder: %q", ph)
+		}
+	}
+}
+
+// TestAssembleSyncPrompt_AllSections verifies full assembly with all conditionals true (AC#2).
+func TestAssembleSyncPrompt_AllSections(t *testing.T) {
+	got, err := assembleSyncPrompt(SerenaSyncOpts{
+		DiffSummary:    "added file foo.go",
+		Learnings:      "lesson: always test",
+		CompletedTasks: "task 1: done",
+		MaxTurns:       5,
+		ProjectRoot:    "/my/project",
+	})
+	if err != nil {
+		t.Fatalf("assembleSyncPrompt: unexpected error: %v", err)
+	}
+
+	// No unresolved template directives
+	if strings.Contains(got, "{{") {
+		t.Error("output contains unresolved template directive '{{'")
+	}
+	// No unreplaced placeholders
+	if strings.Contains(got, "__DIFF_SUMMARY__") || strings.Contains(got, "__LEARNINGS_CONTENT__") || strings.Contains(got, "__COMPLETED_TASKS__") {
+		t.Error("output contains unreplaced __PLACEHOLDER__")
+	}
+
+	// Verify content injected
+	if !strings.Contains(got, "added file foo.go") {
+		t.Error("output missing diff summary content")
+	}
+	if !strings.Contains(got, "lesson: always test") {
+		t.Error("output missing learnings content")
+	}
+	if !strings.Contains(got, "task 1: done") {
+		t.Error("output missing completed tasks content")
+	}
+	if !strings.Contains(got, "/my/project") {
+		t.Error("output missing project root")
+	}
+	if !strings.Contains(got, "Максимум ходов: 5") {
+		t.Error("output missing max turns value")
+	}
+}
+
+// TestAssembleSyncPrompt_NoLearnings verifies learnings section absent when empty (AC#5).
+func TestAssembleSyncPrompt_NoLearnings(t *testing.T) {
+	got, err := assembleSyncPrompt(SerenaSyncOpts{
+		DiffSummary:    "some diff",
+		Learnings:      "",
+		CompletedTasks: "task 1: done",
+		MaxTurns:       5,
+		ProjectRoot:    "/proj",
+	})
+	if err != nil {
+		t.Fatalf("assembleSyncPrompt: unexpected error: %v", err)
+	}
+
+	if strings.Contains(got, "Извлечённые уроки") {
+		t.Error("output should NOT contain learnings section header when Learnings is empty")
+	}
+	// Completed tasks section should still be present
+	if !strings.Contains(got, "Завершённые задачи") {
+		t.Error("output should contain completed tasks section header")
+	}
+}
+
+// TestAssembleSyncPrompt_NoCompletedTasks verifies completed tasks section absent when empty (AC#5).
+func TestAssembleSyncPrompt_NoCompletedTasks(t *testing.T) {
+	got, err := assembleSyncPrompt(SerenaSyncOpts{
+		DiffSummary:    "some diff",
+		Learnings:      "lesson: test well",
+		CompletedTasks: "",
+		MaxTurns:       5,
+		ProjectRoot:    "/proj",
+	})
+	if err != nil {
+		t.Fatalf("assembleSyncPrompt: unexpected error: %v", err)
+	}
+
+	if strings.Contains(got, "Завершённые задачи") {
+		t.Error("output should NOT contain completed tasks section header when CompletedTasks is empty")
+	}
+	// Learnings section should still be present
+	if !strings.Contains(got, "Извлечённые уроки") {
+		t.Error("output should contain learnings section header")
+	}
+}
+
+// TestAssembleSyncPrompt_BothSectionsAbsent verifies output when both optional sections are disabled (AC#5).
+func TestAssembleSyncPrompt_BothSectionsAbsent(t *testing.T) {
+	got, err := assembleSyncPrompt(SerenaSyncOpts{
+		DiffSummary: "some diff",
+		MaxTurns:    5,
+		ProjectRoot: "/proj",
+	})
+	if err != nil {
+		t.Fatalf("assembleSyncPrompt: unexpected error: %v", err)
+	}
+
+	if strings.Contains(got, "Извлечённые уроки") {
+		t.Error("output should NOT contain learnings section header")
+	}
+	if strings.Contains(got, "Завершённые задачи") {
+		t.Error("output should NOT contain completed tasks section header")
+	}
+	// Core sections still present
+	if !strings.Contains(got, "Diff summary") {
+		t.Error("output should contain diff summary section")
+	}
+	if !strings.Contains(got, "Инструкции") {
+		t.Error("output should contain instructions section")
+	}
+}
+
+// TestAssembleSyncPrompt_Instructions verifies key prompt instructions (AC#4).
+func TestAssembleSyncPrompt_Instructions(t *testing.T) {
+	got, err := assembleSyncPrompt(SerenaSyncOpts{
+		DiffSummary: "diff",
+		MaxTurns:    5,
+		ProjectRoot: "/proj",
+	})
+	if err != nil {
+		t.Fatalf("assembleSyncPrompt: unexpected error: %v", err)
+	}
+
+	// Key instructions per AC#4
+	instructions := []string{
+		"list_memories",
+		"read_memory",
+		"edit_memory",
+		"write_memory",
+	}
+	for _, instr := range instructions {
+		if !strings.Contains(got, instr) {
+			t.Errorf("output missing instruction keyword: %q", instr)
+		}
+	}
+
+	// Constraints per AC#4: delete_memory must be in prohibition context
+	if !strings.Contains(got, "ЗАПРЕЩЕНО удалять") {
+		t.Error("output should contain prohibition of deleting memories")
+	}
+	if !strings.Contains(got, "delete_memory") {
+		t.Error("output should mention delete_memory in constraints")
+	}
+}
+
+// --- Story 9.3: Progressive review prompt tests ---
+
+// TestPrompt_Review_IncrementalMode verifies incremental diff section appears when IncrementalDiff=true (AC#2).
+func TestPrompt_Review_IncrementalMode(t *testing.T) {
+	prevFindings := "### [HIGH] Missing error handling\n"
+	data := config.TemplateData{
+		IncrementalDiff:  true,
+		Cycle:            3,
+		MinSeverityLabel: "MEDIUM",
+		MaxFindings:      3,
+	}
+	replacements := reviewReplacements()
+	replacements["__TASK_CONTENT__"] = "Fix authentication bug"
+	replacements["__PREV_FINDINGS__"] = prevFindings
+
+	got, err := config.AssemblePrompt(reviewTemplate, data, replacements)
+	if err != nil {
+		t.Fatalf("AssemblePrompt error: %v", err)
+	}
+
+	checks := []struct {
+		name    string
+		substr  string
+		present bool
+	}{
+		// AC#2: incremental diff instruction
+		{"incremental diff instruction", "git diff HEAD~1..HEAD", true},
+		{"incremental review header", "Incremental Review (Cycle 3)", true},
+		{"previous findings injected", "Missing error handling", true},
+		{"severity threshold instruction", "уровня MEDIUM+", true},
+		// AC#7: findings budget instruction
+		{"budget instruction", "НЕ БОЛЕЕ 3", true},
+		{"prioritize instruction", "Приоритизируй по severity", true},
+		// Placeholders replaced
+		{"no prev findings placeholder", "__PREV_FINDINGS__", false},
+	}
+	for _, c := range checks {
+		t.Run(c.name, func(t *testing.T) {
+			found := strings.Contains(got, c.substr)
+			if c.present && !found {
+				t.Errorf("expected prompt to contain %q, but it does not", c.substr)
+			}
+			if !c.present && found {
+				t.Errorf("expected prompt NOT to contain %q, but it does", c.substr)
+			}
+		})
+	}
+}
+
+// TestPrompt_Review_FullDiffMode verifies incremental section absent when IncrementalDiff=false (AC#3).
+func TestPrompt_Review_FullDiffMode(t *testing.T) {
+	data := config.TemplateData{
+		IncrementalDiff: false,
+	}
+	replacements := reviewReplacements()
+	replacements["__TASK_CONTENT__"] = "Implement feature X"
+
+	got, err := config.AssemblePrompt(reviewTemplate, data, replacements)
+	if err != nil {
+		t.Fatalf("AssemblePrompt error: %v", err)
+	}
+
+	checks := []struct {
+		name   string
+		substr string
+	}{
+		{"no incremental header", "Incremental Review"},
+		{"no git diff instruction", "git diff HEAD~1..HEAD"},
+		{"no prev findings placeholder", "__PREV_FINDINGS__"},
+		{"no budget instruction", "НЕ БОЛЕЕ"},
+	}
+	for _, c := range checks {
+		t.Run(c.name, func(t *testing.T) {
+			if strings.Contains(got, c.substr) {
+				t.Errorf("full diff mode should NOT contain %q", c.substr)
+			}
+		})
+	}
+}
+
+// TestPrompt_Review_BudgetInstruction verifies different budget values render correctly (AC#7).
+func TestPrompt_Review_BudgetInstruction(t *testing.T) {
+	cases := []struct {
+		name        string
+		maxFindings int
+		wantBudget  string
+	}{
+		{"budget 1", 1, "НЕ БОЛЕЕ 1"},
+		{"budget 5", 5, "НЕ БОЛЕЕ 5"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := config.TemplateData{
+				IncrementalDiff:  true,
+				Cycle:            4,
+				MinSeverityLabel: "HIGH",
+				MaxFindings:      tc.maxFindings,
+			}
+			replacements := reviewReplacements()
+			replacements["__TASK_CONTENT__"] = "Fix bug"
+			replacements["__PREV_FINDINGS__"] = "prev"
+
+			got, err := config.AssemblePrompt(reviewTemplate, data, replacements)
+			if err != nil {
+				t.Fatalf("AssemblePrompt error: %v", err)
+			}
+			if count := strings.Count(got, tc.wantBudget); count != 1 {
+				t.Errorf("expected prompt to contain %q exactly once, got %d times", tc.wantBudget, count)
+			}
+		})
+	}
+}
+
+// --- Story 9.6: Scope Creep Protection Prompts ---
+
+// TestPrompt_Execute_ScopeBoundarySection verifies execute.md contains
+// SCOPE BOUNDARY section with task text and scope creep prevention (AC#1, AC#2, AC#5).
+func TestPrompt_Execute_ScopeBoundarySection(t *testing.T) {
+	data := config.TemplateData{}
+	replacements := executeReplacements()
+	replacements["__TASK_CONTENT__"] = "Implement login feature"
+
+	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
+	if err != nil {
+		t.Fatalf("AssemblePrompt error: %v", err)
+	}
+
+	// AC#1: section header present
+	if !strings.Contains(got, "## SCOPE BOUNDARY (MANDATORY)") {
+		t.Error("execute prompt missing '## SCOPE BOUNDARY (MANDATORY)' section")
+	}
+	// AC#1: contains task-specific instruction
+	if !strings.Contains(got, "Реализуй ТОЛЬКО текущую задачу: Implement login feature") {
+		t.Error("scope boundary missing task-specific instruction with actual task text")
+	}
+	// AC#1: contains prohibition
+	if !strings.Contains(got, "НЕ реализуй другие задачи из sprint-tasks.md") {
+		t.Error("scope boundary missing prohibition instruction")
+	}
+	// AC#1: contains pre-commit check
+	if !strings.Contains(got, "Перед коммитом проверь") {
+		t.Error("scope boundary missing pre-commit check instruction")
+	}
+	// AC#1: contains rollback instruction (section-scoped phrase)
+	if !strings.Contains(got, "откати их через git checkout") {
+		t.Error("scope boundary missing git checkout rollback instruction")
+	}
+	// AC#5: uniqueness — SCOPE BOUNDARY appears exactly once
+	if count := strings.Count(got, "SCOPE BOUNDARY"); count != 1 {
+		t.Errorf("SCOPE BOUNDARY should appear once, got %d", count)
+	}
+}
+
+// TestPrompt_Implementation_ScopeCompliance verifies implementation agent
+// contains scope creep check instructions (AC#3).
+func TestPrompt_Implementation_ScopeCompliance(t *testing.T) {
+	// AC#3: contains scope compliance instruction
+	if !strings.Contains(agentImplementationPrompt, "Verify ALL changes in the diff relate to the current task") {
+		t.Error("implementation agent missing scope compliance check instruction")
+	}
+	// AC#3: scope creep as HIGH severity
+	if !strings.Contains(agentImplementationPrompt, "Scope creep") {
+		t.Error("implementation agent missing 'Scope creep' finding format")
+	}
+	if !strings.Contains(agentImplementationPrompt, "Severity: HIGH") {
+		t.Error("implementation agent missing HIGH severity for scope creep")
+	}
+	// AC#3: finding format — verify full template
+	if !strings.Contains(agentImplementationPrompt, "Scope creep: изменения в") {
+		t.Error("implementation agent missing scope creep finding format prefix")
+	}
+	if !strings.Contains(agentImplementationPrompt, "реализуют задачу") {
+		t.Error("implementation agent missing 'реализуют задачу' in finding format")
+	}
+	if !strings.Contains(agentImplementationPrompt, "а не текущую") {
+		t.Error("implementation agent missing 'а не текущую' in finding format")
+	}
+}
+
+// TestPrompt_OtherAgents_NoScopeCreep verifies that quality, simplification,
+// design-principles, and test-coverage agents do NOT contain scope creep
+// check instructions (AC#4).
+func TestPrompt_OtherAgents_NoScopeCreep(t *testing.T) {
+	agents := []struct {
+		name    string
+		content string
+	}{
+		{"quality", agentQualityPrompt},
+		{"simplification", agentSimplificationPrompt},
+		{"design-principles", agentDesignPrinciplesPrompt},
+		{"test-coverage", agentTestCoveragePrompt},
+	}
+	for _, agent := range agents {
+		t.Run(agent.name, func(t *testing.T) {
+			if strings.Contains(agent.content, "Scope creep") {
+				t.Errorf("%s agent should NOT contain 'Scope creep' instructions", agent.name)
+			}
+			if strings.Contains(agent.content, "scope creep") {
+				t.Errorf("%s agent should NOT contain 'scope creep' instructions", agent.name)
+			}
+		})
+	}
+}
+
+// --- Story 9.9: Agent Stats in Review Findings ---
+
+// TestPrompt_SubAgents_AgentField verifies all 5 sub-agent prompts contain correct agent name (AC#3).
+func TestPrompt_SubAgents_AgentField(t *testing.T) {
+	t.Parallel()
+	agents := []struct {
+		name   string
+		prompt string
+		want   string
+	}{
+		{"quality", agentQualityPrompt, "- **Агент**: quality"},
+		{"implementation", agentImplementationPrompt, "- **Агент**: implementation"},
+		{"simplification", agentSimplificationPrompt, "- **Агент**: simplification"},
+		{"design-principles", agentDesignPrinciplesPrompt, "- **Агент**: design-principles"},
+		{"test-coverage", agentTestCoveragePrompt, "- **Агент**: test-coverage"},
+	}
+	for _, a := range agents {
+		t.Run(a.name, func(t *testing.T) {
+			if !strings.Contains(a.prompt, a.want) {
+				t.Errorf("%s agent missing %q", a.name, a.want)
+			}
+		})
+	}
+}
+
+// TestPrompt_Review_AgentFieldInFormat verifies review.md includes Agent field in findings format (AC#2).
+func TestPrompt_Review_AgentFieldInFormat(t *testing.T) {
+	t.Parallel()
+	if !strings.Contains(reviewTemplate, "**Агент**") {
+		t.Error("review.md missing **Агент** field in findings format")
+	}
+	if !strings.Contains(reviewTemplate, "<agent_name>") {
+		t.Error("review.md missing <agent_name> placeholder")
+	}
+	if !strings.Contains(reviewTemplate, "5 fields") {
+		t.Error("review.md should mention 5 fields (was 4)")
+	}
+}
+
+// --- Story 9.7: Pre-flight Check + TaskHash + LogOneline ---
+
+// TestPrompt_Execute_TaskHashMarker verifies execute.md contains [task:__TASK_HASH__]
+// instruction in Commit Rules and __TASK_HASH__ is replaced (AC#8).
+func TestPrompt_Execute_TaskHashMarker(t *testing.T) {
+	data := config.TemplateData{}
+	replacements := executeReplacements()
+	replacements["__TASK_HASH__"] = "a1b2c3"
+
+	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
+	if err != nil {
+		t.Fatalf("AssemblePrompt error: %v", err)
+	}
+
+	// AC#8: commit rules contain task marker instruction
+	if !strings.Contains(got, "[task:a1b2c3]") {
+		t.Error("execute prompt missing [task:<hash>] marker after replacement")
+	}
+	// AC#8: instruction text present
+	if !strings.Contains(got, "В конце commit message добавь маркер") {
+		t.Error("execute prompt missing task marker instruction text")
+	}
+	// AC#8: example present
+	if !strings.Contains(got, "feat: add user validation [task:a1b2c3]") {
+		t.Error("execute prompt missing task marker example")
+	}
+	// Verify no unreplaced __TASK_HASH__ remains
+	if strings.Contains(got, "__TASK_HASH__") {
+		t.Error("execute prompt still contains unreplaced __TASK_HASH__")
 	}
 }

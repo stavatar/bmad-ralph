@@ -422,30 +422,38 @@ func TestSessionResult_ZeroValue(t *testing.T) {
 	if r.Model != "" {
 		t.Errorf("zero Model = %q, want empty", r.Model)
 	}
+	if r.Truncated {
+		t.Errorf("zero Truncated = %v, want false", r.Truncated)
+	}
+	if r.Subtype != "" {
+		t.Errorf("zero Subtype = %q, want empty", r.Subtype)
+	}
 }
 
 func TestParseResult_UsageMetrics(t *testing.T) {
 	tests := []struct {
-		name            string
-		json            string
-		wantMetrics     bool
-		wantInput       int
-		wantOutput      int
-		wantCacheRead   int
-		wantNumTurns    int
-		wantCostUSD     float64
-		wantModel       string
+		name             string
+		json             string
+		wantMetrics      bool
+		wantInput        int
+		wantOutput       int
+		wantCacheRead    int
+		wantCacheCreate  int
+		wantNumTurns     int
+		wantCostUSD      float64
+		wantModel        string
 	}{
 		{
 			name: "with usage data",
-			json: `{"type":"result","session_id":"s1","result":"ok","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_tokens":200},"model":"claude-sonnet-4-20250514","num_turns":3}`,
-			wantMetrics:   true,
-			wantInput:     1000,
-			wantOutput:    500,
-			wantCacheRead: 200,
-			wantNumTurns:  3,
-			wantCostUSD:   0.0,
-			wantModel:     "claude-sonnet-4-20250514",
+			json: `{"type":"result","session_id":"s1","result":"ok","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":200,"cache_creation_input_tokens":50},"model":"claude-sonnet-4-20250514","num_turns":3}`,
+			wantMetrics:     true,
+			wantInput:       1000,
+			wantOutput:      500,
+			wantCacheRead:   200,
+			wantCacheCreate: 50,
+			wantNumTurns:    3,
+			wantCostUSD:     0.0,
+			wantModel:       "claude-sonnet-4-20250514",
 		},
 		{
 			name:        "without usage data graceful degradation",
@@ -455,14 +463,15 @@ func TestParseResult_UsageMetrics(t *testing.T) {
 		},
 		{
 			name: "usage with zero tokens",
-			json: `{"type":"result","session_id":"s3","result":"ok","usage":{"input_tokens":0,"output_tokens":0,"cache_read_tokens":0},"model":"claude-sonnet-4-20250514","num_turns":0}`,
-			wantMetrics:   true,
-			wantInput:     0,
-			wantOutput:    0,
-			wantCacheRead: 0,
-			wantNumTurns:  0,
-			wantCostUSD:   0.0,
-			wantModel:     "claude-sonnet-4-20250514",
+			json: `{"type":"result","session_id":"s3","result":"ok","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"model":"claude-sonnet-4-20250514","num_turns":0}`,
+			wantMetrics:     true,
+			wantInput:       0,
+			wantOutput:      0,
+			wantCacheRead:   0,
+			wantCacheCreate: 0,
+			wantNumTurns:    0,
+			wantCostUSD:     0.0,
+			wantModel:       "claude-sonnet-4-20250514",
 		},
 		{
 			name: "model without usage",
@@ -472,20 +481,33 @@ func TestParseResult_UsageMetrics(t *testing.T) {
 		},
 		{
 			name: "array format with usage",
-			json: `[{"type":"result","session_id":"s5","result":"ok","usage":{"input_tokens":2000,"output_tokens":800,"cache_read_tokens":100},"model":"claude-opus-4-20250514","num_turns":5}]`,
-			wantMetrics:   true,
-			wantInput:     2000,
-			wantOutput:    800,
-			wantCacheRead: 100,
-			wantNumTurns:  5,
-			wantCostUSD:   0.0,
-			wantModel:     "claude-opus-4-20250514",
+			json: `[{"type":"result","session_id":"s5","result":"ok","usage":{"input_tokens":2000,"output_tokens":800,"cache_read_input_tokens":100,"cache_creation_input_tokens":25},"model":"claude-opus-4-20250514","num_turns":5}]`,
+			wantMetrics:     true,
+			wantInput:       2000,
+			wantOutput:      800,
+			wantCacheRead:   100,
+			wantCacheCreate: 25,
+			wantNumTurns:    5,
+			wantCostUSD:     0.0,
+			wantModel:       "claude-opus-4-20250514",
 		},
 		{
 			name:        "array format without usage",
 			json:        `[{"type":"result","session_id":"s6","result":"ok"}]`,
 			wantMetrics: false,
 			wantModel:   "",
+		},
+		{
+			name:            "with total_cost_usd from CLI",
+			json:            `{"type":"result","session_id":"s7","result":"ok","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":200,"cache_creation_input_tokens":50},"model":"claude-opus-4-20250514","num_turns":3,"total_cost_usd":0.042}`,
+			wantMetrics:     true,
+			wantInput:       1000,
+			wantOutput:      500,
+			wantCacheRead:   200,
+			wantCacheCreate: 50,
+			wantNumTurns:    3,
+			wantCostUSD:     0.042,
+			wantModel:       "claude-opus-4-20250514",
 		},
 	}
 
@@ -514,6 +536,9 @@ func TestParseResult_UsageMetrics(t *testing.T) {
 				if result.Metrics.CacheReadTokens != tc.wantCacheRead {
 					t.Errorf("CacheReadTokens = %d, want %d", result.Metrics.CacheReadTokens, tc.wantCacheRead)
 				}
+				if result.Metrics.CacheCreationTokens != tc.wantCacheCreate {
+					t.Errorf("CacheCreationTokens = %d, want %d", result.Metrics.CacheCreationTokens, tc.wantCacheCreate)
+				}
 				if result.Metrics.NumTurns != tc.wantNumTurns {
 					t.Errorf("NumTurns = %d, want %d", result.Metrics.NumTurns, tc.wantNumTurns)
 				}
@@ -529,6 +554,61 @@ func TestParseResult_UsageMetrics(t *testing.T) {
 	}
 }
 
+func TestParseResult_TruncatedAndSubtype(t *testing.T) {
+	tests := []struct {
+		name          string
+		json          string
+		exitCode      int
+		wantTruncated bool
+		wantSubtype   string
+	}{
+		{
+			name:          "error_max_turns with exit 0",
+			json:          `{"type":"result","session_id":"s1","result":"max turns","is_error":true,"subtype":"error_max_turns","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"num_turns":50}`,
+			exitCode:      0,
+			wantTruncated: true,
+			wantSubtype:   "error_max_turns",
+		},
+		{
+			name:          "is_error true with non-zero exit",
+			json:          `{"type":"result","session_id":"s2","result":"fail","is_error":true,"subtype":"error_unknown"}`,
+			exitCode:      1,
+			wantTruncated: false,
+			wantSubtype:   "error_unknown",
+		},
+		{
+			name:          "normal success no truncation",
+			json:          `{"type":"result","session_id":"s3","result":"ok"}`,
+			exitCode:      0,
+			wantTruncated: false,
+			wantSubtype:   "",
+		},
+		{
+			name:          "array format error_max_turns",
+			json:          `[{"type":"result","session_id":"s4","result":"truncated","is_error":true,"subtype":"error_max_turns"}]`,
+			exitCode:      0,
+			wantTruncated: true,
+			wantSubtype:   "error_max_turns",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := &RawResult{Stdout: []byte(tc.json), ExitCode: tc.exitCode}
+			result, err := ParseResult(raw, time.Second)
+			if err != nil {
+				t.Fatalf("ParseResult() error = %v, want nil", err)
+			}
+			if result.Truncated != tc.wantTruncated {
+				t.Errorf("Truncated = %v, want %v", result.Truncated, tc.wantTruncated)
+			}
+			if result.Subtype != tc.wantSubtype {
+				t.Errorf("Subtype = %q, want %q", result.Subtype, tc.wantSubtype)
+			}
+		})
+	}
+}
+
 func TestSessionMetrics_ZeroValue(t *testing.T) {
 	var m SessionMetrics
 	if m.InputTokens != 0 {
@@ -539,6 +619,9 @@ func TestSessionMetrics_ZeroValue(t *testing.T) {
 	}
 	if m.CacheReadTokens != 0 {
 		t.Errorf("zero CacheReadTokens = %d, want 0", m.CacheReadTokens)
+	}
+	if m.CacheCreationTokens != 0 {
+		t.Errorf("zero CacheCreationTokens = %d, want 0", m.CacheCreationTokens)
 	}
 	if m.CostUSD != 0 {
 		t.Errorf("zero CostUSD = %f, want 0", m.CostUSD)

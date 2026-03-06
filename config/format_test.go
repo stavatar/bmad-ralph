@@ -24,7 +24,6 @@ func TestSprintTasksFormat_ContainsMarkers(t *testing.T) {
 		{"FeedbackPrefix marker", FeedbackPrefix},
 		{"source field syntax", "source:"},
 		{"SETUP service prefix", "[SETUP]"},
-		{"VERIFY service prefix", "[VERIFY]"},
 		{"E2E service prefix", "[E2E]"},
 		{"source field regex pattern", `^\s+source:\s+\S+#\S+`},
 	}

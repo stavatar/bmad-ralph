@@ -11,3 +11,6 @@
   - [Architecture Validation Results](#architecture-validation-results)
   - [Architecture Completion Summary](#architecture-completion-summary)
   - [Observability & Metrics](observability-metrics.md) — Epic 7: metrics types, MetricsCollector, data flow, package mapping
+  - [Serena Memory Sync](serena-memory-sync.md) — Epic 8: sync-сессия, backup/rollback, конфигурация, интеграция в runner
+  - [Ralph Run Robustness](ralph-run-robustness.md) — Epic 9: pre-flight, анти-гидра, filepath нормализация, scope creep, agent stats
+  - [Context Window Observability](context-window-observability.md) — Epic 10: PreCompact hook, context fill formula, metrics extension, warning system

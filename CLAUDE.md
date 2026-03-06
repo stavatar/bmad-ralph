@@ -81,3 +81,4 @@ See `docs/project-context.md` for full architecture context.
 - Sprint tracking: `docs/sprint-artifacts/sprint-status.yaml`
 - Story/epic files: `docs/sprint-artifacts/<key>.md`, `docs/epics/epic-N-*.md`
 - Communication language: Русский
+- **СТРОГО**: весь вывод пользователю — только на русском языке. Никакого английского в объяснениях, анализе, таблицах, заголовках. Технические термины (имена функций, пакетов, переменных) остаются как есть, но весь остальной текст — на русском.

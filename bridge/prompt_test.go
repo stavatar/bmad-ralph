@@ -217,7 +217,6 @@ func TestBridgePrompt_ContainsFormatContract(t *testing.T) {
 		{"FeedbackPrefix marker", config.FeedbackPrefix},
 		{"source field syntax", "source:"},
 		{"SETUP service prefix", "[SETUP]"},
-		{"VERIFY service prefix", "[VERIFY]"},
 		{"E2E service prefix", "[E2E]"},
 	}
 	for _, m := range markers {

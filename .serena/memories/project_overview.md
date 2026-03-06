@@ -18,13 +18,14 @@ It manages iterative AI-driven development cycles with code review, human gates,
 - `.gitattributes` enforces LF on git add
 
 ## Project Status
-All 7 epics complete (FR1-FR56): Foundation, Bridge, Core Loop, Code Review, Human Gates, Knowledge Management, Observability & Metrics.
-Total: 62 stories, ~350+ acceptance criteria, ~137 testing/code quality patterns.
+All 8 epics complete (FR1-FR66): Foundation, Bridge, Core Loop, Code Review, Human Gates, Knowledge Management, Observability & Metrics, Serena Memory Sync.
+Total: 69 stories, ~400+ acceptance criteria, ~137 testing/code quality patterns.
+Post-epic: Session log saving added — all Claude sessions (execute, review, resume, sync) write stdout/stderr to `.ralph/logs/sessions/<runID>/`.
 
 ## Package Structure (dependency direction: top-down, cycles forbidden)
 ```
 cmd/ralph/     → CLI entry point, exit codes, cobra commands (run, bridge, distill)
-runner/        → Core execution loop, prompts, git, scanning, knowledge mgmt, metrics, similarity
+runner/        → Core execution loop, prompts, git, scanning, knowledge mgmt, metrics, similarity, session logging
 bridge/        → Bridge mode (single-shot sessions)
 session/       → Claude session management, result parsing
 gates/         → Human gate prompts and decisions

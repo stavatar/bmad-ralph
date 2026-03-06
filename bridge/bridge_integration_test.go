@@ -256,7 +256,6 @@ func TestBridge_Integration_CreateFlow(t *testing.T) {
 		{"story content", "User Login Authentication"},
 		{"gate instruction", "[GATE]"},
 		{"setup instruction", "[SETUP]"},
-		{"verify instruction", "[VERIFY]"},
 		{"e2e instruction", "[E2E]"},
 		{"source traceability", "source:"},
 		{"AC classification", "AC Classification"},

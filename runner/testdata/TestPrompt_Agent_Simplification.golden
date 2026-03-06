@@ -24,11 +24,12 @@ Do NOT report findings in these areas — they are handled by dedicated agents:
 
 ## Instructions
 
-1. Review ONLY the changed files in the diff.
+1. Review ONLY the diff (changes for the current task). Do NOT criticize pre-existing code that was not modified in this task.
 2. For each finding, report:
    - **WHAT**: The verbose or complex construct found
    - **WHERE**: File path and line number (e.g., `runner/runner.go:42`)
    - **WHY**: How the simpler alternative improves readability or reduces code
    - **HOW**: The specific simpler replacement code
 3. Classify each finding by severity: HIGH (significant complexity), MED (moderate verbosity), or LOW (minor style improvement).
-4. If the code is already clean and concise, explicitly state: "No simplification findings."
+4. Include `- **Агент**: simplification` in every finding you report.
+5. If the code is already clean and concise, explicitly state: "No simplification findings."

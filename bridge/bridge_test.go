@@ -421,8 +421,8 @@ func TestRun_GoldenFiles(t *testing.T) {
 				if !strings.Contains(output, "[SETUP]") {
 					t.Errorf("output missing [SETUP] task prefix")
 				}
-				if !strings.Contains(output, "[VERIFY]") {
-					t.Errorf("output missing [VERIFY] task prefix")
+				if !strings.Contains(output, "[E2E]") {
+					t.Errorf("output missing [E2E] task prefix")
 				}
 			},
 		},
@@ -455,8 +455,8 @@ func TestRun_GoldenFiles(t *testing.T) {
 						t.Errorf("output missing source reference %s", ac)
 					}
 				}
-				// Richest fixture: verify ALL 3 service identifiers individually
-				for _, svc := range []string{"#SETUP", "#VERIFY", "#E2E"} {
+				// Richest fixture: verify service identifiers individually
+				for _, svc := range []string{"#SETUP", "#E2E"} {
 					if !strings.Contains(output, svc) {
 						t.Errorf("output missing service identifier %s", svc)
 					}
@@ -986,9 +986,8 @@ func TestRun_CrossValidation_BridgeToScanner(t *testing.T) {
 
 	// Verify at least one service prefix exists
 	hasService := strings.Contains(output, "[SETUP]") ||
-		strings.Contains(output, "[VERIFY]") ||
 		strings.Contains(output, "[E2E]")
 	if !hasService {
-		t.Errorf("golden file missing service prefixes ([SETUP], [VERIFY], or [E2E])")
+		t.Errorf("golden file missing service prefixes ([SETUP] or [E2E])")
 	}
 }

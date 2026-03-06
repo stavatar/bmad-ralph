@@ -23,11 +23,12 @@ Do NOT report findings in these areas — they are handled by dedicated agents:
 
 ## Instructions
 
-1. Review the changed files in the diff AND their surrounding context to identify cross-cutting concerns.
+1. Review ONLY the diff (changes for the current task). Do NOT criticize pre-existing code that was not modified in this task. You may read surrounding context for understanding, but findings must be about the changed code.
 2. For each finding, report:
    - **WHAT**: The specific DRY, KISS, or SRP violation
    - **WHERE**: File paths and line numbers of ALL locations involved (e.g., `runner/runner.go:42` and `runner/review.go:87`)
    - **WHY**: How this violation impacts maintainability, testability, or comprehension
    - **HOW**: A specific refactoring suggestion (e.g., "extract shared helper", "merge into single function", "split struct into two")
 3. Classify each finding by severity: HIGH (significant architectural issue), MED (moderate duplication or complexity), or LOW (minor structural improvement).
-4. If no DRY/KISS/SRP violations are found, explicitly state: "No design principles findings."
+4. Include `- **Агент**: design-principles` in every finding you report.
+5. If no DRY/KISS/SRP violations are found, explicitly state: "No design principles findings."

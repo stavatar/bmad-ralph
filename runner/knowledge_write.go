@@ -2,7 +2,9 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -84,8 +86,10 @@ func (f *FileKnowledgeWriter) ValidateNewLessons(_ context.Context, data Lessons
 
 	currentContent, err := os.ReadFile(learningsPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			// File doesn't exist yet — nothing to validate
+		if errors.Is(err, os.ErrNotExist) {
+			// NOTE: no RunLogger available in standalone functions — using stdlib log.
+			// INFO (not WARN): missing LEARNINGS.md on fresh projects is expected.
+			log.Printf("INFO: %s not found, first run — skipping validation", learningsPath)
 			return nil
 		}
 		return fmt.Errorf("runner: validate lessons: %w", err)
@@ -143,7 +147,7 @@ func (f *FileKnowledgeWriter) ValidateNewLessons(_ context.Context, data Lessons
 		if len(issues) > 0 {
 			tagEntryInContent(&lines, entry, issues)
 			modified = true
-			fmt.Fprintf(os.Stderr, "WARNING: Entry saved with [needs-formatting] — will be fixed at distillation\n")
+			fmt.Fprintf(os.Stderr, "WARNING: Entry saved with [needs-formatting] — will be fixed at distillation (entry: %s: %s)\n", entry.Category, entry.Topic)
 		}
 	}
 
@@ -433,7 +437,7 @@ func mergeEntryContent(content string, existing, newEntry *parsedEntry) string {
 func BudgetCheck(_ context.Context, learningsPath string, limit int) (BudgetStatus, error) {
 	content, err := os.ReadFile(learningsPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return BudgetStatus{Limit: limit}, nil
 		}
 		return BudgetStatus{}, fmt.Errorf("runner: budget check: %w", err)

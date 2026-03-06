@@ -611,12 +611,12 @@ func TestRunner_Execute_Integration_WithMetricsCollector(t *testing.T) {
 			{
 				Type: "execute", ExitCode: 0, SessionID: "m-1",
 				Model: "claude-sonnet-4-20250514",
-				Usage: map[string]int{"input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 10},
+				Usage: map[string]int{"input_tokens": 100, "output_tokens": 50, "cache_read_input_tokens": 10},
 			},
 			{
 				Type: "execute", ExitCode: 0, SessionID: "m-2",
 				Model: "claude-sonnet-4-20250514",
-				Usage: map[string]int{"input_tokens": 200, "output_tokens": 80, "cache_read_tokens": 20},
+				Usage: map[string]int{"input_tokens": 200, "output_tokens": 80, "cache_read_input_tokens": 20},
 			},
 		},
 	}
@@ -656,8 +656,8 @@ func TestRunner_Execute_Integration_WithMetricsCollector(t *testing.T) {
 	if t0.Name != "Task one" {
 		t.Errorf("Tasks[0].Name = %q, want %q", t0.Name, "Task one")
 	}
-	if t0.Status != "done" {
-		t.Errorf("Tasks[0].Status = %q, want %q", t0.Status, "done")
+	if t0.Status != "completed" {
+		t.Errorf("Tasks[0].Status = %q, want %q", t0.Status, "completed")
 	}
 	if t0.CommitSHA != "bbb" {
 		t.Errorf("Tasks[0].CommitSHA = %q, want %q", t0.CommitSHA, "bbb")
@@ -680,8 +680,8 @@ func TestRunner_Execute_Integration_WithMetricsCollector(t *testing.T) {
 	if t1.Name != "Task two" {
 		t.Errorf("Tasks[1].Name = %q, want %q", t1.Name, "Task two")
 	}
-	if t1.Status != "done" {
-		t.Errorf("Tasks[1].Status = %q, want %q", t1.Status, "done")
+	if t1.Status != "completed" {
+		t.Errorf("Tasks[1].Status = %q, want %q", t1.Status, "completed")
 	}
 	if t1.CommitSHA != "ccc" {
 		t.Errorf("Tasks[1].CommitSHA = %q, want %q", t1.CommitSHA, "ccc")

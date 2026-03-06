@@ -24,11 +24,17 @@ type Config struct {
 	GatesEnabled        bool   `yaml:"gates_enabled"`
 	GatesCheckpoint     int    `yaml:"gates_checkpoint"`
 	ReviewEvery         int    `yaml:"review_every"`
-	ModelExecute        string `yaml:"model_execute"`
-	ModelReview         string `yaml:"model_review"`
-	ReviewMinSeverity   string `yaml:"review_min_severity"`
+	ModelExecute         string `yaml:"model_execute"`
+	ModelReview          string `yaml:"model_review"`
+	ModelReviewLight     string `yaml:"model_review_light"`
+	ReviewLightMaxFiles  int    `yaml:"review_light_max_files"`
+	ReviewLightMaxLines  int    `yaml:"review_light_max_lines"`
+	ReviewMinSeverity    string `yaml:"review_min_severity"`
 	AlwaysExtract       bool   `yaml:"always_extract"`
-	SerenaEnabled   bool `yaml:"serena_enabled"`
+	SerenaEnabled       bool   `yaml:"serena_enabled"`
+	SerenaSyncEnabled   bool   `yaml:"serena_sync_enabled"`
+	SerenaSyncMaxTurns  int    `yaml:"serena_sync_max_turns"`
+	SerenaSyncTrigger   string `yaml:"serena_sync_trigger"`
 	LearningsBudget int  `yaml:"learnings_budget"`
 	DistillCooldown int  `yaml:"distill_cooldown"`
 	DistillTimeout  int  `yaml:"distill_timeout"`
@@ -38,6 +44,7 @@ type Config struct {
 	SimilarityHard    float64 `yaml:"similarity_hard"`
 	BudgetMaxUSD      float64 `yaml:"budget_max_usd"`
 	BudgetWarnPct     int     `yaml:"budget_warn_pct"`
+	TaskBudgetMaxUSD  float64 `yaml:"task_budget_max_usd"`
 	ModelPricing        map[string]Pricing `yaml:"model_pricing"`
 	LogDir              string             `yaml:"log_dir"`
 	StoriesDir          string             `yaml:"stories_dir"`
@@ -58,6 +65,7 @@ type CLIFlags struct {
 	ModelExecute        *string
 	ModelReview         *string
 	AlwaysExtract       *bool
+	SerenaSyncEnabled   *bool
 }
 
 func defaultConfig() *Config {
@@ -99,6 +107,9 @@ func applyCLIFlags(cfg *Config, flags CLIFlags) {
 	}
 	if flags.AlwaysExtract != nil {
 		cfg.AlwaysExtract = *flags.AlwaysExtract
+	}
+	if flags.SerenaSyncEnabled != nil {
+		cfg.SerenaSyncEnabled = *flags.SerenaSyncEnabled
 	}
 }
 
@@ -157,6 +168,7 @@ func Load(flags CLIFlags) (*Config, error) {
 }
 
 // Validate checks Config field constraints and returns a descriptive error on first violation.
+// SerenaSyncMaxTurns < 1 is silently corrected to 5 (not an error).
 func (c *Config) Validate() error {
 	if c.MaxTurns <= 0 {
 		return fmt.Errorf("config: validate: max_turns must be > 0, got %d", c.MaxTurns)
@@ -194,6 +206,9 @@ func (c *Config) Validate() error {
 	if c.BudgetMaxUSD > 0 && (c.BudgetWarnPct < 1 || c.BudgetWarnPct > 99) {
 		return fmt.Errorf("config: validate: budget_warn_pct must be 1-99, got %d", c.BudgetWarnPct)
 	}
+	if c.TaskBudgetMaxUSD < 0 {
+		return fmt.Errorf("config: validate: task_budget_max_usd must be >= 0, got %.2f", c.TaskBudgetMaxUSD)
+	}
 	if c.SimilarityWindow < 0 {
 		return fmt.Errorf("config: validate: similarity_window must be >= 0, got %d", c.SimilarityWindow)
 	}
@@ -207,6 +222,15 @@ func (c *Config) Validate() error {
 		if c.SimilarityWarn >= c.SimilarityHard {
 			return fmt.Errorf("config: validate: similarity_warn must be less than similarity_hard")
 		}
+	}
+	switch c.SerenaSyncTrigger {
+	case "", "run", "task":
+		// valid
+	default:
+		return fmt.Errorf("config: validate: invalid serena_sync_trigger %q (must be \"run\" or \"task\")", c.SerenaSyncTrigger)
+	}
+	if c.SerenaSyncMaxTurns < 1 {
+		c.SerenaSyncMaxTurns = 5
 	}
 	return nil
 }

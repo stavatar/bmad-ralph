@@ -33,8 +33,6 @@ func TestExitCode_TableDriven(t *testing.T) {
 		{"ErrMaxRetries", config.ErrMaxRetries, exitPartial},
 		{"ErrNoTasks", config.ErrNoTasks, exitFatal},
 		{"wrapped ErrMaxRetries", fmt.Errorf("runner: %w", config.ErrMaxRetries), exitPartial},
-		{"ErrMaxReviewCycles", config.ErrMaxReviewCycles, exitPartial},
-		{"wrapped ErrMaxReviewCycles", fmt.Errorf("runner: %w", config.ErrMaxReviewCycles), exitPartial},
 	}
 
 	for _, tt := range tests {

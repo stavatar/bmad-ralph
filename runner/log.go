@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/bmad-ralph/bmad-ralph/session"
 )
 
 // LogLevel represents the severity of a log entry.
@@ -22,12 +24,16 @@ const (
 )
 
 // RunLogger writes structured log entries to a daily log file and to stderr.
+// It also saves per-session raw output (stdout/stderr) to individual log files
+// under <logDir>/sessions/<runID>/ for post-mortem debugging.
 // Format: "2006-01-02T15:04:05 LEVEL [runner] message key=value key=value"
 // Thread safety: not goroutine-safe — ralph is single-threaded in Execute.
 type RunLogger struct {
-	file   io.WriteCloser
-	stderr io.Writer
-	runID  string
+	file    io.WriteCloser
+	stderr  io.Writer
+	runID   string
+	sessDir string // directory for session log files; empty = disabled
+	sessSeq int    // monotonic session sequence counter
 }
 
 // noopWriteCloser is a no-op writer for the NopLogger.
@@ -49,6 +55,7 @@ func NopLogger() *RunLogger {
 //   - <projectRoot>/<logDir>/ralph-YYYY-MM-DD.log (appended)
 //   - os.Stderr (duplicated for live terminal visibility)
 //
+// Session logs are saved to <projectRoot>/<logDir>/sessions/<runID>/.
 // The log directory is created if it does not exist.
 // Returns an error if the directory cannot be created or the file cannot be opened.
 func OpenRunLogger(projectRoot, logDir, runID string) (*RunLogger, error) {
@@ -65,10 +72,13 @@ func OpenRunLogger(projectRoot, logDir, runID string) (*RunLogger, error) {
 		return nil, fmt.Errorf("runner: log: open: %w", err)
 	}
 
+	sessDir := filepath.Join(dir, "sessions", runID)
+
 	return &RunLogger{
-		file:   f,
-		stderr: os.Stderr,
-		runID:  runID,
+		file:    f,
+		stderr:  os.Stderr,
+		runID:   runID,
+		sessDir: sessDir,
 	}, nil
 }
 
@@ -149,4 +159,72 @@ func kvs(pairs ...[]string) []string {
 		out = append(out, p...)
 	}
 	return out
+}
+
+// SessionLogInfo holds metadata for a session log file header.
+type SessionLogInfo struct {
+	SessionType string        // e.g. "execute", "review", "once", "once-review", "resume", "sync"
+	Seq         int           // monotonic sequence number within the run
+	ExitCode    int           // process exit code
+	Elapsed     time.Duration // wall-clock session duration
+}
+
+// SaveSessionLog writes a session log file to sessDir with the given metadata and raw output.
+// File format: <type>-<seq>-<timestamp>.log containing a header line, stdout section, and stderr section.
+// Returns an error if the directory cannot be created or the file cannot be written.
+func SaveSessionLog(sessDir string, info SessionLogInfo, raw *session.RawResult) error {
+	if sessDir == "" || raw == nil {
+		return nil
+	}
+
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		return fmt.Errorf("runner: session log: mkdir: %w", err)
+	}
+
+	ts := time.Now().Format("20060102T150405")
+	filename := fmt.Sprintf("%s-%03d-%s.log", info.SessionType, info.Seq, ts)
+	logPath := filepath.Join(sessDir, filename)
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "=== SESSION %s seq=%d exit_code=%d elapsed=%.1fs ===\n",
+		info.SessionType, info.Seq, info.ExitCode, info.Elapsed.Seconds())
+	fmt.Fprintf(&sb, "=== STDOUT (%d bytes) ===\n", len(raw.Stdout))
+	sb.Write(raw.Stdout)
+	if len(raw.Stdout) > 0 && raw.Stdout[len(raw.Stdout)-1] != '\n' {
+		sb.WriteByte('\n')
+	}
+	fmt.Fprintf(&sb, "=== STDERR (%d bytes) ===\n", len(raw.Stderr))
+	sb.Write(raw.Stderr)
+	if len(raw.Stderr) > 0 && raw.Stderr[len(raw.Stderr)-1] != '\n' {
+		sb.WriteByte('\n')
+	}
+
+	if err := os.WriteFile(logPath, []byte(sb.String()), 0644); err != nil {
+		return fmt.Errorf("runner: session log: write: %w", err)
+	}
+	return nil
+}
+
+// NextSeq returns the current session sequence number and increments it.
+func (l *RunLogger) NextSeq() int {
+	seq := l.sessSeq
+	l.sessSeq++
+	return seq
+}
+
+// SaveSession saves a session log file. Write failures are non-fatal: logged as warnings.
+func (l *RunLogger) SaveSession(sessionType string, raw *session.RawResult, exitCode int, elapsed time.Duration) {
+	if l.sessDir == "" {
+		return
+	}
+	seq := l.NextSeq()
+	info := SessionLogInfo{
+		SessionType: sessionType,
+		Seq:         seq,
+		ExitCode:    exitCode,
+		Elapsed:     elapsed,
+	}
+	if err := SaveSessionLog(l.sessDir, info, raw); err != nil {
+		l.Warn("session log save failed", "error", err.Error(), "type", sessionType)
+	}
 }
