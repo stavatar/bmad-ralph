@@ -74,14 +74,16 @@ func TestFormatSummary_WithMetrics(t *testing.T) {
 		},
 	}
 	cfg := &config.Config{
-		LogDir: ".ralph/logs",
-		RunID:  "test-run-id",
+		LogDir:             ".ralph/logs",
+		RunID:              "test-run-id",
+		ContextWarnPct:     55,
+		ContextCriticalPct: 65,
 	}
 
 	out := formatSummary(m, cfg)
 	lines := strings.Split(out, "\n")
-	if len(lines) != 4 {
-		t.Fatalf("summary lines = %d, want 4:\n%s", len(lines), out)
+	if len(lines) != 5 {
+		t.Fatalf("summary lines = %d, want 5:\n%s", len(lines), out)
 	}
 
 	// Line 1: task counts
@@ -124,8 +126,12 @@ func TestFormatSummary_WithMetrics(t *testing.T) {
 	}
 
 	// Line 4: report path
-	if !strings.Contains(lines[3], "ralph-run-test-run-id.json") {
-		t.Errorf("line 4 missing report path: %s", lines[3])
+	// Line 4: context
+	if !strings.Contains(lines[3], "Context: max 0.0% fill, 0 compactions") {
+		t.Errorf("line 4 missing context: %s", lines[3])
+	}
+	if !strings.Contains(lines[4], "ralph-run-test-run-id.json") {
+		t.Errorf("line 5 missing report path: %s", lines[4])
 	}
 }
 
@@ -526,8 +532,8 @@ func TestFormatSummary_WithSerenaSync(t *testing.T) {
 
 	// Verify 5 lines (4 base + 1 sync line)
 	lines := strings.Split(summary, "\n")
-	if len(lines) != 5 {
-		t.Fatalf("summary lines = %d, want 5 (4 base + sync):\n%s", len(lines), summary)
+	if len(lines) != 6 {
+		t.Fatalf("summary lines = %d, want 6 (5 base + sync):\n%s", len(lines), summary)
 	}
 
 	if !strings.Contains(summary, "Serena sync: success ($0.05, 12s)") {
@@ -545,5 +551,72 @@ func TestFormatSummary_WithoutSerenaSync(t *testing.T) {
 
 	if strings.Contains(summary, "Serena sync") {
 		t.Errorf("summary should not contain sync line when SerenaSync is nil, got:\n%s", summary)
+	}
+}
+
+// --- Story 10.7: formatSummary context line tests ---
+
+func TestFormatSummary_ContextLine(t *testing.T) {
+	tests := []struct {
+		name       string
+		fillPct    float64
+		compactions int
+		criticalPct int
+		wantText   string
+		wantMarker bool // expect [!]
+	}{
+		{
+			name:        "normal no compactions",
+			fillPct:     42.7,
+			compactions: 0,
+			criticalPct: 65,
+			wantText:    "Context: max 42.7% fill, 0 compactions",
+			wantMarker:  false,
+		},
+		{
+			name:        "with compactions",
+			fillPct:     65.0,
+			compactions: 2,
+			criticalPct: 65,
+			wantText:    "Context: max 65.0% fill, 2 compactions",
+			wantMarker:  true,
+		},
+		{
+			name:        "critical fill",
+			fillPct:     72.0,
+			compactions: 0,
+			criticalPct: 65,
+			wantText:    "Context: max 72.0% fill, 0 compactions",
+			wantMarker:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &runner.RunMetrics{
+				MaxContextFillPct: tc.fillPct,
+				TotalCompactions:  tc.compactions,
+			}
+			cfg := &config.Config{
+				LogDir:             t.TempDir(),
+				RunID:              "ctx-test",
+				ContextWarnPct:     55,
+				ContextCriticalPct: tc.criticalPct,
+			}
+			out := formatSummary(m, cfg)
+
+			if !strings.Contains(out, tc.wantText) {
+				t.Errorf("summary missing %q\ngot: %s", tc.wantText, out)
+			}
+			if tc.wantMarker {
+				if !strings.Contains(out, "[!]") {
+					t.Errorf("summary missing [!] marker\ngot: %s", out)
+				}
+			} else {
+				if strings.Contains(out, "[!]") {
+					t.Errorf("summary should not contain [!] marker\ngot: %s", out)
+				}
+			}
+		})
 	}
 }

@@ -356,6 +356,8 @@ func TestSaveSessionLog_WritesFile(t *testing.T) {
 		{"header seq", "seq=0"},
 		{"header exit", "exit_code=0"},
 		{"header elapsed", "elapsed=5.0s"},
+		{"header compactions", "compactions=0"},
+		{"header max_fill", "max_fill=0.0%"},
 		{"stdout section", "=== STDOUT (15 bytes) ==="},
 		{"stdout content", `{"result":"ok"}`},
 		{"stderr section", "=== STDERR (13 bytes) ==="},
@@ -375,6 +377,59 @@ func TestSaveSessionLog_WritesFile(t *testing.T) {
 	}
 	if !strings.HasSuffix(name, ".log") {
 		t.Errorf("filename suffix = %q, want *.log", name)
+	}
+}
+
+func TestSaveSessionLog_ContextFields(t *testing.T) {
+	dir := t.TempDir()
+	sessDir := filepath.Join(dir, "sessions", "run-ctx")
+
+	raw := &session.RawResult{
+		Stdout:   []byte("output"),
+		Stderr:   []byte("errors"),
+		ExitCode: 0,
+	}
+	info := runner.SessionLogInfo{
+		SessionType: "execute",
+		Seq:         2,
+		ExitCode:    0,
+		Elapsed:     10 * time.Second,
+		Compactions: 3,
+		MaxFillPct:  72.5,
+	}
+
+	err := runner.SaveSessionLog(sessDir, info, raw)
+	if err != nil {
+		t.Fatalf("SaveSessionLog: unexpected error: %v", err)
+	}
+
+	entries, readErr := os.ReadDir(sessDir)
+	if readErr != nil {
+		t.Fatalf("read session dir: %v", readErr)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(entries))
+	}
+
+	content, readErr := os.ReadFile(filepath.Join(sessDir, entries[0].Name()))
+	if readErr != nil {
+		t.Fatalf("read session log: %v", readErr)
+	}
+
+	text := string(content)
+	checks := []struct {
+		label string
+		want  string
+	}{
+		{"compactions in header", "compactions=3"},
+		{"max_fill in header", "max_fill=72.5%"},
+		{"header seq", "seq=2"},
+		{"header elapsed", "elapsed=10.0s"},
+	}
+	for _, c := range checks {
+		if !strings.Contains(text, c.want) {
+			t.Errorf("session log missing %s: %q\ngot:\n%s", c.label, c.want, text)
+		}
 	}
 }
 

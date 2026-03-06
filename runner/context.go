@@ -113,6 +113,30 @@ func EnsureCompactHook(projectRoot string) error {
 	return nil
 }
 
+// LogContextWarnings logs warnings/errors based on context fill percentage and compactions.
+// Silent when fillPct <= warnPct and compactions == 0 (AC1).
+// Logs WARN when fillPct > warnPct but <= criticalPct (AC2).
+// Logs ERROR when fillPct > criticalPct (AC3) or compactions > 0 (AC4).
+// Both fill and compaction checks are independent — both may fire (AC5).
+// No-op when log is nil.
+func LogContextWarnings(log *RunLogger, fillPct float64, compactions int, maxTurns int, warnPct int, criticalPct int) {
+	if log == nil {
+		return
+	}
+
+	// Fill-level check.
+	if fillPct > float64(criticalPct) {
+		log.Error(fmt.Sprintf("context fill %.1f%% exceeds critical threshold — quality degradation likely, reduce max_turns (current: %d)", fillPct, maxTurns))
+	} else if fillPct > float64(warnPct) {
+		log.Warn(fmt.Sprintf("context fill %.1f%% — consider reducing max_turns (current: %d) or splitting task into smaller pieces", fillPct, maxTurns))
+	}
+
+	// Compaction check (independent of fill level).
+	if compactions > 0 {
+		log.Error(fmt.Sprintf("%d compaction(s) detected — context was compressed, quality degraded. Reduce max_turns (current: %d)", compactions, maxTurns))
+	}
+}
+
 // ensureHookScript creates or updates .ralph/hooks/count-compact.sh.
 // Skips write if file exists with correct content (idempotent).
 func ensureHookScript(projectRoot string) error {

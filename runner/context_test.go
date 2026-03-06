@@ -501,3 +501,118 @@ func TestEnsureCompactHook_Backup(t *testing.T) {
 		}
 	})
 }
+
+func TestLogContextWarnings_Cases(t *testing.T) {
+	tests := []struct {
+		name        string
+		fillPct     float64
+		compactions int
+		maxTurns    int
+		warnPct     int
+		criticalPct int
+		wantWarn    []string // substrings expected in log at WARN level
+		wantError   []string // substrings expected in log at ERROR level
+		wantSilent  bool     // true = no log output expected
+	}{
+		{
+			name:        "silent below warn",
+			fillPct:     40.0,
+			compactions: 0,
+			maxTurns:    15,
+			warnPct:     55,
+			criticalPct: 65,
+			wantSilent:  true,
+		},
+		{
+			name:        "warn above warn below critical",
+			fillPct:     58.0,
+			compactions: 0,
+			maxTurns:    15,
+			warnPct:     55,
+			criticalPct: 65,
+			wantWarn:    []string{"context fill 58.0%", "consider reducing max_turns", "current: 15"},
+		},
+		{
+			name:        "error above critical",
+			fillPct:     70.0,
+			compactions: 0,
+			maxTurns:    15,
+			warnPct:     55,
+			criticalPct: 65,
+			wantError:   []string{"context fill 70.0%", "exceeds critical threshold", "current: 15"},
+		},
+		{
+			name:        "error on compaction",
+			fillPct:     30.0,
+			compactions: 2,
+			maxTurns:    15,
+			warnPct:     55,
+			criticalPct: 65,
+			wantError:   []string{"2 compaction(s) detected", "context was compressed", "current: 15"},
+		},
+		{
+			name:        "both fill and compaction",
+			fillPct:     70.0,
+			compactions: 1,
+			maxTurns:    15,
+			warnPct:     55,
+			criticalPct: 65,
+			wantError:   []string{"context fill 70.0%", "1 compaction(s) detected"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			log, err := OpenRunLogger(dir, "logs", "")
+			if err != nil {
+				t.Fatalf("OpenRunLogger: %v", err)
+			}
+			defer log.Close() //nolint:errcheck
+
+			LogContextWarnings(log, tc.fillPct, tc.compactions, tc.maxTurns, tc.warnPct, tc.criticalPct)
+
+			// Read log file.
+			date := time.Now().Format("2006-01-02")
+			logPath := filepath.Join(dir, "logs", "ralph-"+date+".log")
+			data, readErr := os.ReadFile(logPath)
+			if readErr != nil {
+				t.Fatalf("ReadFile: %v", readErr)
+			}
+			content := string(data)
+
+			if tc.wantSilent {
+				if len(strings.TrimSpace(content)) > 0 {
+					t.Errorf("expected silent, got: %q", content)
+				}
+				return
+			}
+
+			for _, want := range tc.wantWarn {
+				if !strings.Contains(content, want) {
+					t.Errorf("log missing warn substring %q\ngot: %s", want, content)
+				}
+			}
+			if len(tc.wantWarn) > 0 {
+				if !strings.Contains(content, "WARN") {
+					t.Errorf("log missing WARN level\ngot: %s", content)
+				}
+			}
+			for _, want := range tc.wantError {
+				if !strings.Contains(content, want) {
+					t.Errorf("log missing error substring %q\ngot: %s", want, content)
+				}
+			}
+			if len(tc.wantError) > 0 {
+				if !strings.Contains(content, "ERROR") {
+					t.Errorf("log missing ERROR level\ngot: %s", content)
+				}
+			}
+		})
+	}
+}
+
+func TestLogContextWarnings_NilLogger(t *testing.T) {
+	// Should not panic with nil logger.
+	LogContextWarnings(nil, 70.0, 2, 15, 55, 65)
+}

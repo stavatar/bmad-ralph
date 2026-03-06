@@ -106,17 +106,30 @@ func formatSummary(m *runner.RunMetrics, cfg *config.Config) string {
 	}
 	line3 := fmt.Sprintf("Reviews: %d cycles, %d findings (%dh/%dm/%dl)", reviewCycles, totalFindings, high, medium, low)
 
-	// Line 4 (conditional): Serena sync
+	// Line 4: context window metrics (FR90)
+	contextText := fmt.Sprintf("Context: max %.1f%% fill, %d compactions", m.MaxContextFillPct, m.TotalCompactions)
+	yellow := color.New(color.FgYellow).SprintFunc()
+	red := color.New(color.FgRed).SprintFunc()
+	if m.MaxContextFillPct > float64(cfg.ContextCriticalPct) {
+		contextText += " [!]"
+		contextText = red(contextText)
+	} else if m.TotalCompactions > 0 {
+		contextText += " [!]"
+		contextText = yellow(contextText)
+	}
+	line4 := contextText
+
+	// Line 5 (conditional): Serena sync
 	var syncLine string
 	if m.SerenaSync != nil {
 		sm := m.SerenaSync
 		syncLine = fmt.Sprintf("\nSerena sync: %s ($%.2f, %ds)", sm.Status, sm.CostUSD, sm.DurationMs/1000)
 	}
 
-	// Line 5: report path
+	// Line 6: report path
 	reportPath := filepath.Join(cfg.LogDir, fmt.Sprintf("ralph-run-%s.json", cfg.RunID))
-	line5 := fmt.Sprintf("Report: %s", reportPath)
-	return fmt.Sprintf("%s\n%s\n%s%s\n%s", line1, line2, line3, syncLine, line5)
+	line6 := fmt.Sprintf("Report: %s", reportPath)
+	return fmt.Sprintf("%s\n%s\n%s\n%s%s\n%s", line1, line2, line3, line4, syncLine, line6)
 }
 
 // formatTokens formats a token count for display: exact for <1000, "XK" for thousands, "X.XM" for millions.

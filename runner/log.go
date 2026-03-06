@@ -167,6 +167,8 @@ type SessionLogInfo struct {
 	Seq         int           // monotonic sequence number within the run
 	ExitCode    int           // process exit code
 	Elapsed     time.Duration // wall-clock session duration
+	Compactions int           // compaction events during session (Story 10.7 FR92)
+	MaxFillPct  float64       // estimated max context fill percentage (Story 10.7 FR92)
 }
 
 // SaveSessionLog writes a session log file to sessDir with the given metadata and raw output.
@@ -186,8 +188,8 @@ func SaveSessionLog(sessDir string, info SessionLogInfo, raw *session.RawResult)
 	logPath := filepath.Join(sessDir, filename)
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "=== SESSION %s seq=%d exit_code=%d elapsed=%.1fs ===\n",
-		info.SessionType, info.Seq, info.ExitCode, info.Elapsed.Seconds())
+	fmt.Fprintf(&sb, "=== SESSION %s seq=%d exit_code=%d elapsed=%.1fs compactions=%d max_fill=%.1f%% ===\n",
+		info.SessionType, info.Seq, info.ExitCode, info.Elapsed.Seconds(), info.Compactions, info.MaxFillPct)
 	fmt.Fprintf(&sb, "=== STDOUT (%d bytes) ===\n", len(raw.Stdout))
 	sb.Write(raw.Stdout)
 	if len(raw.Stdout) > 0 && raw.Stdout[len(raw.Stdout)-1] != '\n' {
