@@ -19,6 +19,7 @@ type GitClient interface {
 	HeadCommit(ctx context.Context) (string, error)
 	RestoreClean(ctx context.Context) error
 	DiffStats(ctx context.Context, before, after string) (*DiffStats, error)
+	LogOneline(ctx context.Context, n int) ([]string, error)
 }
 
 // Sentinel errors for git health check failures.
@@ -159,4 +160,20 @@ func (c *ExecGitClient) DiffStats(ctx context.Context, before, after string) (*D
 	}
 	sort.Strings(stats.Packages)
 	return &stats, nil
+}
+
+// LogOneline returns the last n commit subjects via `git log --oneline -<n>`.
+// Each line is one commit (abbreviated hash + subject).
+func (e *ExecGitClient) LogOneline(ctx context.Context, n int) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "log", "--oneline", fmt.Sprintf("-%d", n))
+	cmd.Dir = e.Dir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("runner: git log oneline: %w", err)
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return nil, nil
+	}
+	return strings.Split(raw, "\n"), nil
 }

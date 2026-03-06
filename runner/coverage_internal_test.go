@@ -970,6 +970,7 @@ func (nopGitClient) RestoreClean(_ context.Context) error         { return nil }
 func (nopGitClient) DiffStats(_ context.Context, _, _ string) (*DiffStats, error) {
 	return &DiffStats{}, nil
 }
+func (nopGitClient) LogOneline(_ context.Context, _ int) ([]string, error) { return nil, nil }
 
 // --- RunOnce ScanTasks error ---
 

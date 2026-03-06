@@ -196,6 +196,8 @@ Violation of any rule is grounds for immediate session termination.
 - NEVER commit with failing tests — fix them first, then commit.
 - Each commit should represent a logical, self-contained unit of work.
 - Write clear commit messages describing what changed and why.
+- В конце commit message добавь маркер: [task:]
+- Пример: feat: add user validation [task:]
 - The `[GATE]` tag in tasks is a signal for the orchestrator (Ralph), NOT for you. Do NOT pause or wait when you see `[GATE]`. Implement the task, run tests, and commit normally.
 
 ## SCOPE BOUNDARY (MANDATORY)

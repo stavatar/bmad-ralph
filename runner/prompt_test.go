@@ -23,6 +23,7 @@ func executeReplacements() map[string]string {
 		"__FINDINGS_CONTENT__":  "",
 		"__SERENA_HINT__":       "",
 		"__TASK_CONTENT__":      "",
+		"__TASK_HASH__":         "",
 	}
 }
 
@@ -694,6 +695,7 @@ func TestPrompt_Execute_KnowledgeSections(t *testing.T) {
 		"__LEARNINGS_CONTENT__": "Recent learning about assertions",
 		"__FINDINGS_CONTENT__":  "",
 		"__TASK_CONTENT__":      "Test task",
+		"__TASK_HASH__":         "",
 	}
 
 	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
@@ -761,6 +763,7 @@ func TestPrompt_Execute_SelfReview(t *testing.T) {
 				"__RALPH_KNOWLEDGE__":   "",
 				"__LEARNINGS_CONTENT__": "",
 				"__TASK_CONTENT__":      "",
+				"__TASK_HASH__":         "",
 			}
 
 			got, err := config.AssemblePrompt(executeTemplate, data, replacements)
@@ -789,6 +792,7 @@ func TestPrompt_Execute_NoKnowledge(t *testing.T) {
 		"__RALPH_KNOWLEDGE__":   "",
 		"__LEARNINGS_CONTENT__": "",
 		"__TASK_CONTENT__":      "",
+		"__TASK_HASH__":         "",
 	}
 
 	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
@@ -1277,5 +1281,37 @@ func TestPrompt_OtherAgents_NoScopeCreep(t *testing.T) {
 				t.Errorf("%s agent should NOT contain 'scope creep' instructions", agent.name)
 			}
 		})
+	}
+}
+
+// --- Story 9.7: Pre-flight Check + TaskHash + LogOneline ---
+
+// TestPrompt_Execute_TaskHashMarker verifies execute.md contains [task:__TASK_HASH__]
+// instruction in Commit Rules and __TASK_HASH__ is replaced (AC#8).
+func TestPrompt_Execute_TaskHashMarker(t *testing.T) {
+	data := config.TemplateData{}
+	replacements := executeReplacements()
+	replacements["__TASK_HASH__"] = "a1b2c3"
+
+	got, err := config.AssemblePrompt(executeTemplate, data, replacements)
+	if err != nil {
+		t.Fatalf("AssemblePrompt error: %v", err)
+	}
+
+	// AC#8: commit rules contain task marker instruction
+	if !strings.Contains(got, "[task:a1b2c3]") {
+		t.Error("execute prompt missing [task:<hash>] marker after replacement")
+	}
+	// AC#8: instruction text present
+	if !strings.Contains(got, "В конце commit message добавь маркер") {
+		t.Error("execute prompt missing task marker instruction text")
+	}
+	// AC#8: example present
+	if !strings.Contains(got, "feat: add user validation [task:a1b2c3]") {
+		t.Error("execute prompt missing task marker example")
+	}
+	// Verify no unreplaced __TASK_HASH__ remains
+	if strings.Contains(got, "__TASK_HASH__") {
+		t.Error("execute prompt still contains unreplaced __TASK_HASH__")
 	}
 }

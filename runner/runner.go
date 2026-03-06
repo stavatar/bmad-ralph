@@ -849,6 +849,19 @@ func (r *Runner) execute(ctx context.Context) error {
 			"task", taskText,
 		)
 
+		// Story 9.7: pre-flight check — skip task if commit with [task:<hash>] found and no findings.
+		if skip, reason := PreFlightCheck(ctx, r.Git, taskText, r.Cfg.ProjectRoot); skip {
+			log.Info("pre-flight skip", "task", taskText, "reason", reason)
+			taskDesc := taskDescription(taskText)
+			if err := SkipTask(r.TasksFile, taskDesc); err != nil {
+				return fmt.Errorf("runner: pre-flight skip task: %w", err)
+			}
+			if r.Metrics != nil {
+				r.Metrics.FinishTask("skipped", "")
+			}
+			continue
+		}
+
 		// Story 8.6: capture HEAD before task for per-task diff scope.
 		// Only call when per-task sync is active to avoid consuming mock HeadCommit slots.
 		var taskHeadBefore string
@@ -887,6 +900,7 @@ func (r *Runner) execute(ctx context.Context) error {
 				"__FINDINGS_CONTENT__": findingsContent,
 				"__SERENA_HINT__":      serenaHint,
 				"__TASK_CONTENT__":     taskText,
+				"__TASK_HASH__":        TaskHash(taskText),
 			}
 			for k, v := range knowledgeReplacements {
 				executeReplacements[k] = v
@@ -1683,6 +1697,7 @@ func RunOnce(ctx context.Context, rc RunConfig) error {
 	onceReplacements := map[string]string{
 		"__FORMAT_CONTRACT__": config.SprintTasksFormat(),
 		"__TASK_CONTENT__":    taskText,
+		"__TASK_HASH__":       TaskHash(taskText),
 	}
 	for k, v := range onceKnowledge {
 		onceReplacements[k] = v
@@ -1818,6 +1833,7 @@ func RunReview(ctx context.Context, rc RunConfig) error {
 		config.TemplateData{},
 		map[string]string{
 			"__TASK_CONTENT__":      "review stub",
+			"__TASK_HASH__":         TaskHash("review stub"),
 			"__RALPH_KNOWLEDGE__":   "",
 			"__LEARNINGS_CONTENT__": "",
 			"__SERENA_HINT__":       "",

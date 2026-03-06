@@ -369,6 +369,9 @@ func (g *syncTestGitClient) DiffStats(_ context.Context, _, _ string) (*DiffStat
 	}
 	return &DiffStats{}, nil
 }
+func (g *syncTestGitClient) LogOneline(_ context.Context, _ int) ([]string, error) {
+	return nil, nil
+}
 
 // mockCodeIndexerSync is a test mock for CodeIndexerDetector (internal package).
 type mockCodeIndexerSync struct {
