@@ -78,10 +78,10 @@ type TaskMetrics struct {
 	FindingsProgression []int             `json:"findings_progression,omitempty"`
 	CycleDurationsMs    []int64           `json:"cycle_durations_ms,omitempty"`
 	Latency             *LatencyBreakdown `json:"latency,omitempty"`
-	Gate              *GateStats        `json:"gate,omitempty"`
-	Errors            *ErrorStats       `json:"errors,omitempty"`
-	TotalCompactions  int               `json:"total_compactions"`
-	MaxContextFillPct float64           `json:"max_context_fill_pct"`
+	Gate                *GateStats        `json:"gate,omitempty"`
+	Errors              *ErrorStats       `json:"errors,omitempty"`
+	TotalCompactions    int               `json:"total_compactions"`
+	MaxContextFillPct   float64           `json:"max_context_fill_pct"`
 }
 
 // RunMetrics holds accumulated metrics for an entire run.
@@ -96,25 +96,25 @@ type SerenaSyncMetrics struct {
 }
 
 type RunMetrics struct {
-	RunID               string        `json:"run_id"`
-	StartTime           time.Time     `json:"start_time"`
-	EndTime             time.Time     `json:"end_time"`
-	DurationMs          int64         `json:"duration_ms"`
-	Tasks               []TaskMetrics `json:"tasks"`
-	InputTokens         int           `json:"input_tokens"`
-	OutputTokens        int           `json:"output_tokens"`
-	CacheTokens         int           `json:"cache_read_tokens"`
-	CacheCreationTokens int           `json:"cache_creation_tokens"`
-	CostUSD             float64       `json:"cost_usd"`
-	NumTurns       int           `json:"num_turns"`
-	TotalSessions  int           `json:"total_sessions"`
-	TasksCompleted int           `json:"tasks_completed"`
-	TasksFailed    int           `json:"tasks_failed"`
-	TasksSkipped   int                          `json:"tasks_skipped"`
-	AgentStats        map[string]*AgentFindingStats `json:"agent_stats,omitempty"`
-	SerenaSync        *SerenaSyncMetrics            `json:"serena_sync,omitempty"`
-	TotalCompactions  int                           `json:"total_compactions"`
-	MaxContextFillPct float64                       `json:"max_context_fill_pct"`
+	RunID               string                        `json:"run_id"`
+	StartTime           time.Time                     `json:"start_time"`
+	EndTime             time.Time                     `json:"end_time"`
+	DurationMs          int64                         `json:"duration_ms"`
+	Tasks               []TaskMetrics                 `json:"tasks"`
+	InputTokens         int                           `json:"input_tokens"`
+	OutputTokens        int                           `json:"output_tokens"`
+	CacheTokens         int                           `json:"cache_read_tokens"`
+	CacheCreationTokens int                           `json:"cache_creation_tokens"`
+	CostUSD             float64                       `json:"cost_usd"`
+	NumTurns            int                           `json:"num_turns"`
+	TotalSessions       int                           `json:"total_sessions"`
+	TasksCompleted      int                           `json:"tasks_completed"`
+	TasksFailed         int                           `json:"tasks_failed"`
+	TasksSkipped        int                           `json:"tasks_skipped"`
+	AgentStats          map[string]*AgentFindingStats `json:"agent_stats,omitempty"`
+	SerenaSync          *SerenaSyncMetrics            `json:"serena_sync,omitempty"`
+	TotalCompactions    int                           `json:"total_compactions"`
+	MaxContextFillPct   float64                       `json:"max_context_fill_pct"`
 }
 
 // taskAccumulator is internal mutable state for the current task.
@@ -126,8 +126,8 @@ type taskAccumulator struct {
 	cacheTokens         int
 	cacheCreationTokens int
 	costUSD             float64
-	numTurns     int
-	sessions     int
+	numTurns            int
+	sessions            int
 	diff                *DiffStats
 	findings            []ReviewFinding
 	findingsProgression []int
@@ -149,13 +149,13 @@ type MetricsCollector struct {
 	current   *taskAccumulator
 
 	// Run-level accumulators
-	totalInput         int
-	totalOutput        int
-	totalCache         int
-	totalCacheCreation int
-	totalCost          float64
-	totalTurns    int
-	totalSessions int
+	totalInput          int
+	totalOutput         int
+	totalCache          int
+	totalCacheCreation  int
+	totalCost           float64
+	totalTurns          int
+	totalSessions       int
 	agentStats          map[string]*AgentFindingStats
 	serenaSync          *SerenaSyncMetrics
 	serenaSyncCount     int
@@ -188,6 +188,7 @@ func (mc *MetricsCollector) StartTask(name string) {
 // Returns the resolved model used for pricing (may differ from input if fallback applied).
 // Returns original model unchanged if no current task (StartTask not called).
 // Returns empty string if pricing map is empty (no fallback available).
+// compactions and contextFillPct are accumulated per-task (sum and max respectively).
 // stepType and durationMs are accepted for call-site documentation but not stored;
 // latency is tracked separately via RecordLatency.
 func (mc *MetricsCollector) RecordSession(metrics *session.SessionMetrics, model, stepType string, durationMs int64, compactions int, contextFillPct float64) string {

@@ -142,8 +142,8 @@ TotalCompactions:  totalCompactions,
 MaxContextFillPct: maxFillPct,
 ```
 
-### 7 call sites для обновления
-Все в `runner/runner.go` и `runner/serena.go`. Найти через grep `RecordSession(`. Добавить `, 0, 0.0` — в Story 10.6 эти нули заменятся на реальные данные.
+### 4 call sites для обновления
+4 в `runner/runner.go` (2 execute, 1 resume, 1 review). Найти через grep `RecordSession(`. Добавить `, 0, 0.0` — в Story 10.6 эти нули заменятся на реальные данные.
 
 ### Existing tests
 Все тесты в `runner/metrics_test.go` нужно обновить: добавить `, 0, 0.0` к `RecordSession` calls.
