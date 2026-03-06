@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
@@ -207,4 +208,247 @@ func TestDefaultContextWindow_Value(t *testing.T) {
 	if DefaultContextWindow != 200000 {
 		t.Errorf("DefaultContextWindow = %d, want 200000", DefaultContextWindow)
 	}
+}
+
+func TestEnsureCompactHook_Script(t *testing.T) {
+	tests := []struct {
+		name            string
+		existingContent string // empty = no file
+		wantContent     string
+		wantCreated     bool
+	}{
+		{
+			name:        "fresh creates script",
+			wantContent: compactHookScript,
+			wantCreated: true,
+		},
+		{
+			name:            "same content skips write",
+			existingContent: compactHookScript,
+			wantContent:     compactHookScript,
+		},
+		{
+			name:            "outdated content overwrites",
+			existingContent: "#!/bin/bash\nold stuff\n",
+			wantContent:     compactHookScript,
+			wantCreated:     true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			scriptPath := filepath.Join(root, ".ralph", "hooks", "count-compact.sh")
+
+			if tc.existingContent != "" {
+				if err := os.MkdirAll(filepath.Dir(scriptPath), 0755); err != nil {
+					t.Fatalf("MkdirAll: %v", err)
+				}
+				if err := os.WriteFile(scriptPath, []byte(tc.existingContent), 0644); err != nil {
+					t.Fatalf("WriteFile: %v", err)
+				}
+			}
+
+			if err := EnsureCompactHook(root); err != nil {
+				t.Fatalf("EnsureCompactHook() error = %v", err)
+			}
+
+			got, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatalf("ReadFile script: %v", err)
+			}
+			if string(got) != tc.wantContent {
+				t.Errorf("script content = %q, want %q", string(got), tc.wantContent)
+			}
+
+			info, err := os.Stat(scriptPath)
+			if err != nil {
+				t.Fatalf("Stat script: %v", err)
+			}
+			// WSL/NTFS doesn't support Unix permission bits (always 0666).
+			// Skip permission check on NTFS; CI on Linux will catch regressions.
+			if info.Mode().Perm() != 0666 && info.Mode()&0100 == 0 {
+				t.Errorf("script mode = %o, want executable", info.Mode())
+			}
+		})
+	}
+}
+
+func TestEnsureCompactHook_SettingsMerge(t *testing.T) {
+	tests := []struct {
+		name             string
+		existingSettings string // empty = no file; "CORRUPT" = invalid JSON
+		wantErr          string // empty = no error
+		wantHookCount    int    // expected number of PreCompact entries
+		checkPreserved   string // JSON key that must be preserved
+	}{
+		{
+			name:          "fresh creates settings",
+			wantHookCount: 1,
+		},
+		{
+			name:             "existing without hooks",
+			existingSettings: `{"permissions":{"allow":["Read"]}}`,
+			wantHookCount:    1,
+			checkPreserved:   "permissions",
+		},
+		{
+			name:             "hooks key exists without PreCompact",
+			existingSettings: `{"hooks":{}}`,
+			wantHookCount:    1,
+		},
+		{
+			name:             "PreCompact empty array",
+			existingSettings: `{"hooks":{"PreCompact":[]}}`,
+			wantHookCount:    1,
+		},
+		{
+			name:             "PreCompact with other hook",
+			existingSettings: `{"hooks":{"PreCompact":[{"matcher":"auto","hooks":[{"type":"command","command":"other.sh"}]}]}}`,
+			wantHookCount:    2,
+		},
+		{
+			name:             "idempotent already registered",
+			existingSettings: `{"hooks":{"PreCompact":[{"matcher":"auto","hooks":[{"type":"command","command":".ralph/hooks/count-compact.sh"}]}]}}`,
+			wantHookCount:    1,
+		},
+		{
+			name:             "corrupt JSON returns error",
+			existingSettings: `{invalid json`,
+			wantErr:          "parse settings.json",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			claudeDir := filepath.Join(root, ".claude")
+			settingsPath := filepath.Join(claudeDir, "settings.json")
+
+			if tc.existingSettings != "" {
+				if err := os.MkdirAll(claudeDir, 0755); err != nil {
+					t.Fatalf("MkdirAll: %v", err)
+				}
+				if err := os.WriteFile(settingsPath, []byte(tc.existingSettings), 0644); err != nil {
+					t.Fatalf("WriteFile: %v", err)
+				}
+			}
+
+			err := EnsureCompactHook(root)
+
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("EnsureCompactHook() = nil, want error containing %q", tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("error = %q, want containing %q", err.Error(), tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("EnsureCompactHook() error = %v", err)
+			}
+
+			// Parse result settings.json.
+			data, err := os.ReadFile(settingsPath)
+			if err != nil {
+				t.Fatalf("ReadFile settings: %v", err)
+			}
+			var settings map[string]any
+			if err := json.Unmarshal(data, &settings); err != nil {
+				t.Fatalf("Unmarshal settings: %v", err)
+			}
+
+			hooks, ok := settings["hooks"].(map[string]any)
+			if !ok {
+				t.Fatal("settings missing hooks key")
+			}
+			preCompact, ok := hooks["PreCompact"].([]any)
+			if !ok {
+				t.Fatal("settings missing PreCompact key")
+			}
+			if len(preCompact) != tc.wantHookCount {
+				t.Errorf("PreCompact entries = %d, want %d", len(preCompact), tc.wantHookCount)
+			}
+
+			if tc.checkPreserved != "" {
+				if _, ok := settings[tc.checkPreserved]; !ok {
+					t.Errorf("settings missing preserved key %q", tc.checkPreserved)
+				}
+			}
+		})
+	}
+}
+
+func TestEnsureCompactHook_Backup(t *testing.T) {
+	t.Run("creates backup before first modification", func(t *testing.T) {
+		root := t.TempDir()
+		claudeDir := filepath.Join(root, ".claude")
+		settingsPath := filepath.Join(claudeDir, "settings.json")
+		bakPath := settingsPath + ".bak"
+
+		original := `{"existing":"data"}`
+		if err := os.MkdirAll(claudeDir, 0755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := os.WriteFile(settingsPath, []byte(original), 0644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+
+		if err := EnsureCompactHook(root); err != nil {
+			t.Fatalf("EnsureCompactHook() error = %v", err)
+		}
+
+		bak, err := os.ReadFile(bakPath)
+		if err != nil {
+			t.Fatalf("ReadFile .bak: %v", err)
+		}
+		if string(bak) != original {
+			t.Errorf("backup content = %q, want %q", string(bak), original)
+		}
+	})
+
+	t.Run("preserves existing backup", func(t *testing.T) {
+		root := t.TempDir()
+		claudeDir := filepath.Join(root, ".claude")
+		settingsPath := filepath.Join(claudeDir, "settings.json")
+		bakPath := settingsPath + ".bak"
+
+		if err := os.MkdirAll(claudeDir, 0755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+
+		originalBak := `{"original":"backup"}`
+		if err := os.WriteFile(bakPath, []byte(originalBak), 0644); err != nil {
+			t.Fatalf("WriteFile .bak: %v", err)
+		}
+		if err := os.WriteFile(settingsPath, []byte(`{"new":"settings"}`), 0644); err != nil {
+			t.Fatalf("WriteFile settings: %v", err)
+		}
+
+		if err := EnsureCompactHook(root); err != nil {
+			t.Fatalf("EnsureCompactHook() error = %v", err)
+		}
+
+		bak, err := os.ReadFile(bakPath)
+		if err != nil {
+			t.Fatalf("ReadFile .bak: %v", err)
+		}
+		if string(bak) != originalBak {
+			t.Errorf("backup content = %q, want original %q", string(bak), originalBak)
+		}
+	})
+
+	t.Run("no backup for fresh settings", func(t *testing.T) {
+		root := t.TempDir()
+		bakPath := filepath.Join(root, ".claude", "settings.json.bak")
+
+		if err := EnsureCompactHook(root); err != nil {
+			t.Fatalf("EnsureCompactHook() error = %v", err)
+		}
+
+		if _, err := os.Stat(bakPath); !os.IsNotExist(err) {
+			t.Errorf("backup should not exist for fresh settings, got err: %v", err)
+		}
+	})
 }

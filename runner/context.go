@@ -1,12 +1,21 @@
 package runner
 
 import (
+	"encoding/json"
+	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/bmad-ralph/bmad-ralph/session"
 )
+
+// compactHookScript is the shell script content for the PreCompact hook.
+const compactHookScript = "#!/bin/bash\n[ -n \"$RALPH_COMPACT_COUNTER\" ] && echo 1 >> \"$RALPH_COMPACT_COUNTER\"\n"
+
+// compactHookCommand is the command path stored in settings.json for the hook.
+const compactHookCommand = ".ralph/hooks/count-compact.sh"
 
 // DefaultContextWindow is the fallback context window size (tokens) when
 // the actual value is not available from Claude Code's modelUsage.
@@ -83,4 +92,136 @@ func EstimateMaxContextFill(metrics *session.SessionMetrics, fallbackContextWind
 	estimatedMax := 2.0 * totalCumulative / effectiveTurns
 
 	return estimatedMax / float64(contextWindow) * 100.0
+}
+
+// EnsureCompactHook creates the PreCompact hook script and registers it in
+// Claude Code's settings.json. The hook appends "1\n" to $RALPH_COMPACT_COUNTER
+// on each compaction event.
+//
+// Script: .ralph/hooks/count-compact.sh (created/updated, chmod 0755)
+// Settings: .claude/settings.json (additive merge, backup before first modification)
+//
+// Returns error on corrupt settings.json or I/O failure. Caller should log
+// as warning and continue (compactions=0 fallback).
+func EnsureCompactHook(projectRoot string) error {
+	if err := ensureHookScript(projectRoot); err != nil {
+		return fmt.Errorf("runner: ensure compact hook: script: %w", err)
+	}
+	if err := ensureHookSettings(projectRoot); err != nil {
+		return fmt.Errorf("runner: ensure compact hook: settings: %w", err)
+	}
+	return nil
+}
+
+// ensureHookScript creates or updates .ralph/hooks/count-compact.sh.
+// Skips write if file exists with correct content (idempotent).
+func ensureHookScript(projectRoot string) error {
+	dir := filepath.Join(projectRoot, ".ralph", "hooks")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	scriptPath := filepath.Join(dir, "count-compact.sh")
+
+	existing, err := os.ReadFile(scriptPath)
+	if err == nil && string(existing) == compactHookScript {
+		return nil // already correct
+	}
+
+	if err := os.WriteFile(scriptPath, []byte(compactHookScript), 0644); err != nil {
+		return fmt.Errorf("write script: %w", err)
+	}
+	if err := os.Chmod(scriptPath, 0755); err != nil {
+		return fmt.Errorf("chmod: %w", err)
+	}
+	return nil
+}
+
+// ensureHookSettings reads .claude/settings.json, adds PreCompact hook entry
+// if not already present, and writes back. Creates file if missing.
+// Creates .claude/settings.json.bak before first modification.
+func ensureHookSettings(projectRoot string) error {
+	dir := filepath.Join(projectRoot, ".claude")
+	settingsPath := filepath.Join(dir, "settings.json")
+	bakPath := settingsPath + ".bak"
+
+	// Read existing or start fresh.
+	var data map[string]any
+	existing, err := os.ReadFile(settingsPath)
+	if err == nil {
+		if err := json.Unmarshal(existing, &data); err != nil {
+			return fmt.Errorf("parse settings.json: %w", err)
+		}
+	} else if os.IsNotExist(err) {
+		data = map[string]any{}
+	} else {
+		return fmt.Errorf("read settings.json: %w", err)
+	}
+
+	// Navigate: hooks → PreCompact → []any
+	hooks, ok := data["hooks"].(map[string]any)
+	if !ok {
+		hooks = map[string]any{}
+		data["hooks"] = hooks
+	}
+	preCompact, _ := hooks["PreCompact"].([]any)
+
+	// Idempotency: check if hook already registered.
+	for _, entry := range preCompact {
+		entryMap, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		hooksArr, ok := entryMap["hooks"].([]any)
+		if !ok {
+			continue
+		}
+		for _, h := range hooksArr {
+			hMap, ok := h.(map[string]any)
+			if !ok {
+				continue
+			}
+			cmd, _ := hMap["command"].(string)
+			if strings.Contains(cmd, "count-compact.sh") {
+				return nil // already registered
+			}
+		}
+	}
+
+	// Append hook entry.
+	hookEntry := map[string]any{
+		"matcher": "auto",
+		"hooks": []any{
+			map[string]any{
+				"type":    "command",
+				"command": compactHookCommand,
+			},
+		},
+	}
+	preCompact = append(preCompact, hookEntry)
+	hooks["PreCompact"] = preCompact
+
+	// Marshal.
+	out, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal settings.json: %w", err)
+	}
+	out = append(out, '\n')
+
+	// Backup before first modification (only if settings.json existed and .bak doesn't).
+	if existing != nil {
+		if _, err := os.Stat(bakPath); os.IsNotExist(err) {
+			if err := os.WriteFile(bakPath, existing, 0644); err != nil {
+				return fmt.Errorf("backup settings.json: %w", err)
+			}
+		}
+	}
+
+	// Create .claude/ dir if needed, write.
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("mkdir .claude: %w", err)
+	}
+	if err := os.WriteFile(settingsPath, out, 0644); err != nil {
+		return fmt.Errorf("write settings.json: %w", err)
+	}
+	return nil
 }
