@@ -348,8 +348,8 @@ func TestConfig_Load_DefaultsComplete(t *testing.T) {
 	if cfg.MaxIterations != 3 {
 		t.Errorf("MaxIterations = %d, want 3", cfg.MaxIterations)
 	}
-	if cfg.MaxReviewIterations != 3 {
-		t.Errorf("MaxReviewIterations = %d, want 3", cfg.MaxReviewIterations)
+	if cfg.MaxReviewIterations != 6 {
+		t.Errorf("MaxReviewIterations = %d, want 6", cfg.MaxReviewIterations)
 	}
 	if cfg.GatesEnabled {
 		t.Error("GatesEnabled should default to false")
@@ -410,6 +410,9 @@ func TestConfig_Load_DefaultsComplete(t *testing.T) {
 	}
 	if cfg.BudgetWarnPct != 80 {
 		t.Errorf("BudgetWarnPct = %d, want 80", cfg.BudgetWarnPct)
+	}
+	if cfg.TaskBudgetMaxUSD != 0 {
+		t.Errorf("TaskBudgetMaxUSD = %f, want 0", cfg.TaskBudgetMaxUSD)
 	}
 	if cfg.ModelPricing != nil {
 		t.Errorf("ModelPricing = %v, want nil (no default)", cfg.ModelPricing)
@@ -1251,6 +1254,11 @@ func TestConfig_Validate_Errors(t *testing.T) {
 				c.BudgetWarnPct = 100
 			},
 			errContains: "budget_warn_pct must be 1-99",
+		},
+		{
+			name:        "TaskBudgetMaxUSD negative",
+			mutate:      func(c *Config) { c.TaskBudgetMaxUSD = -1.0 },
+			errContains: "task_budget_max_usd must be >= 0",
 		},
 		{
 			name:        "SerenaSyncTrigger invalid",

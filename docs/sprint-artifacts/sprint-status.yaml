@@ -135,3 +135,15 @@ development_status:
   8-6-per-task-trigger-growth: done
   8-7-integration-tests: done
   epic-8-retrospective: done
+
+  # Epic 9: Ralph Run Robustness (9 stories, FR67-FR80)
+  epic-9: in-progress
+  9-1-progressive-review-types-config-default: review
+  9-2-severity-filtering-findings-budget: ready-for-dev
+  9-3-scope-lock-effort-escalation: ready-for-dev
+  9-4-session-options-env: ready-for-dev
+  9-5-filepath-normalization-graceful-degradation: ready-for-dev
+  9-6-scope-creep-protection-prompts: ready-for-dev
+  9-7-preflight-taskhash-logoneline: backlog
+  9-8-smart-merge-x-preservation: backlog
+  9-9-agent-stats-review-findings: backlog
