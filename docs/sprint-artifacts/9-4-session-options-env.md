@@ -1,6 +1,6 @@
 # Story 9.4: Session Options.Env
 
-Status: Ready for Review
+Status: done
 
 ## Story
 

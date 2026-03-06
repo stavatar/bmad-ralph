@@ -141,7 +141,7 @@ development_status:
   9-1-progressive-review-types-config-default: review
   9-2-severity-filtering-findings-budget: review
   9-3-scope-lock-effort-escalation: ready-for-dev
-  9-4-session-options-env: review
+  9-4-session-options-env: done
   9-5-filepath-normalization-graceful-degradation: ready-for-dev
   9-6-scope-creep-protection-prompts: ready-for-dev
   9-7-preflight-taskhash-logoneline: ready-for-dev
