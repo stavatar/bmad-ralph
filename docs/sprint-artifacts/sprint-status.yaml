@@ -1,4 +1,4 @@
-# generated: 2026-02-25
+# generated: 2026-03-06
 # project: bmad-ralph
 # tracking_system: file-system
 # story_location: docs/sprint-artifacts
@@ -26,7 +26,7 @@
 # - SM typically drafts next story ONLY after previous one is 'done' to incorporate learnings
 # - Dev moves story to 'review', dev reviews, then Dev moves to 'done'
 
-generated: 2026-02-25
+generated: 2026-03-06
 project: bmad-ralph
 tracking_system: file-system
 story_location: docs/sprint-artifacts
@@ -137,13 +137,25 @@ development_status:
   epic-8-retrospective: done
 
   # Epic 9: Ralph Run Robustness (9 stories, FR67-FR80)
-  epic-9: in-progress
-  9-1-progressive-review-types-config-default: review
-  9-2-severity-filtering-findings-budget: review
-  9-3-scope-lock-effort-escalation: review
+  epic-9: done
+  9-1-progressive-review-types-config-default: done
+  9-2-severity-filtering-findings-budget: done
+  9-3-scope-lock-effort-escalation: done
   9-4-session-options-env: done
-  9-5-filepath-normalization-graceful-degradation: review
-  9-6-scope-creep-protection-prompts: review
-  9-7-preflight-taskhash-logoneline: review
-  9-8-smart-merge-x-preservation: review
-  9-9-agent-stats-review-findings: review
+  9-5-filepath-normalization-graceful-degradation: done
+  9-6-scope-creep-protection-prompts: done
+  9-7-preflight-taskhash-logoneline: done
+  9-8-smart-merge-x-preservation: done
+  9-9-agent-stats-review-findings: done
+  epic-9-retrospective: optional
+
+  # Epic 10: Context Window Observability (7 stories, FR81-FR92)
+  epic-10: in-progress
+  10-1-config-fields-max-turns-default: review
+  10-2-sessionmetrics-contextwindow-parsing: ready-for-dev
+  10-3-core-context-functions: ready-for-dev
+  10-4-ensurecompacthook: ready-for-dev
+  10-5-metricscollector-extension: ready-for-dev
+  10-6-runner-integration: ready-for-dev
+  10-7-warning-system-summary-session-log: ready-for-dev
+  epic-10-retrospective: optional

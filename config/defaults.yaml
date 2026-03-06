@@ -1,5 +1,5 @@
 claude_command: "claude"
-max_turns: 50
+max_turns: 15
 max_iterations: 3
 max_review_iterations: 6
 gates_enabled: false
@@ -23,6 +23,8 @@ similarity_warn: 0.85
 similarity_hard: 0.95
 budget_max_usd: 0
 budget_warn_pct: 80
+context_warn_pct: 55
+context_critical_pct: 65
 stories_dir: "docs/sprint-artifacts"
 serena_sync_enabled: false
 serena_sync_max_turns: 5

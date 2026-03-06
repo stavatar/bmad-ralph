@@ -44,7 +44,9 @@ type Config struct {
 	SimilarityHard    float64 `yaml:"similarity_hard"`
 	BudgetMaxUSD      float64 `yaml:"budget_max_usd"`
 	BudgetWarnPct     int     `yaml:"budget_warn_pct"`
-	TaskBudgetMaxUSD  float64 `yaml:"task_budget_max_usd"`
+	TaskBudgetMaxUSD   float64 `yaml:"task_budget_max_usd"`
+	ContextWarnPct     int     `yaml:"context_warn_pct"`
+	ContextCriticalPct int     `yaml:"context_critical_pct"`
 	ModelPricing        map[string]Pricing `yaml:"model_pricing"`
 	LogDir              string             `yaml:"log_dir"`
 	StoriesDir          string             `yaml:"stories_dir"`
@@ -205,6 +207,15 @@ func (c *Config) Validate() error {
 	}
 	if c.BudgetMaxUSD > 0 && (c.BudgetWarnPct < 1 || c.BudgetWarnPct > 99) {
 		return fmt.Errorf("config: validate: budget_warn_pct must be 1-99, got %d", c.BudgetWarnPct)
+	}
+	if c.ContextWarnPct < 1 || c.ContextWarnPct > 99 {
+		return fmt.Errorf("config: validate: context_warn_pct must be 1-99, got %d", c.ContextWarnPct)
+	}
+	if c.ContextCriticalPct < 1 || c.ContextCriticalPct > 99 {
+		return fmt.Errorf("config: validate: context_critical_pct must be 1-99, got %d", c.ContextCriticalPct)
+	}
+	if c.ContextCriticalPct <= c.ContextWarnPct {
+		return fmt.Errorf("config: validate: context_critical_pct (%d) must be > context_warn_pct (%d)", c.ContextCriticalPct, c.ContextWarnPct)
 	}
 	if c.TaskBudgetMaxUSD < 0 {
 		return fmt.Errorf("config: validate: task_budget_max_usd must be >= 0, got %.2f", c.TaskBudgetMaxUSD)
