@@ -522,7 +522,7 @@ func ResumeExtraction(ctx context.Context, cfg *config.Config, kw KnowledgeWrite
 
 	// BUG-11: merge resume session metrics into the current task
 	if mc != nil {
-		mc.RecordSession(sr.Metrics, cfg.ModelExecute, "resume", elapsed.Milliseconds())
+		mc.RecordSession(sr.Metrics, cfg.ModelExecute, "resume", elapsed.Milliseconds(), 0, 0.0)
 	}
 
 	if err := kw.WriteProgress(ctx, ProgressData{SessionID: sr.SessionID}); err != nil {
@@ -1006,7 +1006,7 @@ func (r *Runner) execute(ctx context.Context) error {
 						if sr, parseErr := session.ParseResult(raw, elapsed); parseErr == nil {
 							sessionID = sr.SessionID
 							if r.Metrics != nil {
-								resolved := r.Metrics.RecordSession(sr.Metrics, sr.Model, "execute", elapsed.Milliseconds())
+								resolved := r.Metrics.RecordSession(sr.Metrics, sr.Model, "execute", elapsed.Milliseconds(), 0, 0.0)
 								if resolved != sr.Model {
 									log.Warn("unknown model pricing", "model", sr.Model, "fallback", resolved)
 								}
@@ -1045,7 +1045,7 @@ func (r *Runner) execute(ctx context.Context) error {
 					}
 					sessionID = sr.SessionID
 					if r.Metrics != nil {
-						resolved := r.Metrics.RecordSession(sr.Metrics, sr.Model, "execute", elapsed.Milliseconds())
+						resolved := r.Metrics.RecordSession(sr.Metrics, sr.Model, "execute", elapsed.Milliseconds(), 0, 0.0)
 						if resolved != sr.Model {
 							log.Warn("unknown model pricing", "model", sr.Model, "fallback", resolved)
 						}
@@ -1280,7 +1280,7 @@ func (r *Runner) execute(ctx context.Context) error {
 			}
 			// AC5: record review session cost (tokens + model from RealReview)
 			if r.Metrics != nil && rr.SessionMetrics != nil {
-				resolved := r.Metrics.RecordSession(rr.SessionMetrics, rr.Model, "review", reviewElapsed.Milliseconds())
+				resolved := r.Metrics.RecordSession(rr.SessionMetrics, rr.Model, "review", reviewElapsed.Milliseconds(), 0, 0.0)
 				if resolved != rr.Model {
 					log.Warn("unknown model pricing", "model", rr.Model, "fallback", resolved)
 				}

@@ -155,7 +155,7 @@ development_status:
   10-2-sessionmetrics-contextwindow-parsing: review
   10-3-core-context-functions: review
   10-4-ensurecompacthook: review
-  10-5-metricscollector-extension: ready-for-dev
+  10-5-metricscollector-extension: review
   10-6-runner-integration: ready-for-dev
   10-7-warning-system-summary-session-log: ready-for-dev
   epic-10-retrospective: optional

@@ -78,8 +78,10 @@ type TaskMetrics struct {
 	FindingsProgression []int             `json:"findings_progression,omitempty"`
 	CycleDurationsMs    []int64           `json:"cycle_durations_ms,omitempty"`
 	Latency             *LatencyBreakdown `json:"latency,omitempty"`
-	Gate         *GateStats        `json:"gate,omitempty"`
-	Errors       *ErrorStats       `json:"errors,omitempty"`
+	Gate              *GateStats        `json:"gate,omitempty"`
+	Errors            *ErrorStats       `json:"errors,omitempty"`
+	TotalCompactions  int               `json:"total_compactions"`
+	MaxContextFillPct float64           `json:"max_context_fill_pct"`
 }
 
 // RunMetrics holds accumulated metrics for an entire run.
@@ -109,8 +111,10 @@ type RunMetrics struct {
 	TasksCompleted int           `json:"tasks_completed"`
 	TasksFailed    int           `json:"tasks_failed"`
 	TasksSkipped   int                          `json:"tasks_skipped"`
-	AgentStats     map[string]*AgentFindingStats `json:"agent_stats,omitempty"`
-	SerenaSync     *SerenaSyncMetrics            `json:"serena_sync,omitempty"`
+	AgentStats        map[string]*AgentFindingStats `json:"agent_stats,omitempty"`
+	SerenaSync        *SerenaSyncMetrics            `json:"serena_sync,omitempty"`
+	TotalCompactions  int                           `json:"total_compactions"`
+	MaxContextFillPct float64                       `json:"max_context_fill_pct"`
 }
 
 // taskAccumulator is internal mutable state for the current task.
@@ -129,8 +133,10 @@ type taskAccumulator struct {
 	findingsProgression []int
 	cycleDurationsMs    []int64
 	gate                *GateStats
-	errors       *ErrorStats
-	latency      *LatencyBreakdown
+	errors              *ErrorStats
+	latency             *LatencyBreakdown
+	totalCompactions    int
+	maxContextFillPct   float64
 }
 
 // MetricsCollector accumulates session metrics across a run.
@@ -184,7 +190,7 @@ func (mc *MetricsCollector) StartTask(name string) {
 // Returns empty string if pricing map is empty (no fallback available).
 // stepType and durationMs are accepted for call-site documentation but not stored;
 // latency is tracked separately via RecordLatency.
-func (mc *MetricsCollector) RecordSession(metrics *session.SessionMetrics, model, stepType string, durationMs int64) string {
+func (mc *MetricsCollector) RecordSession(metrics *session.SessionMetrics, model, stepType string, durationMs int64, compactions int, contextFillPct float64) string {
 	if mc.current == nil {
 		return model
 	}
@@ -214,6 +220,11 @@ func (mc *MetricsCollector) RecordSession(metrics *session.SessionMetrics, model
 				float64(metrics.CacheReadTokens)*p.CachePer1M) / 1_000_000
 			mc.current.costUSD += cost
 		}
+	}
+	// Context window metrics.
+	mc.current.totalCompactions += compactions
+	if contextFillPct > mc.current.maxContextFillPct {
+		mc.current.maxContextFillPct = contextFillPct
 	}
 	return resolvedModel
 }
@@ -245,6 +256,8 @@ func (mc *MetricsCollector) FinishTask(status, commitSHA string) {
 		Gate:                mc.current.gate,
 		Errors:              mc.current.errors,
 		Latency:             mc.current.latency,
+		TotalCompactions:    mc.current.totalCompactions,
+		MaxContextFillPct:   mc.current.maxContextFillPct,
 	}
 	mc.tasks = append(mc.tasks, tm)
 
@@ -270,6 +283,8 @@ func (mc *MetricsCollector) Finish() RunMetrics {
 	now := time.Now()
 
 	var completed, failed, skipped int
+	var totalCompactions int
+	var maxFillPct float64
 	for _, t := range mc.tasks {
 		switch t.Status {
 		case "completed":
@@ -278,6 +293,10 @@ func (mc *MetricsCollector) Finish() RunMetrics {
 			failed++
 		case "skipped":
 			skipped++
+		}
+		totalCompactions += t.TotalCompactions
+		if t.MaxContextFillPct > maxFillPct {
+			maxFillPct = t.MaxContextFillPct
 		}
 	}
 
@@ -299,6 +318,8 @@ func (mc *MetricsCollector) Finish() RunMetrics {
 		TasksSkipped:        skipped,
 		AgentStats:          mc.agentStats,
 		SerenaSync:          mc.serenaSync,
+		TotalCompactions:    totalCompactions,
+		MaxContextFillPct:   maxFillPct,
 	}
 }
 

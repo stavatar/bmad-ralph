@@ -34,14 +34,14 @@ func TestMetricsCollector_FullLifecycle(t *testing.T) {
 		CacheReadTokens:      200,
 		CacheCreationTokens:  150,
 		NumTurns:             3,
-	}, "", "execute", 5000)
+	}, "", "execute", 5000, 0, 0.0)
 	mc.RecordSession(&session.SessionMetrics{
 		InputTokens:          800,
 		OutputTokens:         400,
 		CacheReadTokens:      100,
 		CacheCreationTokens:  50,
 		NumTurns:             2,
-	}, "", "review", 3000)
+	}, "", "review", 3000, 0, 0.0)
 	mc.FinishTask("completed", "abc123")
 
 	mc.StartTask("task-2")
@@ -51,7 +51,7 @@ func TestMetricsCollector_FullLifecycle(t *testing.T) {
 		CacheReadTokens:      50,
 		CacheCreationTokens:  30,
 		NumTurns:             1,
-	}, "", "execute", 2000)
+	}, "", "execute", 2000, 0, 0.0)
 	mc.FinishTask("completed", "def456")
 
 	rm := mc.Finish()
@@ -141,7 +141,7 @@ func TestMetricsCollector_FullLifecycle(t *testing.T) {
 func TestMetricsCollector_NilMetricsInput(t *testing.T) {
 	mc := NewMetricsCollector("run-nil", nil)
 	mc.StartTask("task-nil")
-	mc.RecordSession(nil, "", "execute", 1000)
+	mc.RecordSession(nil, "", "execute", 1000, 0, 0.0)
 	mc.FinishTask("completed", "sha1")
 
 	rm := mc.Finish()
@@ -159,7 +159,7 @@ func TestMetricsCollector_NilMetricsInput(t *testing.T) {
 func TestMetricsCollector_NoCurrentTask(t *testing.T) {
 	// RecordSession and FinishTask with no StartTask should not panic
 	mc := NewMetricsCollector("run-nocurrent", nil)
-	mc.RecordSession(&session.SessionMetrics{InputTokens: 100}, "", "execute", 500)
+	mc.RecordSession(&session.SessionMetrics{InputTokens: 100}, "", "execute", 500, 0, 0.0)
 	mc.FinishTask("completed", "sha1")
 
 	rm := mc.Finish()
@@ -177,7 +177,7 @@ func TestMetricsCollector_FinishAutoFinishesOrphanedTask(t *testing.T) {
 		InputTokens:  500,
 		OutputTokens: 200,
 		NumTurns:     2,
-	}, "", "execute", 3000)
+	}, "", "execute", 3000, 0, 0.0)
 
 	rm := mc.Finish()
 	if len(rm.Tasks) != 1 {
@@ -291,8 +291,8 @@ func TestMetricsCollector_CurrentTaskCost_WithSessions(t *testing.T) {
 
 	// First task: 2 sessions
 	mc.StartTask("task-1")
-	mc.RecordSession(&session.SessionMetrics{InputTokens: 1000}, "sonnet", "execute", 1000)
-	mc.RecordSession(&session.SessionMetrics{InputTokens: 2000}, "sonnet", "review", 2000)
+	mc.RecordSession(&session.SessionMetrics{InputTokens: 1000}, "sonnet", "execute", 1000, 0, 0.0)
+	mc.RecordSession(&session.SessionMetrics{InputTokens: 2000}, "sonnet", "review", 2000, 0, 0.0)
 	// task-1 cost = (1000+2000) * 1.0 / 1_000_000 = 0.003
 	taskCost := mc.CurrentTaskCost()
 	wantCost := 0.003
@@ -303,7 +303,7 @@ func TestMetricsCollector_CurrentTaskCost_WithSessions(t *testing.T) {
 	// Finish task-1 and start task-2: cost resets
 	mc.FinishTask("completed", "abc")
 	mc.StartTask("task-2")
-	mc.RecordSession(&session.SessionMetrics{InputTokens: 500}, "sonnet", "execute", 500)
+	mc.RecordSession(&session.SessionMetrics{InputTokens: 500}, "sonnet", "execute", 500, 0, 0.0)
 	// task-2 cost = 500 * 1.0 / 1_000_000 = 0.0005
 	taskCost2 := mc.CurrentTaskCost()
 	wantCost2 := 0.0005
@@ -324,7 +324,7 @@ func TestMetricsCollector_CostCalculation(t *testing.T) {
 		OutputTokens:    500,
 		CacheReadTokens: 200,
 		NumTurns:        1,
-	}, "claude-sonnet-4-20250514", "execute", 5000)
+	}, "claude-sonnet-4-20250514", "execute", 5000, 0, 0.0)
 	mc.FinishTask("completed", "sha1")
 
 	rm := mc.Finish()
@@ -350,13 +350,13 @@ func TestMetricsCollector_MultiSessionCostAggregation(t *testing.T) {
 	// Session 1: sonnet
 	mc.RecordSession(&session.SessionMetrics{
 		InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 200,
-	}, "sonnet", "execute", 1000)
+	}, "sonnet", "execute", 1000, 0, 0.0)
 	// Expected: (1000*3 + 500*15 + 200*0.3) / 1M = 10560 / 1M = 0.01056
 
 	// Session 2: opus
 	mc.RecordSession(&session.SessionMetrics{
 		InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 200,
-	}, "opus", "review", 2000)
+	}, "opus", "review", 2000, 0, 0.0)
 	// Expected: (1000*15 + 500*75 + 200*1.5) / 1M = 52800 / 1M = 0.0528
 
 	mc.FinishTask("completed", "sha1")
@@ -379,7 +379,7 @@ func TestMetricsCollector_CumulativeCostIncludesCurrent(t *testing.T) {
 	mc.StartTask("task-1")
 	mc.RecordSession(&session.SessionMetrics{
 		InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 200,
-	}, "sonnet", "execute", 1000)
+	}, "sonnet", "execute", 1000, 0, 0.0)
 	mc.FinishTask("completed", "sha1")
 	task1Cost := 0.01056
 
@@ -387,7 +387,7 @@ func TestMetricsCollector_CumulativeCostIncludesCurrent(t *testing.T) {
 	mc.StartTask("task-2")
 	mc.RecordSession(&session.SessionMetrics{
 		InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 200,
-	}, "sonnet", "execute", 2000)
+	}, "sonnet", "execute", 2000, 0, 0.0)
 
 	// CumulativeCost should include both finished and in-progress
 	wantCumul := task1Cost * 2
@@ -409,7 +409,7 @@ func TestMetricsCollector_CostPrecision(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		mc.RecordSession(&session.SessionMetrics{
 			InputTokens: 1000,
-		}, "model", "execute", 100)
+		}, "model", "execute", 100, 0, 0.0)
 	}
 	mc.FinishTask("completed", "sha1")
 
@@ -431,7 +431,7 @@ func TestMetricsCollector_UnknownModelFallback(t *testing.T) {
 	mc.StartTask("task-unknown")
 	resolved := mc.RecordSession(&session.SessionMetrics{
 		InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 200,
-	}, "unknown-model", "execute", 1000)
+	}, "unknown-model", "execute", 1000, 0, 0.0)
 
 	if resolved != "pricey" {
 		t.Errorf("resolved model = %q, want %q", resolved, "pricey")
@@ -462,7 +462,7 @@ func TestMetricsCollector_CLICostPreferred(t *testing.T) {
 		CacheReadTokens: 200,
 		CostUSD:         0.042,
 		NumTurns:        3,
-	}, "claude-sonnet-4-20250514", "execute", 5000)
+	}, "claude-sonnet-4-20250514", "execute", 5000, 0, 0.0)
 
 	mc.FinishTask("completed", "sha1")
 	rm := mc.Finish()
@@ -490,7 +490,7 @@ func TestMetricsCollector_CLICostZeroFallsBackToRecalculation(t *testing.T) {
 		CacheReadTokens: 200,
 		CostUSD:         0.0,
 		NumTurns:        1,
-	}, "claude-sonnet-4-20250514", "execute", 5000)
+	}, "claude-sonnet-4-20250514", "execute", 5000, 0, 0.0)
 
 	mc.FinishTask("completed", "sha1")
 	rm := mc.Finish()
@@ -514,12 +514,12 @@ func TestMetricsCollector_CLICostMixedSessions(t *testing.T) {
 	mc.RecordSession(&session.SessionMetrics{
 		InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 200,
 		CostUSD: 0.05,
-	}, "sonnet", "execute", 1000)
+	}, "sonnet", "execute", 1000, 0, 0.0)
 
 	// Session 2: no CLI cost, recalculate
 	mc.RecordSession(&session.SessionMetrics{
 		InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 200,
-	}, "sonnet", "review", 2000)
+	}, "sonnet", "review", 2000, 0, 0.0)
 
 	mc.FinishTask("completed", "sha1")
 	rm := mc.Finish()
@@ -537,7 +537,7 @@ func TestMetricsCollector_EmptyPricingNoCost(t *testing.T) {
 	mc.StartTask("task-no-pricing")
 	resolved := mc.RecordSession(&session.SessionMetrics{
 		InputTokens: 1000, OutputTokens: 500,
-	}, "any-model", "execute", 1000)
+	}, "any-model", "execute", 1000, 0, 0.0)
 
 	// With nil pricing, MostExpensiveModel returns "" — no fallback available
 	if resolved != "" {
@@ -1539,5 +1539,59 @@ func TestMetricsCollector_Finish_AgentStats_Nil(t *testing.T) {
 	rm := mc.Finish()
 	if rm.AgentStats != nil {
 		t.Errorf("AgentStats = %v, want nil", rm.AgentStats)
+	}
+}
+
+func TestMetricsCollector_RecordSession_ContextMetrics(t *testing.T) {
+	mc := NewMetricsCollector("run-ctx", nil)
+	mc.StartTask("task-1")
+
+	// Session 1: no compactions, 30% fill.
+	mc.RecordSession(&session.SessionMetrics{InputTokens: 100}, "", "execute", 1000, 0, 30.0)
+	// Session 2: 1 compaction, 55% fill.
+	mc.RecordSession(&session.SessionMetrics{InputTokens: 100}, "", "execute", 1000, 1, 55.0)
+	// Session 3: no compactions, 42% fill.
+	mc.RecordSession(&session.SessionMetrics{InputTokens: 100}, "", "execute", 1000, 0, 42.0)
+
+	mc.FinishTask("completed", "sha1")
+	rm := mc.Finish()
+
+	task := rm.Tasks[0]
+	if task.TotalCompactions != 1 {
+		t.Errorf("TotalCompactions = %d, want 1", task.TotalCompactions)
+	}
+	if task.MaxContextFillPct != 55.0 {
+		t.Errorf("MaxContextFillPct = %f, want 55.0", task.MaxContextFillPct)
+	}
+}
+
+func TestMetricsCollector_RecordSession_ContextMetrics_NilCollector(t *testing.T) {
+	mc := NewMetricsCollector("run-nil", nil)
+	// No StartTask — current is nil.
+	resolved := mc.RecordSession(&session.SessionMetrics{InputTokens: 100}, "sonnet", "execute", 1000, 2, 50.0)
+	if resolved != "sonnet" {
+		t.Errorf("resolved = %q, want %q", resolved, "sonnet")
+	}
+	// Should not panic.
+}
+
+func TestMetricsCollector_Finish_ContextAggregation(t *testing.T) {
+	mc := NewMetricsCollector("run-agg", nil)
+
+	mc.StartTask("task-1")
+	mc.RecordSession(&session.SessionMetrics{InputTokens: 100}, "", "execute", 1000, 1, 55.0)
+	mc.FinishTask("completed", "sha1")
+
+	mc.StartTask("task-2")
+	mc.RecordSession(&session.SessionMetrics{InputTokens: 100}, "", "execute", 1000, 3, 42.0)
+	mc.FinishTask("completed", "sha2")
+
+	rm := mc.Finish()
+
+	if rm.TotalCompactions != 4 {
+		t.Errorf("RunMetrics.TotalCompactions = %d, want 4", rm.TotalCompactions)
+	}
+	if rm.MaxContextFillPct != 55.0 {
+		t.Errorf("RunMetrics.MaxContextFillPct = %f, want 55.0", rm.MaxContextFillPct)
 	}
 }
