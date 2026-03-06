@@ -237,6 +237,12 @@ func TestSmartMergeStatus_Scenarios(t *testing.T) {
 			new:  "- [ ] Task A\n- [ ] Task B\n- [ ] Task C",
 			want: "- [x] Task A\n- [x] Task B\n- [ ] Task C",
 		},
+		{
+			name: "trailing newline preserved",
+			old:  "- [x] Task A\n",
+			new:  "- [ ] Task A\n",
+			want: "- [x] Task A\n",
+		},
 	}
 
 	for _, tc := range cases {

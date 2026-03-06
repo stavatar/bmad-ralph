@@ -62,6 +62,7 @@ func PreFlightCheck(ctx context.Context, git GitClient, taskText, projectRoot st
 
 // SmartMergeStatus preserves [x] status from oldContent when regenerating sprint-tasks.md.
 // Tasks are matched by TaskHash. Non-task lines in newContent pass through unchanged.
+// Only top-level tasks (non-indented) are matched; nested subtasks are not supported.
 // Returns newContent unmodified if oldContent is empty.
 func SmartMergeStatus(oldContent, newContent string) string {
 	if oldContent == "" {
