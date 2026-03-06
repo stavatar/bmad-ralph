@@ -448,6 +448,8 @@ func TestEnvToSlice_AllCases(t *testing.T) {
 		{"empty map", map[string]string{}, 0},
 		{"single entry", map[string]string{"KEY": "val"}, 1},
 		{"multiple entries", map[string]string{"A": "1", "B": "2", "C": "3"}, 3},
+		{"empty value", map[string]string{"KEY": ""}, 1},
+		{"empty key skipped", map[string]string{"": "val"}, 0},
 	}
 
 	for _, tt := range tests {
@@ -462,8 +464,11 @@ func TestEnvToSlice_AllCases(t *testing.T) {
 					t.Errorf("entry %q missing '=' separator", entry)
 				}
 			}
-			// Verify all keys present.
+			// Verify all non-empty keys present (empty keys skipped by envToSlice).
 			for k, v := range tt.m {
+				if k == "" {
+					continue
+				}
 				found := false
 				expected := k + "=" + v
 				for _, entry := range got {
@@ -525,7 +530,8 @@ func TestExecute_EnvMultipleVars(t *testing.T) {
 
 func TestExecute_EnvNilPreservesExisting(t *testing.T) {
 	t.Setenv("SESSION_TEST_HELPER", "echo_env")
-	t.Setenv("ECHO_ENV_KEYS", "HOME")
+	t.Setenv("TEST_NIL_PRESERVE", "kept")
+	t.Setenv("ECHO_ENV_KEYS", "TEST_NIL_PRESERVE")
 	dir := t.TempDir()
 
 	result, err := Execute(context.Background(), Options{
@@ -537,9 +543,9 @@ func TestExecute_EnvNilPreservesExisting(t *testing.T) {
 		t.Fatalf("Execute() unexpected error: %v", err)
 	}
 	got := string(result.Stdout)
-	// HOME should still be present from os.Environ().
-	if !strings.Contains(got, "HOME=") {
-		t.Errorf("stdout = %q, want containing HOME= (from os.Environ)", got)
+	// TEST_NIL_PRESERVE should still be present from os.Environ() even with nil Env.
+	if !strings.Contains(got, "TEST_NIL_PRESERVE=kept") {
+		t.Errorf("stdout = %q, want containing %q (from os.Environ)", got, "TEST_NIL_PRESERVE=kept")
 	}
 }
 
