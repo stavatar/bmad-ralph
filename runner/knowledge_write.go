@@ -87,7 +87,9 @@ func (f *FileKnowledgeWriter) ValidateNewLessons(_ context.Context, data Lessons
 	currentContent, err := os.ReadFile(learningsPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			log.Printf("WARN: %s not found, skipping", learningsPath)
+			// NOTE: no RunLogger available in standalone functions — using stdlib log.
+			// INFO (not WARN): missing LEARNINGS.md on fresh projects is expected.
+			log.Printf("INFO: %s not found, first run — skipping validation", learningsPath)
 			return nil
 		}
 		return fmt.Errorf("runner: validate lessons: %w", err)

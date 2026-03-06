@@ -143,7 +143,7 @@ Claude Opus 4.6
 - Task 1: knowledge_distill.go — all paths already use filepath.Join, all checks already use errors.Is(err, os.ErrNotExist). No changes needed.
 - Task 2: knowledge_write.go — paths already use filepath.Join. Fixed os.IsNotExist→errors.Is on lines 87,436. Added log import. Added WARN log on ValidateNewLessons NotExist path.
 - Task 3: runner.go — all paths already use filepath.Join, all checks already use errors.Is. No changes needed. DetermineReviewOutcome confirmed using filepath.Join.
-- Task 3b: knowledge_read.go — fixed os.IsNotExist→errors.Is on line 131. Added errors import.
+- Task 3b: knowledge_read.go — fixed os.IsNotExist→errors.Is on line 131. Added errors import. (Out of AC scope but improves consistency — single-line fix, no risk.)
 - Task 3c: progressive_test.go — fixed string concatenation dir+"/review-findings.md"→filepath.Join(dir,"review-findings.md") on lines 390,417. Added path/filepath import.
 - Task 4: AutoDistill — added errors.Is(err, os.ErrNotExist) guard with log.Printf WARN and return nil. Added log import. Updated existing test from error-expectation to graceful-skip-expectation.
 - Task 5: ValidateNewLessons already had NotExist guard (returns nil). Added WARN log.Printf for consistency with AC#5 pattern. BudgetCheck NotExist guard already existed (returns zero BudgetStatus).

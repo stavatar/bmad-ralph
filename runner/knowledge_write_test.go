@@ -785,6 +785,8 @@ func TestFileKnowledgeWriter_ValidateNewLessons_WriteError(t *testing.T) {
 
 // TestFilepathJoin_CrossPlatform verifies filepath.Join produces platform-correct
 // paths for key runner operations (AC#7: review-findings.md, LEARNINGS.md).
+// Exercises AC#7; actual filepath.Join coverage via stdlib — this test guards
+// that production path patterns (nested dirs, dotfiles) work on the current platform.
 func TestFilepathJoin_CrossPlatform(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -799,10 +801,9 @@ func TestFilepathJoin_CrossPlatform(t *testing.T) {
 		{"ralph-rules", filepath.Join(root, ".ralph", "rules", "ralph-testing.md")},
 	}
 	for _, tc := range cases {
-		// Path must not contain raw "/" on Windows or raw "\" on Unix —
 		// filepath.Join normalizes to os-specific separator.
-		if strings.Contains(tc.path, "\x00") {
-			t.Errorf("%s: path contains null byte", tc.name)
+		if !strings.Contains(tc.path, string(os.PathSeparator)) {
+			t.Errorf("%s: path %q missing os.PathSeparator %q", tc.name, tc.path, string(os.PathSeparator))
 		}
 		// Verify the path is writable (platform-correct separators)
 		dir := filepath.Dir(tc.path)
