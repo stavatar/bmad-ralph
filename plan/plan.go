@@ -1,7 +1,6 @@
 package plan
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	_ "embed"
@@ -74,7 +73,6 @@ type PlanOpts struct {
 	MaxRetries      int
 	ExistingContent []byte     // content of existing sprint-tasks.md for merge mode; populated by cmd/ralph/plan.go
 	CompletedTasks  string     // completed tasks text for replan mode (prepended to output)
-	GateReader      io.Reader  // reader for gate input (default: os.Stdin); set in tests for mock
 	ProgressWriter  io.Writer  // writer for progress output (default: os.Stderr); set in cmd/ layer
 }
 
@@ -90,9 +88,8 @@ type templateData struct {
 // Run generates sprint-tasks.md from input documents via a Claude session.
 // If NoReview is false, a review session follows generation.
 // On review OK or NoReview: writes file atomically and returns nil.
-// On review ISSUES: retries generation with InjectFeedback, then reviews again.
-// On retry-review ISSUES: prompts gate [p/e/q] via GateReader.
-// Max 3 sessions total: generate → review → retry (no second retry).
+// On review ISSUES: retries generation with InjectFeedback up to MaxRetries times.
+// After MaxRetries exhausted: accepts the best plan automatically (no gate prompt).
 func Run(ctx context.Context, cfg *config.Config, opts PlanOpts) error {
 	outputPath := opts.OutputPath
 	if outputPath == "" {
@@ -113,53 +110,48 @@ func Run(ctx context.Context, cfg *config.Config, opts PlanOpts) error {
 		return err
 	}
 
-	// Review flow (if enabled)
+	// Review loop (if enabled): retry up to MaxRetries times on ISSUES, then auto-proceed.
 	if !opts.NoReview {
-		issues, reviewErr := runReview(ctx, cfg, opts.Inputs, generatedPlan)
-		if reviewErr != nil {
-			return reviewErr
+		pw := opts.ProgressWriter
+		if pw == nil {
+			pw = os.Stderr
 		}
 
-		if issues != "" {
-			// Progress: retry
-			pw := opts.ProgressWriter
-			if pw == nil {
-				pw = os.Stderr
+		maxRetries := opts.MaxRetries
+		if maxRetries <= 0 {
+			maxRetries = 1
+		}
+
+		for attempt := 0; attempt < maxRetries; attempt++ {
+			issues, reviewErr := runReview(ctx, cfg, opts.Inputs, generatedPlan)
+			if reviewErr != nil {
+				return reviewErr
 			}
-			fmt.Fprint(pw, "Retry генерации с feedback...")
+			if issues == "" {
+				break // review passed
+			}
+
+			// Retry: regenerate with reviewer feedback
+			fmt.Fprintf(pw, "Retry генерации с feedback (попытка %d/%d)...", attempt+1, maxRetries)
 			retryStart := time.Now()
 
-			// Retry: generate with reviewer feedback injected
 			retryPlan, retryErr := runGenerate(ctx, cfg, prompt, issues)
 			if retryErr != nil {
 				fmt.Fprintln(pw)
 				return retryErr
 			}
 			generatedPlan = retryPlan
+			fmt.Fprintf(pw, " завершён (%s)\n", time.Since(retryStart).Round(time.Second))
 
-			retryElapsed := time.Since(retryStart).Round(time.Second)
-			fmt.Fprintf(pw, " Retry завершён (%s)\n", retryElapsed)
-
-			// Review retry result
-			retryIssues, retryReviewErr := runReview(ctx, cfg, opts.Inputs, generatedPlan)
-			if retryReviewErr != nil {
-				return retryReviewErr
-			}
-
-			if retryIssues != "" {
-				// Gate [p/e/q]: max retries exhausted
-				action, gateErr := promptGate(opts.GateReader, pw, retryIssues)
-				if gateErr != nil {
-					return fmt.Errorf("plan: gate: %w", gateErr)
+			if attempt == maxRetries-1 {
+				// All retries done — review final result, then auto-proceed regardless
+				finalIssues, finalReviewErr := runReview(ctx, cfg, opts.Inputs, generatedPlan)
+				if finalReviewErr != nil {
+					return finalReviewErr
 				}
-				switch action {
-				case "p":
-					// proceed: accept plan as-is, fall through to writeAtomic
-				case "e":
-					// edit: not implemented in MVP
-					return fmt.Errorf("plan: gate: edit not implemented")
-				case "q":
-					return fmt.Errorf("plan: gate: user quit (exit 3)")
+				if finalIssues != "" {
+					fmt.Fprintf(pw, "\nReview выявил проблемы после %d retry, принимаем план автоматически:\n%s\n",
+						maxRetries, finalIssues)
 				}
 			}
 		}
@@ -244,35 +236,6 @@ func runReview(ctx context.Context, cfg *config.Config, inputs []PlanInput, gene
 	return trimmed, nil
 }
 
-// promptGate displays review issues and reads gate action [p/e/q] from reader.
-// Output goes to w (typically ProgressWriter or os.Stderr).
-func promptGate(reader io.Reader, w io.Writer, issues string) (string, error) {
-	if reader == nil {
-		reader = os.Stdin
-	}
-	if w == nil {
-		w = os.Stderr
-	}
-	fmt.Fprintf(w, "\nReview выявил проблемы после retry:\n%s\n", issues)
-	fmt.Fprintln(w, "[p] proceed — принять план как есть")
-	fmt.Fprintln(w, "[e] edit    — открыть файл в редакторе")
-	fmt.Fprintln(w, "[q] quit    — выйти (exit 3)")
-
-	scanner := bufio.NewScanner(reader)
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return "", fmt.Errorf("plan: gate: read: %w", err)
-		}
-		return "", fmt.Errorf("plan: gate: no input (EOF)")
-	}
-	action := strings.TrimSpace(scanner.Text())
-	switch action {
-	case "p", "e", "q":
-		return action, nil
-	default:
-		return "", fmt.Errorf("plan: gate: unknown action: %q", action)
-	}
-}
 
 // GeneratePrompt assembles the plan prompt from inputs and options.
 // Stage 1: text/template renders structure (typed headers, merge conditional).

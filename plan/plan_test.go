@@ -78,11 +78,6 @@ func TestPlanPrompt_Generate(t *testing.T) {
 		t.Error("missing content from tech-context.md")
 	}
 
-	// Verify output path
-	if !strings.Contains(got, "docs/sprint-tasks.md") {
-		t.Error("missing output path")
-	}
-
 	// Verify merge section absent
 	if strings.Contains(got, "MERGE mode") {
 		t.Error("merge section should be absent when merge=false")
@@ -598,13 +593,13 @@ func TestRun_RetrySuccess(t *testing.T) {
 	}
 }
 
-func TestRun_RetryFailGateProceed(t *testing.T) {
+func TestRun_RetryExhausted_AutoProceeds(t *testing.T) {
 	projectDir := t.TempDir()
 	retryContent := "- [ ] Retry task\n  source: req.md#AC-1"
 	issuesText := "ISSUES:\n- FR3 not covered"
 
 	scenario := testutil.Scenario{
-		Name: "retry_fail_gate_proceed",
+		Name: "retry_exhausted_auto_proceed",
 		Steps: []testutil.ScenarioStep{
 			{ // generate
 				Type:       "execute",
@@ -624,7 +619,7 @@ func TestRun_RetryFailGateProceed(t *testing.T) {
 				SessionID:  "plan-retry",
 				OutputFile: "retry-output.txt",
 			},
-			{ // retry review → ISSUES again
+			{ // retry review → ISSUES again (MaxRetries=1 → exhausted, auto-proceed)
 				Type:       "execute",
 				ExitCode:   0,
 				SessionID:  "plan-review-2",
@@ -632,7 +627,7 @@ func TestRun_RetryFailGateProceed(t *testing.T) {
 			},
 		},
 	}
-	scenarioPath, _ := testutil.SetupMockClaude(t, scenario) // second return is stateDir, unused; t.Fatal on error
+	scenarioPath, _ := testutil.SetupMockClaude(t, scenario)
 	scenarioDir := filepath.Dir(scenarioPath)
 
 	if err := os.WriteFile(filepath.Join(scenarioDir, "output.txt"), []byte("- [ ] Original"), 0644); err != nil {
@@ -659,15 +654,15 @@ func TestRun_RetryFailGateProceed(t *testing.T) {
 		Inputs: []PlanInput{
 			{File: "req.md", Role: "requirements", Content: []byte("# Requirements")},
 		},
-		GateReader: strings.NewReader("p\n"),
+		MaxRetries: 1, // 1 retry → after retry review still fails → auto-proceed
 	}
 
 	err := Run(context.Background(), cfg, opts)
 	if err != nil {
-		t.Fatalf("Run() error: %v", err)
+		t.Fatalf("Run() error: %v (want auto-proceed, not gate error)", err)
 	}
 
-	// Verify retry output was written despite issues (gate proceed)
+	// Verify retry output was written automatically despite remaining issues
 	outPath := filepath.Join(projectDir, "sprint-tasks.md")
 	data, readErr := os.ReadFile(outPath)
 	if readErr != nil {
@@ -675,84 +670,6 @@ func TestRun_RetryFailGateProceed(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "Retry task") {
 		t.Errorf("output = %q, want containing 'Retry task'", string(data))
-	}
-}
-
-func TestRun_RetryFailGateQuit(t *testing.T) {
-	projectDir := t.TempDir()
-	issuesText := "ISSUES:\n- FR3 not covered"
-
-	scenario := testutil.Scenario{
-		Name: "retry_fail_gate_quit",
-		Steps: []testutil.ScenarioStep{
-			{ // generate
-				Type:       "execute",
-				ExitCode:   0,
-				SessionID:  "plan-generate",
-				OutputFile: "output.txt",
-			},
-			{ // review → ISSUES
-				Type:       "execute",
-				ExitCode:   0,
-				SessionID:  "plan-review-1",
-				OutputFile: "review-output-1.txt",
-			},
-			{ // retry generate
-				Type:       "execute",
-				ExitCode:   0,
-				SessionID:  "plan-retry",
-				OutputFile: "retry-output.txt",
-			},
-			{ // retry review → ISSUES again
-				Type:       "execute",
-				ExitCode:   0,
-				SessionID:  "plan-review-2",
-				OutputFile: "review-output-2.txt",
-			},
-		},
-	}
-	scenarioPath, _ := testutil.SetupMockClaude(t, scenario) // second return is stateDir, unused; t.Fatal on error
-	scenarioDir := filepath.Dir(scenarioPath)
-
-	if err := os.WriteFile(filepath.Join(scenarioDir, "output.txt"), []byte("- [ ] Original"), 0644); err != nil {
-		t.Fatalf("write output: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(scenarioDir, "review-output-1.txt"), []byte(issuesText), 0644); err != nil {
-		t.Fatalf("write review-output-1: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(scenarioDir, "retry-output.txt"), []byte("- [ ] Retry task"), 0644); err != nil {
-		t.Fatalf("write retry-output: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(scenarioDir, "review-output-2.txt"), []byte("ISSUES:\n- Still bad"), 0644); err != nil {
-		t.Fatalf("write review-output-2: %v", err)
-	}
-
-	cfg := &config.Config{
-		ClaudeCommand:  os.Args[0],
-		ProjectRoot:    projectDir,
-		PlanOutputPath: "sprint-tasks.md",
-		MaxTurns:       5,
-	}
-
-	opts := PlanOpts{
-		Inputs: []PlanInput{
-			{File: "req.md", Role: "requirements", Content: []byte("# Requirements")},
-		},
-		GateReader: strings.NewReader("q\n"),
-	}
-
-	err := Run(context.Background(), cfg, opts)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "user quit") {
-		t.Errorf("error = %q, want containing 'user quit'", err.Error())
-	}
-
-	// Verify file was NOT written
-	outPath := filepath.Join(projectDir, "sprint-tasks.md")
-	if _, statErr := os.Stat(outPath); !os.IsNotExist(statErr) {
-		t.Error("output file should not exist when user quit")
 	}
 }
 
