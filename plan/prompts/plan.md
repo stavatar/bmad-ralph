@@ -105,16 +105,16 @@ Generate tasks using this exact format:
   source: story.md#AC-1
 ```
 
-## Pre-Generation Analysis (REQUIRED)
+## Pre-Generation Analysis (REQUIRED — think through, do NOT output)
 
-Before generating any tasks, complete this analysis in your response:
+Before writing any `- [ ]` lines, mentally complete these steps (do not write them out — they must NOT appear in your output):
 
-**Step 1 — AC/FR Inventory:** List all acceptance criteria or functional requirements from input documents, numbered.
-**Step 2 — File Grouping:** Group the numbered items by which files or packages they touch.
-**Step 3 — Dependency Order:** Identify which groups must complete before others can start.
-**Step 4 — Size Flag:** Mark any group that would produce >150 LOC or touch 4+ files — split it before generating tasks.
+- **Step 1:** Inventory all ACs/FRs from input documents.
+- **Step 2:** Cluster them by which files/packages they touch.
+- **Step 3:** Order clusters so dependencies come first.
+- **Step 4:** Check each cluster: if it would touch 4+ files or produce >150 LOC, split it.
 
-Then generate tasks following the analysis order.
+Your output must start directly with the first `- [ ]` task line or a `##` phase header — no preamble, no analysis text.
 
 ## Instructions
 
