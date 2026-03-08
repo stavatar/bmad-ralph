@@ -33,7 +33,7 @@ const (
 )
 
 // Options configures a Claude CLI session invocation.
-// The caller (runner/bridge) fills this from config.Config values.
+// The caller (runner/plan) fills this from config.Config values.
 // Session package does NOT import config — receives everything via Options.
 type Options struct {
 	Command                    string  // Claude CLI path (config.ClaudeCommand)
@@ -44,7 +44,9 @@ type Options struct {
 	OutputJSON                 bool    // --output-format json
 	Resume                     string  // --resume session_id (empty = omit)
 	DangerouslySkipPermissions bool    // --dangerously-skip-permissions
-	AppendSystemPrompt         *string // Channel 1 delivery — critical rules via system prompt (nil = omit)
+	AppendSystemPrompt         *string           // Channel 1 delivery — critical rules via system prompt (nil = omit)
+	InjectFeedback             string            // Reviewer feedback for retry session (empty = omit)
+	Env                        map[string]string // Extra env vars merged into subprocess environment (nil = no extra vars)
 }
 
 // RawResult contains raw output from a Claude CLI invocation.
@@ -58,6 +60,8 @@ type RawResult struct {
 }
 
 // Execute invokes the Claude CLI with the given options and captures output.
+// When Options.Env is non-empty, custom environment variables are merged into
+// the subprocess environment (appended after os.Environ for override semantics).
 // For prompts exceeding maxPromptArgLen, the prompt is delivered via stdin
 // instead of -p flag to avoid the Windows 32K command line length limit.
 func Execute(ctx context.Context, opts Options) (*RawResult, error) {
@@ -66,6 +70,16 @@ func Execute(ctx context.Context, opts Options) (*RawResult, error) {
 	cmd := exec.CommandContext(ctx, opts.Command, args...)
 	cmd.Dir = opts.Dir
 	cmd.Env = os.Environ()
+	if len(opts.Env) > 0 {
+		// Append custom vars after os.Environ() so they appear last.
+		// Go exec.Cmd uses the last occurrence of a key on all platforms
+		// (it passes the full slice to the OS; on Linux/macOS the C runtime's
+		// getenv scans forward and returns the first match, but Go's
+		// os.Getenv in the subprocess re-scans and the child process sees
+		// the appended value via exec.Cmd's documented behavior).
+		// For guaranteed deduplication, see envMerge pattern if needed.
+		cmd.Env = append(cmd.Env, envToSlice(opts.Env)...)
+	}
 
 	if opts.Prompt != "" && len(opts.Prompt) > maxPromptArgLen {
 		cmd.Stdin = strings.NewReader(opts.Prompt)
@@ -136,5 +150,22 @@ func buildArgs(opts Options) []string {
 		args = append(args, flagAppendSystemPrompt, *opts.AppendSystemPrompt)
 	}
 
+	if opts.InjectFeedback != "" {
+		args = append(args, flagAppendSystemPrompt, opts.InjectFeedback)
+	}
+
 	return args
+}
+
+// envToSlice converts a map of environment variables to a slice of "KEY=VALUE" strings.
+// Empty keys are silently skipped (invalid env var names).
+func envToSlice(m map[string]string) []string {
+	s := make([]string, 0, len(m))
+	for k, v := range m {
+		if k == "" {
+			continue
+		}
+		s = append(s, k+"="+v)
+	}
+	return s
 }

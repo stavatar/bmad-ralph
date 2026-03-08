@@ -19,6 +19,8 @@ Launch 5 review sub-agents using the Task tool. Each sub-agent reads its prompt 
 
 Each sub-agent MUST read its prompt file, then analyze the code changes for the current task within its defined SCOPE. Sub-agents report their findings back to you.
 
+**IMPORTANT**: Sub-agents must evaluate ONLY the diff (changes for the current task). Pre-existing code that was not modified must NOT be criticized.
+
 Collect all findings from all 5 sub-agents before proceeding to verification.
 
 ---
@@ -63,14 +65,15 @@ Only CONFIRMED findings are written to the findings file. When writing results, 
 
 ## Finding Structure
 
-Each CONFIRMED finding MUST include exactly 4 fields:
+Each CONFIRMED finding MUST include exactly 5 fields:
 
 1. **Description** — what is wrong (clear statement of the issue)
 2. **Location** — file path and line range where the issue exists
 3. **Reasoning** — why this is a problem (impact, risk, or violation)
 4. **Recommendation** — how to fix it (actionable suggestion)
+5. **Agent** (Агент) — which sub-agent reported this finding (e.g., quality, implementation)
 
-All 4 fields are mandatory for every CONFIRMED finding.
+All 5 fields are mandatory for every CONFIRMED finding.
 
 ---
 
@@ -105,6 +108,7 @@ For each CONFIRMED finding:
 - **ГДЕ в коде** — file path and line range (where in the code)
 - **ПОЧЕМУ это проблема** — reasoning and impact (why it matters)
 - **КАК исправить** — actionable recommendation (how to fix)
+- **Агент**: <agent_name> — which sub-agent reported this finding
 
 Overwrite review-findings.md completely — previous content is fully replaced, never appended. The file contains ONLY current task findings — no historical data from previous tasks.
 

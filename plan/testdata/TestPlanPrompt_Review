@@ -1,0 +1,81 @@
+You are a sprint plan reviewer. Your job is to evaluate a generated sprint-tasks.md for quality and completeness.
+
+## Input Documents
+
+The following documents were used to generate the plan:
+
+### Document 0: prd.md (role: requirements)
+
+<!-- file: prd.md | role: requirements -->
+# PRD
+
+FR1: User login
+
+## Generated Plan
+
+- [ ] Implement user login
+  source: prd.md#FR1
+
+## Review Checklist
+
+Evaluate the generated plan against these criteria:
+
+1. **FR Coverage** — Every functional requirement from the input documents has at least one task covering it
+2. **Granularity** — Tasks are atomic. Apply these measurable rules:
+   - File count: task touches ≤ 3 files (ideally 1–2); more = bundle
+   - AC count: task references ≤ 3 ACs; more = over-scoped
+   - Bundle detection: implementation + unit tests in same package = OK; implementation + config changes + a different module = bundle, split
+   - "and" connecting changes in different files or layers = bundle signal
+   - Vagueness: task description has no concrete file or function names = not self-contained
+3. **Source References** — Every task has a `source:` field with real file names from typed headers above
+4. **SETUP and GATE Tasks** — Infrastructure/setup tasks are tagged `[SETUP]` and placed first; `[GATE]` is used only for irreversible decisions (schema migrations, public API contracts, external integrations) or explicit human approval checkpoints
+5. **No Duplication** — No duplicate or contradictory tasks
+6. **Task Ordering** — Tasks are logically ordered: SETUP → implementation → GATE checkpoints
+7. **Task Independence** — Each task is self-contained (sessions are isolated without memory of previous tasks)
+8. **Task Completeness** — Each task names specific files, functions, or types to create/modify; if it depends on a previous task, it describes the expected interface/signature from that task inline as an external contract
+
+## ISSUES Format Examples
+
+When issues are found, format each item precisely so the planner can act on it:
+
+**Bundle detection:**
+```
+ISSUES:
+- Task "Implement config loading and wire CLI flag" bundles 2 concerns; split into (1) add `PlanMode` field + defaults in `config/config.go` with unit tests, (2) wire `--plan-mode` flag in `cmd/ralph/plan.go`
+```
+
+**Vagueness:**
+```
+ISSUES:
+- Task "Add error handling" has no concrete file or function names; specify which function in which file returns the error and what wrapping format to use
+```
+
+**Over-scoped:**
+```
+ISSUES:
+- Task references 5 ACs spanning runner/, config/, and cmd/; split into tasks of ≤ 3 ACs each within a single package boundary
+```
+
+## Response Format
+
+Respond with EXACTLY one of:
+
+1. If the plan passes all checks — output ONLY the word "OK" on a single line, nothing else:
+```
+OK
+```
+
+WRONG (these are NOT valid OK responses):
+- `OK — the plan looks good overall.` ← trailing text is forbidden
+- `**OK**` ← markdown formatting is forbidden
+- `` `OK` `` ← code fence around OK is forbidden
+- `OK, minor issues aside` ← any qualifier is forbidden
+
+2. If issues are found:
+```
+ISSUES:
+- <description of issue 1>
+- <description of issue 2>
+```
+
+Do NOT include any other text or explanation outside this format.

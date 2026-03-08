@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -800,6 +801,11 @@ func AutoDistill(ctx context.Context, cfg *config.Config, state *DistillState) e
 	learningsPath := filepath.Join(cfg.ProjectRoot, "LEARNINGS.md")
 	learningsContent, err := os.ReadFile(learningsPath)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// NOTE: no RunLogger available in standalone functions — using stdlib log.
+			log.Printf("WARN: %s not found, skipping distillation", learningsPath)
+			return nil
+		}
 		return fmt.Errorf("runner: distill: read learnings: %w", err)
 	}
 

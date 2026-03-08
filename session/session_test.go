@@ -43,6 +43,13 @@ func runTestHelper(scenario string) {
 		var buf bytes.Buffer
 		_, _ = buf.ReadFrom(os.Stdin)
 		fmt.Fprint(os.Stdout, buf.String())
+	case "echo_env":
+		// Print requested env var values, one per line.
+		// Caller sets ECHO_ENV_KEYS=KEY1,KEY2 to request specific vars.
+		keys := strings.Split(os.Getenv("ECHO_ENV_KEYS"), ",")
+		for _, k := range keys {
+			fmt.Fprintf(os.Stdout, "%s=%s\n", k, os.Getenv(k))
+		}
 	case "json_success":
 		fmt.Fprint(os.Stdout, `[{"type":"system","subtype":"init","session_id":"integ-test-001","tools":[],"model":"claude-sonnet-4-5-20250514"},{"type":"result","subtype":"success","session_id":"integ-test-001","result":"Integration test output.","is_error":false,"duration_ms":1000,"num_turns":1}]`)
 	case "resume_json":
@@ -93,6 +100,46 @@ func TestBuildArgs_AppendSystemPrompt_Nil(t *testing.T) {
 	for _, arg := range got {
 		if arg == "--append-system-prompt" {
 			t.Errorf("--append-system-prompt flag should be absent when nil, got args: %v", got)
+		}
+	}
+}
+
+func TestBuildArgs_InjectFeedback_Present(t *testing.T) {
+	feedback := "Review found 2 issues: missing error handling in foo.go"
+	got := buildArgs(Options{
+		Prompt:                     "test",
+		InjectFeedback:             feedback,
+		DangerouslySkipPermissions: true,
+	})
+
+	foundFlag := false
+	for i, arg := range got {
+		if arg == "--append-system-prompt" {
+			foundFlag = true
+			if i+1 >= len(got) {
+				t.Fatal("--append-system-prompt flag missing value")
+			}
+			if got[i+1] != feedback {
+				t.Errorf("--append-system-prompt value = %q, want %q", got[i+1], feedback)
+			}
+			break
+		}
+	}
+	if !foundFlag {
+		t.Errorf("expected --append-system-prompt flag in args: %v", got)
+	}
+}
+
+func TestBuildArgs_InjectFeedback_Empty(t *testing.T) {
+	got := buildArgs(Options{
+		Prompt:                     "test",
+		InjectFeedback:             "",
+		DangerouslySkipPermissions: true,
+	})
+
+	for _, arg := range got {
+		if arg == "--append-system-prompt" {
+			t.Errorf("--append-system-prompt flag should be absent when InjectFeedback is empty, got args: %v", got)
 		}
 	}
 }
@@ -426,5 +473,140 @@ func TestExecute_EmptyPromptNoStdin(t *testing.T) {
 	// No stdin written — subprocess reads empty stdin, outputs nothing.
 	if got := string(result.Stdout); got != "" {
 		t.Errorf("stdout = %q, want empty when no prompt", got)
+	}
+}
+
+// --- envToSlice unit tests ---
+
+func TestEnvToSlice_AllCases(t *testing.T) {
+	tests := []struct {
+		name string
+		m    map[string]string
+		want int // expected length
+	}{
+		{"nil map", nil, 0},
+		{"empty map", map[string]string{}, 0},
+		{"single entry", map[string]string{"KEY": "val"}, 1},
+		{"multiple entries", map[string]string{"A": "1", "B": "2", "C": "3"}, 3},
+		{"empty value", map[string]string{"KEY": ""}, 1},
+		{"empty key skipped", map[string]string{"": "val"}, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := envToSlice(tt.m)
+			if len(got) != tt.want {
+				t.Fatalf("envToSlice() returned %d entries, want %d: %v", len(got), tt.want, got)
+			}
+			// Verify KEY=VALUE format for non-empty maps.
+			for _, entry := range got {
+				if !strings.Contains(entry, "=") {
+					t.Errorf("entry %q missing '=' separator", entry)
+				}
+			}
+			// Verify all non-empty keys present (empty keys skipped by envToSlice).
+			for k, v := range tt.m {
+				if k == "" {
+					continue
+				}
+				found := false
+				expected := k + "=" + v
+				for _, entry := range got {
+					if entry == expected {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected %q in result, got %v", expected, got)
+				}
+			}
+		})
+	}
+}
+
+// --- Execute Env integration tests ---
+
+func TestExecute_EnvSingleVar(t *testing.T) {
+	t.Setenv("SESSION_TEST_HELPER", "echo_env")
+	t.Setenv("ECHO_ENV_KEYS", "CLAUDE_CODE_EFFORT_LEVEL")
+	dir := t.TempDir()
+
+	result, err := Execute(context.Background(), Options{
+		Command: os.Args[0],
+		Dir:     dir,
+		Env:     map[string]string{"CLAUDE_CODE_EFFORT_LEVEL": "high"},
+	})
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+	got := string(result.Stdout)
+	if !strings.Contains(got, "CLAUDE_CODE_EFFORT_LEVEL=high") {
+		t.Errorf("stdout = %q, want containing %q", got, "CLAUDE_CODE_EFFORT_LEVEL=high")
+	}
+}
+
+func TestExecute_EnvMultipleVars(t *testing.T) {
+	t.Setenv("SESSION_TEST_HELPER", "echo_env")
+	t.Setenv("ECHO_ENV_KEYS", "KEY1,KEY2")
+	dir := t.TempDir()
+
+	result, err := Execute(context.Background(), Options{
+		Command: os.Args[0],
+		Dir:     dir,
+		Env:     map[string]string{"KEY1": "val1", "KEY2": "val2"},
+	})
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+	got := string(result.Stdout)
+	if !strings.Contains(got, "KEY1=val1") {
+		t.Errorf("stdout = %q, want containing %q", got, "KEY1=val1")
+	}
+	if !strings.Contains(got, "KEY2=val2") {
+		t.Errorf("stdout = %q, want containing %q", got, "KEY2=val2")
+	}
+}
+
+func TestExecute_EnvNilPreservesExisting(t *testing.T) {
+	t.Setenv("SESSION_TEST_HELPER", "echo_env")
+	t.Setenv("TEST_NIL_PRESERVE", "kept")
+	t.Setenv("ECHO_ENV_KEYS", "TEST_NIL_PRESERVE")
+	dir := t.TempDir()
+
+	result, err := Execute(context.Background(), Options{
+		Command: os.Args[0],
+		Dir:     dir,
+		Env:     nil,
+	})
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+	got := string(result.Stdout)
+	// TEST_NIL_PRESERVE should still be present from os.Environ() even with nil Env.
+	if !strings.Contains(got, "TEST_NIL_PRESERVE=kept") {
+		t.Errorf("stdout = %q, want containing %q (from os.Environ)", got, "TEST_NIL_PRESERVE=kept")
+	}
+}
+
+func TestExecute_EnvOverridesExisting(t *testing.T) {
+	t.Setenv("SESSION_TEST_HELPER", "echo_env")
+	t.Setenv("ECHO_ENV_KEYS", "CLAUDE_CODE_EFFORT_LEVEL")
+	// Set an existing value that should be overridden.
+	t.Setenv("CLAUDE_CODE_EFFORT_LEVEL", "low")
+	dir := t.TempDir()
+
+	result, err := Execute(context.Background(), Options{
+		Command: os.Args[0],
+		Dir:     dir,
+		Env:     map[string]string{"CLAUDE_CODE_EFFORT_LEVEL": "high"},
+	})
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+	got := string(result.Stdout)
+	// Last value wins — appended after os.Environ(), so "high" should be the effective value.
+	if !strings.Contains(got, "CLAUDE_CODE_EFFORT_LEVEL=high") {
+		t.Errorf("stdout = %q, want containing %q (override)", got, "CLAUDE_CODE_EFFORT_LEVEL=high")
 	}
 }

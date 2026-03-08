@@ -353,6 +353,54 @@ func TestExecGitClient_HeadCommit_EmptyRepo(t *testing.T) {
 	}
 }
 
+// TestExecGitClient_LogOneline_Success verifies LogOneline returns commit lines from a real repo (AC#3).
+func TestExecGitClient_LogOneline_Success(t *testing.T) {
+	dir := initGitRepo(t)
+
+	// Create a second commit so we have 2 commits total
+	if err := os.WriteFile(filepath.Join(dir, "second.txt"), []byte("second\n"), 0644); err != nil {
+		t.Fatalf("write second file: %v", err)
+	}
+	runGit(t, dir, "add", "second.txt")
+	runGit(t, dir, "commit", "-m", "add second file")
+
+	client := &ExecGitClient{Dir: dir}
+	lines, err := client.LogOneline(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("LogOneline: unexpected error: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("LogOneline: got %d lines, want 2", len(lines))
+	}
+	// Each line should contain abbreviated hash + subject
+	if !strings.Contains(lines[0], "add second file") {
+		t.Errorf("lines[0] = %q, want containing 'add second file'", lines[0])
+	}
+	if !strings.Contains(lines[1], "initial commit") {
+		t.Errorf("lines[1] = %q, want containing 'initial commit'", lines[1])
+	}
+}
+
+// TestExecGitClient_LogOneline_NotARepo verifies error wrapping on non-repo directory (AC#3).
+func TestExecGitClient_LogOneline_NotARepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not in PATH")
+	}
+	dir := t.TempDir() // No git init
+
+	client := &ExecGitClient{Dir: dir}
+	lines, err := client.LogOneline(context.Background(), 5)
+	if err == nil {
+		t.Fatal("LogOneline on non-repo: want error, got nil")
+	}
+	if lines != nil {
+		t.Errorf("LogOneline lines on error: want nil, got %v", lines)
+	}
+	if !strings.Contains(err.Error(), "runner: git log oneline:") {
+		t.Errorf("error prefix: want 'runner: git log oneline:', got %q", err.Error())
+	}
+}
+
 // TestExecGitClient_DiffStats_HappyPath verifies diff stats for a commit with known changes.
 func TestExecGitClient_DiffStats_HappyPath(t *testing.T) {
 	dir := initGitRepo(t)

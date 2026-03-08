@@ -23,12 +23,18 @@ Do NOT report findings in these areas — they are handled by dedicated agents:
 
 ## Instructions
 
-1. Read the story's acceptance criteria carefully.
-2. For each AC, verify that the implementation satisfies it completely.
-3. For each finding, report:
+1. Review ONLY the diff (changes for the current task). Do NOT criticize pre-existing code that was not modified in this task.
+2. Read the story's acceptance criteria carefully.
+3. For each AC, verify that the implementation satisfies it completely.
+4. Verify the diff does not touch files outside the task's scope (file-level) — flag any out-of-scope file modifications.
+5. Verify ALL changes in the diff relate to the current task's acceptance criteria (task-level). If changes implement a different task from sprint-tasks.md — this is a scope creep finding:
+   - Severity: HIGH
+   - Format: "Scope creep: изменения в <файл> реализуют задачу '<другая задача>', а не текущую"
+6. For each finding, report:
    - **WHAT**: Which AC is not satisfied or partially satisfied
    - **WHERE**: File path and line number where implementation is missing or incorrect
    - **WHY**: How the current implementation fails to meet the AC
    - **HOW**: What specific changes would satisfy the AC
-4. Classify each finding by severity: HIGH (AC not met), MED (AC partially met), or LOW (AC met but edge case missing).
-5. If all ACs are satisfied, explicitly state: "All acceptance criteria satisfied."
+7. Classify each finding by severity: HIGH (AC not met), MED (AC partially met), or LOW (AC met but edge case missing).
+8. Include `- **Агент**: implementation` in every finding you report.
+9. If all ACs are satisfied, explicitly state: "All acceptance criteria satisfied."

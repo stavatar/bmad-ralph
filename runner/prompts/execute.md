@@ -34,6 +34,7 @@ Violation of any rule is grounds for immediate session termination.
 7. Do NOT modify CI/CD pipelines unless the task explicitly requires it.
 8. Do NOT access external services, APIs, or URLs not specified in the task.
 9. Do NOT commit credentials, secrets, or sensitive data.
+10. Do NOT work on tasks you did not select at the beginning of this session.
 
 ## ATDD — Acceptance Test-Driven Development
 
@@ -55,11 +56,39 @@ Violation of any rule is grounds for immediate session termination.
 3. Refactor if needed while keeping all tests green.
 4. Repeat for each sub-requirement in the task.
 
-## Commit Rules
+## Commit Rules — MANDATORY
 
-- Commit ONLY when ALL tests pass (green). NEVER commit with failing tests.
+- You MUST `git add` and `git commit` your changes when ALL tests pass (green).
+- NEVER end a session without committing. Uncommitted work is LOST between sessions.
+- NEVER commit with failing tests — fix them first, then commit.
 - Each commit should represent a logical, self-contained unit of work.
 - Write clear commit messages describing what changed and why.
+- В конце commit message добавь маркер: [task:__TASK_HASH__]
+- Пример: feat: add user validation [task:__TASK_HASH__]
+- The `[GATE]` tag in tasks is a signal for the orchestrator (Ralph), NOT for you. Do NOT pause or wait when you see `[GATE]`. Implement the task, run tests, and commit normally.
+
+## SCOPE BOUNDARY (MANDATORY)
+
+Реализуй ТОЛЬКО текущую задачу: __TASK_CONTENT__
+НЕ реализуй другие задачи из sprint-tasks.md, даже если они кажутся связанными.
+Если текущая задача зависит от другой — остановись и сообщи, не делай обе.
+
+Перед коммитом проверь: каждый изменённый файл и каждое изменение
+напрямую связаны с текущей задачей. Если обнаружишь изменения для другой
+задачи — откати их через git checkout.
+
+## Session Completion
+
+- After you finish implementing and committing ONE task, STOP the session immediately.
+- Do NOT scan sprint-tasks.md for additional tasks after your commit.
+- Your session handles exactly one task: the first open `- [ ]` task you selected at the start.
+- Once committed, your work is done. Exit cleanly.
+
+## Task Scope — Files
+
+- Only modify files that are directly required by the current task.
+- Do NOT make changes to files outside the task's scope (no drive-by refactoring, no unrelated cleanups).
+- If you notice issues in unrelated files, leave them for a future task — do NOT fix them now.
 
 ## Mutation Asymmetry — INVIOLABLE
 
@@ -91,7 +120,7 @@ Re-read the top 5 most recent learnings. For each modified file, verify that the
 
 ## Gates
 
-GATES ARE ENABLED. When you encounter a task tagged with `[GATE]`, pause execution and report status. Wait for human approval before continuing past the gate.
+GATES ARE ENABLED. The `[GATE]` tag means the orchestrator will pause AFTER your session to ask for human approval. You still MUST implement the task fully, run tests, and commit. Do NOT stop early or skip the commit — the gate check happens outside your session.
 {{- end}}
 {{- if .SerenaEnabled}}
 

@@ -4,16 +4,14 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"github.com/bmad-ralph/bmad-ralph/config"
+	"github.com/bmad-ralph/bmad-ralph/runner"
+	"github.com/fatih/color"
+	"github.com/spf13/cobra"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
-
-	"github.com/bmad-ralph/bmad-ralph/config"
-	"github.com/bmad-ralph/bmad-ralph/runner"
 )
 
 var runCmd = &cobra.Command{
@@ -31,24 +29,20 @@ func init() {
 	runCmd.Flags().Int("every", 0, "Checkpoint gate every N tasks (0 = off)")
 	runCmd.Flags().String("model", "", "Override Claude model for execute")
 	runCmd.Flags().Bool("always-extract", false, "Extract knowledge after every execute")
+	runCmd.Flags().Bool("serena-sync", false, "Enable Serena memory sync after run")
 }
-
 func runRun(cmd *cobra.Command, args []string) error {
 	flags := buildCLIFlags(cmd)
-
 	cfg, err := config.Load(flags)
 	if err != nil {
 		return fmt.Errorf("ralph: load config: %w", err)
 	}
-
 	cfg.RunID = generateRunID()
 	metrics, runErr := runner.Run(cmd.Context(), cfg)
-
 	if metrics != nil {
 		writeRunReport(cfg, metrics)
 		fmt.Fprintln(cmd.OutOrStdout(), formatSummary(metrics, cfg))
 	}
-
 	return runErr
 }
 
@@ -59,20 +53,19 @@ func writeRunReport(cfg *config.Config, m *runner.RunMetrics) {
 		fmt.Fprintf(os.Stderr, "WARNING: failed to marshal run report: %v\n", err)
 		return
 	}
-
 	dir := filepath.Join(cfg.ProjectRoot, cfg.LogDir)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: failed to create log directory: %v\n", err)
 		return
 	}
-
 	path := filepath.Join(dir, fmt.Sprintf("ralph-run-%s.json", cfg.RunID))
 	if err := os.WriteFile(path, jsonBytes, 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: failed to write run report: %v\n", err)
 	}
 }
 
-// formatSummary returns a 4-line text summary of the run for stdout (AC3, AC4).
+// formatSummary returns a 4-5 line text summary of the run for stdout (AC3, AC4).
+// Line 4 (Serena sync) is present only when SerenaSync metrics are populated.
 func formatSummary(m *runner.RunMetrics, cfg *config.Config) string {
 	totalTasks := m.TasksCompleted + m.TasksFailed + m.TasksSkipped
 	dur := time.Duration(m.DurationMs) * time.Millisecond
@@ -83,7 +76,6 @@ func formatSummary(m *runner.RunMetrics, cfg *config.Config) string {
 	green := color.New(color.FgGreen).SprintFunc()
 	line1 := green(fmt.Sprintf("Run complete: %d tasks (%d completed, %d skipped, %d failed)",
 		totalTasks, m.TasksCompleted, m.TasksSkipped, m.TasksFailed))
-
 	// Line 2: duration, cost, tokens
 	var costStr, tokenStr string
 	if m.CostUSD == 0 && m.InputTokens == 0 {
@@ -105,11 +97,11 @@ func formatSummary(m *runner.RunMetrics, cfg *config.Config) string {
 				for _, f := range t.Findings {
 					totalFindings++
 					switch strings.ToUpper(f.Severity) {
-					case "HIGH":
+					case "HIGH", "CRITICAL":
 						high++
 					case "MEDIUM":
 						medium++
-					case "LOW":
+					default:
 						low++
 					}
 				}
@@ -118,11 +110,30 @@ func formatSummary(m *runner.RunMetrics, cfg *config.Config) string {
 	}
 	line3 := fmt.Sprintf("Reviews: %d cycles, %d findings (%dh/%dm/%dl)", reviewCycles, totalFindings, high, medium, low)
 
-	// Line 4: report path
-	reportPath := filepath.Join(cfg.LogDir, fmt.Sprintf("ralph-run-%s.json", cfg.RunID))
-	line4 := fmt.Sprintf("Report: %s", reportPath)
+	// Line 4: context window metrics (FR90)
+	contextText := fmt.Sprintf("Context: max %.1f%% fill, %d compactions", m.MaxContextFillPct, m.TotalCompactions)
+	yellow := color.New(color.FgYellow).SprintFunc()
+	red := color.New(color.FgRed).SprintFunc()
+	if m.MaxContextFillPct > float64(cfg.ContextCriticalPct) {
+		contextText += " [!]"
+		contextText = red(contextText)
+	} else if m.TotalCompactions > 0 {
+		contextText += " [!]"
+		contextText = yellow(contextText)
+	}
+	line4 := contextText
 
-	return fmt.Sprintf("%s\n%s\n%s\n%s", line1, line2, line3, line4)
+	// Line 5 (conditional): Serena sync
+	var syncLine string
+	if m.SerenaSync != nil {
+		sm := m.SerenaSync
+		syncLine = fmt.Sprintf("\nSerena sync: %s ($%.2f, %ds)", sm.Status, sm.CostUSD, sm.DurationMs/1000)
+	}
+
+	// Line 6: report path
+	reportPath := filepath.Join(cfg.LogDir, fmt.Sprintf("ralph-run-%s.json", cfg.RunID))
+	line6 := fmt.Sprintf("Report: %s", reportPath)
+	return fmt.Sprintf("%s\n%s\n%s\n%s%s\n%s", line1, line2, line3, line4, syncLine, line6)
 }
 
 // formatTokens formats a token count for display: exact for <1000, "XK" for thousands, "X.XM" for millions.
@@ -145,7 +156,7 @@ func formatTokens(n int) string {
 // Uses crypto/rand for secure random bytes.
 func generateRunID() string {
 	var b [16]byte
-	_, _ = rand.Read(b[:]) // crypto/rand.Read always returns len(p), nil on supported platforms
+	_, _ = rand.Read(b[:])      // crypto/rand.Read always returns len(p), nil on supported platforms
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
@@ -155,7 +166,6 @@ func generateRunID() string {
 // Only flags explicitly set by the user are populated (pointer non-nil).
 func buildCLIFlags(cmd *cobra.Command) config.CLIFlags {
 	var flags config.CLIFlags
-
 	if cmd.Flags().Changed("max-turns") {
 		v, _ := cmd.Flags().GetInt("max-turns")
 		flags.MaxTurns = &v
@@ -176,6 +186,9 @@ func buildCLIFlags(cmd *cobra.Command) config.CLIFlags {
 		v, _ := cmd.Flags().GetBool("always-extract")
 		flags.AlwaysExtract = &v
 	}
-
+	if cmd.Flags().Changed("serena-sync") {
+		v, _ := cmd.Flags().GetBool("serena-sync")
+		flags.SerenaSyncEnabled = &v
+	}
 	return flags
 }

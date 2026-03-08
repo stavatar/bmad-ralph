@@ -81,7 +81,6 @@ Service tasks are infrastructure or validation tasks not directly tied to a user
 | Prefix | Purpose | Example |
 |--------|---------|---------|
 | `[SETUP]` | Environment or infrastructure setup | `- [ ] [SETUP] Initialize database migrations` |
-| `[VERIFY]` | Verification or validation step | `- [ ] [VERIFY] Run integration test suite` |
 | `[E2E]` | End-to-end test or workflow | `- [ ] [E2E] Complete user registration flow` |
 
 Service tasks still follow the same `source:` traceability format:
@@ -89,8 +88,6 @@ Service tasks still follow the same `source:` traceability format:
 ```
 - [ ] [SETUP] Create staging environment
   source: stories/2-1-deployment.md#SETUP
-- [ ] [VERIFY] Validate API contract compliance
-  source: stories/1-3-api-design.md#VERIFY
 - [ ] [E2E] Test checkout flow end-to-end
   source: stories/3-2-checkout.md#E2E
 ```
@@ -123,8 +120,6 @@ When a human gate reviewer provides feedback, it appears as a blockquote prefixe
 
 - [x] [SETUP] Configure API rate limiter
   source: stories/1-5-api-security.md#SETUP
-- [ ] [VERIFY] Validate rate limit thresholds
-  source: stories/1-5-api-security.md#VERIFY
 - [ ] Implement pagination for list endpoints
   source: stories/1-3-api-design.md#AC-2
 > USER FEEDBACK: Use cursor-based pagination, not offset

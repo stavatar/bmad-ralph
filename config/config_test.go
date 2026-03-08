@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,9 @@ model_review: "sonnet"
 review_min_severity: "HIGH"
 always_extract: true
 serena_enabled: false
+serena_sync_enabled: true
+serena_sync_max_turns: 10
+serena_sync_trigger: "run"
 learnings_budget: 500
 stuck_threshold: 5
 budget_max_usd: 25.0
@@ -54,6 +58,15 @@ model_pricing:
     output_per_1m: 25.0
     cache_per_1m: 0.50
 log_dir: "/tmp/ralph-logs"
+plan_inputs:
+  - file: "docs/prd.md"
+    role: "requirements"
+  - file: "docs/arch.md"
+    role: "technical_context"
+plan_output_path: "output/tasks.md"
+plan_max_retries: 3
+plan_merge: true
+plan_mode: "bmad"
 `
 	writeConfigYAML(t, dir, yaml)
 	t.Chdir(dir)
@@ -99,6 +112,15 @@ log_dir: "/tmp/ralph-logs"
 	if cfg.SerenaEnabled {
 		t.Error("SerenaEnabled = true, want false")
 	}
+	if !cfg.SerenaSyncEnabled {
+		t.Error("SerenaSyncEnabled = false, want true")
+	}
+	if cfg.SerenaSyncMaxTurns != 10 {
+		t.Errorf("SerenaSyncMaxTurns = %d, want 10", cfg.SerenaSyncMaxTurns)
+	}
+	if cfg.SerenaSyncTrigger != "run" {
+		t.Errorf("SerenaSyncTrigger = %q, want %q", cfg.SerenaSyncTrigger, "run")
+	}
 	if cfg.LearningsBudget != 500 {
 		t.Errorf("LearningsBudget = %d, want 500", cfg.LearningsBudget)
 	}
@@ -129,6 +151,33 @@ log_dir: "/tmp/ralph-logs"
 	}
 	if cfg.LogDir != "/tmp/ralph-logs" {
 		t.Errorf("LogDir = %q, want %q", cfg.LogDir, "/tmp/ralph-logs")
+	}
+	if len(cfg.PlanInputs) != 2 {
+		t.Fatalf("PlanInputs len = %d, want 2", len(cfg.PlanInputs))
+	}
+	if cfg.PlanInputs[0].File != "docs/prd.md" {
+		t.Errorf("PlanInputs[0].File = %q, want %q", cfg.PlanInputs[0].File, "docs/prd.md")
+	}
+	if cfg.PlanInputs[0].Role != "requirements" {
+		t.Errorf("PlanInputs[0].Role = %q, want %q", cfg.PlanInputs[0].Role, "requirements")
+	}
+	if cfg.PlanInputs[1].File != "docs/arch.md" {
+		t.Errorf("PlanInputs[1].File = %q, want %q", cfg.PlanInputs[1].File, "docs/arch.md")
+	}
+	if cfg.PlanInputs[1].Role != "technical_context" {
+		t.Errorf("PlanInputs[1].Role = %q, want %q", cfg.PlanInputs[1].Role, "technical_context")
+	}
+	if cfg.PlanOutputPath != "output/tasks.md" {
+		t.Errorf("PlanOutputPath = %q, want %q", cfg.PlanOutputPath, "output/tasks.md")
+	}
+	if cfg.PlanMaxRetries != 3 {
+		t.Errorf("PlanMaxRetries = %d, want 3", cfg.PlanMaxRetries)
+	}
+	if !cfg.PlanMerge {
+		t.Error("PlanMerge = false, want true")
+	}
+	if cfg.PlanMode != "bmad" {
+		t.Errorf("PlanMode = %q, want %q", cfg.PlanMode, "bmad")
 	}
 	if cfg.ProjectRoot != dir {
 		t.Errorf("ProjectRoot = %q, want %q", cfg.ProjectRoot, dir)
@@ -184,8 +233,8 @@ func TestConfig_Load_PartialConfig(t *testing.T) {
 				if cfg.SerenaEnabled {
 					t.Error("SerenaEnabled = true, want false")
 				}
-				if cfg.MaxTurns != 50 {
-					t.Errorf("default MaxTurns = %d, want 50", cfg.MaxTurns)
+				if cfg.MaxTurns != 15 {
+					t.Errorf("default MaxTurns = %d, want 15", cfg.MaxTurns)
 				}
 				if cfg.ReviewMinSeverity != "LOW" {
 					t.Errorf("default ReviewMinSeverity = %q, want %q", cfg.ReviewMinSeverity, "LOW")
@@ -216,8 +265,8 @@ func TestConfig_Load_EmptyFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.MaxTurns != 50 {
-		t.Errorf("MaxTurns = %d, want 50 (default)", cfg.MaxTurns)
+	if cfg.MaxTurns != 15 {
+		t.Errorf("MaxTurns = %d, want 15 (default)", cfg.MaxTurns)
 	}
 	if !cfg.SerenaEnabled {
 		t.Error("SerenaEnabled should be true (default)")
@@ -233,8 +282,8 @@ func TestConfig_Load_EmptyDocumentMarker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.MaxTurns != 50 {
-		t.Errorf("defaults lost: MaxTurns = %d, want 50", cfg.MaxTurns)
+	if cfg.MaxTurns != 15 {
+		t.Errorf("defaults lost: MaxTurns = %d, want 15", cfg.MaxTurns)
 	}
 	if !cfg.SerenaEnabled {
 		t.Error("defaults lost: SerenaEnabled should be true")
@@ -256,8 +305,8 @@ func TestConfig_Load_MissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.MaxTurns != 50 {
-		t.Errorf("default MaxTurns = %d, want 50", cfg.MaxTurns)
+	if cfg.MaxTurns != 15 {
+		t.Errorf("default MaxTurns = %d, want 15", cfg.MaxTurns)
 	}
 	if !cfg.SerenaEnabled {
 		t.Error("SerenaEnabled default should be true")
@@ -329,14 +378,14 @@ func TestConfig_Load_DefaultsComplete(t *testing.T) {
 	if cfg.ClaudeCommand != "claude" {
 		t.Errorf("ClaudeCommand = %q, want %q", cfg.ClaudeCommand, "claude")
 	}
-	if cfg.MaxTurns != 50 {
-		t.Errorf("MaxTurns = %d, want 50", cfg.MaxTurns)
+	if cfg.MaxTurns != 15 {
+		t.Errorf("MaxTurns = %d, want 15", cfg.MaxTurns)
 	}
 	if cfg.MaxIterations != 3 {
 		t.Errorf("MaxIterations = %d, want 3", cfg.MaxIterations)
 	}
-	if cfg.MaxReviewIterations != 3 {
-		t.Errorf("MaxReviewIterations = %d, want 3", cfg.MaxReviewIterations)
+	if cfg.MaxReviewIterations != 6 {
+		t.Errorf("MaxReviewIterations = %d, want 6", cfg.MaxReviewIterations)
 	}
 	if cfg.GatesEnabled {
 		t.Error("GatesEnabled should default to false")
@@ -347,11 +396,20 @@ func TestConfig_Load_DefaultsComplete(t *testing.T) {
 	if cfg.ReviewEvery != 1 {
 		t.Errorf("ReviewEvery = %d, want 1", cfg.ReviewEvery)
 	}
-	if cfg.ModelExecute != "" {
-		t.Errorf("ModelExecute = %q, want empty", cfg.ModelExecute)
+	if cfg.ModelExecute != "claude-opus-4-6" {
+		t.Errorf("ModelExecute = %q, want %q", cfg.ModelExecute, "claude-opus-4-6")
 	}
-	if cfg.ModelReview != "" {
-		t.Errorf("ModelReview = %q, want empty", cfg.ModelReview)
+	if cfg.ModelReview != "claude-sonnet-4-6" {
+		t.Errorf("ModelReview = %q, want %q", cfg.ModelReview, "claude-sonnet-4-6")
+	}
+	if cfg.ModelReviewLight != "claude-haiku-4-5-20251001" {
+		t.Errorf("ModelReviewLight = %q, want %q", cfg.ModelReviewLight, "claude-haiku-4-5-20251001")
+	}
+	if cfg.ReviewLightMaxFiles != 5 {
+		t.Errorf("ReviewLightMaxFiles = %d, want 5", cfg.ReviewLightMaxFiles)
+	}
+	if cfg.ReviewLightMaxLines != 50 {
+		t.Errorf("ReviewLightMaxLines = %d, want 50", cfg.ReviewLightMaxLines)
 	}
 	if cfg.ReviewMinSeverity != "LOW" {
 		t.Errorf("ReviewMinSeverity = %q, want %q", cfg.ReviewMinSeverity, "LOW")
@@ -401,6 +459,21 @@ func TestConfig_Load_DefaultsComplete(t *testing.T) {
 	if cfg.ProjectRoot == "" {
 		t.Error("ProjectRoot should not be empty")
 	}
+	if cfg.SerenaSyncEnabled {
+		t.Error("SerenaSyncEnabled should default to false")
+	}
+	if cfg.SerenaSyncMaxTurns != 5 {
+		t.Errorf("SerenaSyncMaxTurns = %d, want 5", cfg.SerenaSyncMaxTurns)
+	}
+	if cfg.SerenaSyncTrigger != "task" {
+		t.Errorf("SerenaSyncTrigger = %q, want %q", cfg.SerenaSyncTrigger, "task")
+	}
+	if cfg.ContextWarnPct != 55 {
+		t.Errorf("ContextWarnPct = %d, want 55", cfg.ContextWarnPct)
+	}
+	if cfg.ContextCriticalPct != 65 {
+		t.Errorf("ContextCriticalPct = %d, want 65", cfg.ContextCriticalPct)
+	}
 }
 
 func TestConfig_Load_StoriesDirFromFile(t *testing.T) {
@@ -449,8 +522,8 @@ func TestConfig_Load_CommentsOnlyYAML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.MaxTurns != 50 {
-		t.Errorf("defaults lost: MaxTurns = %d, want 50", cfg.MaxTurns)
+	if cfg.MaxTurns != 15 {
+		t.Errorf("defaults lost: MaxTurns = %d, want 15", cfg.MaxTurns)
 	}
 	if !cfg.SerenaEnabled {
 		t.Error("defaults lost: SerenaEnabled should be true")
@@ -472,8 +545,8 @@ func TestConfig_Load_GitFallbackRoot(t *testing.T) {
 	if cfg.ProjectRoot != dir {
 		t.Errorf("ProjectRoot = %q, want %q", cfg.ProjectRoot, dir)
 	}
-	if cfg.MaxTurns != 50 {
-		t.Errorf("MaxTurns = %d, want 50 (default)", cfg.MaxTurns)
+	if cfg.MaxTurns != 15 {
+		t.Errorf("MaxTurns = %d, want 15 (default)", cfg.MaxTurns)
 	}
 }
 
@@ -585,7 +658,7 @@ func TestConfig_Load_ConfigOverridesEmbedded(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cfg.MaxTurns != 75 {
-		t.Errorf("MaxTurns = %d, want 75 (config override of embedded 50)", cfg.MaxTurns)
+		t.Errorf("MaxTurns = %d, want 75 (config override of embedded 15)", cfg.MaxTurns)
 	}
 	if !cfg.GatesEnabled {
 		t.Error("GatesEnabled = false, want true (config override of embedded false)")
@@ -607,14 +680,14 @@ func TestConfig_Load_EmbeddedDefaultUsed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.MaxTurns != 50 {
-		t.Errorf("MaxTurns = %d, want 50 (embedded default)", cfg.MaxTurns)
+	if cfg.MaxTurns != 15 {
+		t.Errorf("MaxTurns = %d, want 15 (embedded default)", cfg.MaxTurns)
 	}
 	if cfg.GatesEnabled {
 		t.Error("GatesEnabled = true, want false (embedded default)")
 	}
-	if cfg.ModelExecute != "" {
-		t.Errorf("ModelExecute = %q, want empty (embedded default)", cfg.ModelExecute)
+	if cfg.ModelExecute != "claude-opus-4-6" {
+		t.Errorf("ModelExecute = %q, want %q (embedded default)", cfg.ModelExecute, "claude-opus-4-6")
 	}
 }
 
@@ -628,30 +701,34 @@ func TestConfig_Load_CascadeThreeLevels(t *testing.T) {
 		wantBool bool     // expected GatesEnabled
 		wantStr  string   // expected ModelExecute
 	}{
-		// int cascade (MaxTurns: embedded=50)
+		// int cascade (MaxTurns: embedded=15)
 		{
 			name:    "int/CLI overrides config",
 			yaml:    "max_turns: 75\n",
 			flags:   CLIFlags{MaxTurns: intPtr(100)},
 			wantInt: 100,
+			wantStr: "claude-opus-4-6",
 		},
 		{
 			name:    "int/config overrides embedded",
 			yaml:    "max_turns: 75\n",
 			flags:   CLIFlags{},
 			wantInt: 75,
+			wantStr: "claude-opus-4-6",
 		},
 		{
 			name:     "int/embedded default used",
 			noConfig: true,
 			flags:    CLIFlags{},
-			wantInt:  50,
+			wantInt:  15,
+			wantStr:  "claude-opus-4-6",
 		},
 		{
 			name:     "int/CLI overrides embedded no config",
 			noConfig: true,
 			flags:    CLIFlags{MaxTurns: intPtr(100)},
 			wantInt:  100,
+			wantStr:  "claude-opus-4-6",
 		},
 		// bool cascade (GatesEnabled: embedded=false)
 		{
@@ -659,50 +736,54 @@ func TestConfig_Load_CascadeThreeLevels(t *testing.T) {
 			yaml:     "gates_enabled: false\n",
 			flags:    CLIFlags{GatesEnabled: boolPtr(true)},
 			wantBool: true,
-			wantInt:  50,
+			wantInt:  15,
+			wantStr:  "claude-opus-4-6",
 		},
 		{
 			name:     "bool/CLI false overrides config true",
 			yaml:     "gates_enabled: true\n",
 			flags:    CLIFlags{GatesEnabled: boolPtr(false)},
 			wantBool: false,
-			wantInt:  50,
+			wantInt:  15,
+			wantStr:  "claude-opus-4-6",
 		},
 		{
 			name:     "bool/config overrides embedded",
 			yaml:     "gates_enabled: true\n",
 			flags:    CLIFlags{},
 			wantBool: true,
-			wantInt:  50,
+			wantInt:  15,
+			wantStr:  "claude-opus-4-6",
 		},
 		{
 			name:     "bool/embedded default used",
 			noConfig: true,
 			flags:    CLIFlags{},
 			wantBool: false,
-			wantInt:  50,
+			wantInt:  15,
+			wantStr:  "claude-opus-4-6",
 		},
-		// string cascade (ModelExecute: embedded="")
+		// string cascade (ModelExecute: embedded="claude-opus-4-6")
 		{
 			name:    "string/CLI overrides config",
 			yaml:    "model_execute: sonnet\n",
 			flags:   CLIFlags{ModelExecute: strPtr("haiku")},
 			wantStr: "haiku",
-			wantInt: 50,
+			wantInt: 15,
 		},
 		{
 			name:    "string/config overrides embedded",
 			yaml:    "model_execute: sonnet\n",
 			flags:   CLIFlags{},
 			wantStr: "sonnet",
-			wantInt: 50,
+			wantInt: 15,
 		},
 		{
 			name:     "string/embedded default used",
 			noConfig: true,
 			flags:    CLIFlags{},
-			wantStr:  "",
-			wantInt:  50,
+			wantStr:  "claude-opus-4-6",
+			wantInt:  15,
 		},
 	}
 
@@ -762,7 +843,7 @@ func TestConfig_Load_CLIOverridesEmbeddedNoConfigFile(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cfg.MaxTurns != 100 {
-		t.Errorf("MaxTurns = %d, want 100 (CLI overrides embedded default of 50)", cfg.MaxTurns)
+		t.Errorf("MaxTurns = %d, want 100 (CLI overrides embedded default of 15)", cfg.MaxTurns)
 	}
 	if !cfg.GatesEnabled {
 		t.Error("GatesEnabled = false, want true (CLI overrides embedded default of false)")
@@ -785,7 +866,7 @@ func TestConfig_Load_CLIOverridesEmptyConfig(t *testing.T) {
 
 func TestConfig_Load_AllCLIFlagsOverrideFullConfig(t *testing.T) {
 	dir := t.TempDir()
-	// Full config file with all 15 parameters set to non-default values
+	// Full config file with all parameters set to non-default values
 	writeConfigYAML(t, dir, `claude_command: "custom-claude"
 max_turns: 75
 max_iterations: 5
@@ -798,12 +879,15 @@ model_review: "opus"
 review_min_severity: "HIGH"
 always_extract: true
 serena_enabled: false
+serena_sync_enabled: true
+serena_sync_max_turns: 10
+serena_sync_trigger: "run"
 learnings_budget: 500
 log_dir: "/custom/logs"
 `)
 	t.Chdir(dir)
 
-	// Set ALL 9 CLI flags to override config values
+	// Set ALL 10 CLI flags to override config values
 	cfg, err := Load(CLIFlags{
 		MaxTurns:            intPtr(200),
 		MaxIterations:       intPtr(10),
@@ -814,12 +898,13 @@ log_dir: "/custom/logs"
 		ModelExecute:        strPtr("haiku"),
 		ModelReview:         strPtr("haiku"),
 		AlwaysExtract:       boolPtr(false),
+		SerenaSyncEnabled:   boolPtr(false),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// All 9 CLI-overridable fields must reflect CLI values
+	// All 10 CLI-overridable fields must reflect CLI values
 	if cfg.MaxTurns != 200 {
 		t.Errorf("MaxTurns = %d, want 200", cfg.MaxTurns)
 	}
@@ -847,6 +932,9 @@ log_dir: "/custom/logs"
 	if cfg.AlwaysExtract {
 		t.Error("AlwaysExtract = true, want false")
 	}
+	if cfg.SerenaSyncEnabled {
+		t.Error("SerenaSyncEnabled = true, want false (CLI override)")
+	}
 
 	// Config-only fields (no CLI flags) must retain config file values
 	if cfg.ClaudeCommand != "custom-claude" {
@@ -863,6 +951,12 @@ log_dir: "/custom/logs"
 	}
 	if cfg.LogDir != "/custom/logs" {
 		t.Errorf("LogDir = %q, want %q (config-only)", cfg.LogDir, "/custom/logs")
+	}
+	if cfg.SerenaSyncMaxTurns != 10 {
+		t.Errorf("SerenaSyncMaxTurns = %d, want 10 (config-only)", cfg.SerenaSyncMaxTurns)
+	}
+	if cfg.SerenaSyncTrigger != "run" {
+		t.Errorf("SerenaSyncTrigger = %q, want %q (config-only)", cfg.SerenaSyncTrigger, "run")
 	}
 }
 
@@ -1047,6 +1141,8 @@ func TestConfig_Validate_HappyPath(t *testing.T) {
 		DistillCooldown:     5,
 		DistillTimeout:      120,
 		LearningsBudget:     200,
+		ContextWarnPct:      55,
+		ContextCriticalPct:  65,
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate: unexpected error: %v", err)
@@ -1063,6 +1159,8 @@ func TestConfig_Validate_Errors(t *testing.T) {
 		DistillCooldown:     5,
 		DistillTimeout:      120,
 		LearningsBudget:     200,
+		ContextWarnPct:      55,
+		ContextCriticalPct:  65,
 	}
 
 	tests := []struct {
@@ -1200,6 +1298,47 @@ func TestConfig_Validate_Errors(t *testing.T) {
 			},
 			errContains: "budget_warn_pct must be 1-99",
 		},
+		{
+			name:        "ContextWarnPct zero",
+			mutate:      func(c *Config) { c.ContextWarnPct = 0 },
+			errContains: "context_warn_pct must be 1-99, got 0",
+		},
+		{
+			name:        "ContextWarnPct 100",
+			mutate:      func(c *Config) { c.ContextWarnPct = 100 },
+			errContains: "context_warn_pct must be 1-99, got 100",
+		},
+		{
+			name:        "ContextCriticalPct zero",
+			mutate:      func(c *Config) { c.ContextCriticalPct = 0 },
+			errContains: "context_critical_pct must be 1-99, got 0",
+		},
+		{
+			name:        "ContextCriticalPct 100",
+			mutate:      func(c *Config) { c.ContextCriticalPct = 100 },
+			errContains: "context_critical_pct must be 1-99, got 100",
+		},
+		{
+			name: "ContextCriticalPct less than ContextWarnPct",
+			mutate: func(c *Config) {
+				c.ContextWarnPct = 65
+				c.ContextCriticalPct = 55
+			},
+			errContains: "context_critical_pct (55) must be > context_warn_pct (65)",
+		},
+		{
+			name: "ContextCriticalPct equal to ContextWarnPct",
+			mutate: func(c *Config) {
+				c.ContextWarnPct = 55
+				c.ContextCriticalPct = 55
+			},
+			errContains: "context_critical_pct (55) must be > context_warn_pct (55)",
+		},
+		{
+			name:        "SerenaSyncTrigger invalid",
+			mutate:      func(c *Config) { c.SerenaSyncTrigger = "invalid" },
+			errContains: `invalid serena_sync_trigger "invalid"`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1230,6 +1369,8 @@ func TestConfig_Validate_SimilarityDisabledSkipsThresholdValidation(t *testing.T
 		SimilarityWindow:    0,    // disabled
 		SimilarityWarn:      0.0,  // would be invalid if enabled
 		SimilarityHard:      -1.0, // would be invalid if enabled
+		ContextWarnPct:      55,
+		ContextCriticalPct:  65,
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate: similarity disabled should skip threshold validation, got: %v", err)
@@ -1246,6 +1387,8 @@ func TestConfig_Validate_SimilarityEnabledValid(t *testing.T) {
 		SimilarityWindow:    3,
 		SimilarityWarn:      0.85,
 		SimilarityHard:      0.95,
+		ContextWarnPct:      55,
+		ContextCriticalPct:  65,
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate: valid similarity config should pass, got: %v", err)
@@ -1262,8 +1405,246 @@ func TestConfig_Validate_EmptySeverity(t *testing.T) {
 		DistillCooldown:     0,
 		DistillTimeout:      60,
 		LearningsBudget:     100,
+		ContextWarnPct:      55,
+		ContextCriticalPct:  65,
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate: empty severity should be valid, got: %v", err)
+	}
+}
+
+// TestConfig_Validate_SerenaSyncTrigger covers AC#3: valid/invalid trigger values.
+func TestConfig_Validate_SerenaSyncTrigger(t *testing.T) {
+	base := Config{
+		MaxTurns:            50,
+		MaxIterations:       3,
+		MaxReviewIterations: 3,
+		DistillCooldown:     5,
+		DistillTimeout:      120,
+		LearningsBudget:     200,
+		ContextWarnPct:      55,
+		ContextCriticalPct:  65,
+		SerenaSyncMaxTurns:  5,
+	}
+
+	tests := []struct {
+		name    string
+		trigger string
+		wantErr bool
+		errMsg  string
+	}{
+		{"task valid", "task", false, ""},
+		{"run valid", "run", false, ""},
+		{"empty valid", "", false, ""},
+		{"invalid value", "invalid", true, `config: validate: invalid serena_sync_trigger "invalid" (must be "run" or "task")`},
+		{"unknown value", "hourly", true, `config: validate: invalid serena_sync_trigger "hourly" (must be "run" or "task")`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := base
+			cfg.SerenaSyncTrigger = tt.trigger
+			err := cfg.Validate()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("Validate: expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("error = %q, want containing %q", err.Error(), tt.errMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Validate: unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestConfig_Validate_SerenaSyncMaxTurns covers AC#4: max turns correction behavior.
+func TestConfig_Validate_SerenaSyncMaxTurns(t *testing.T) {
+	base := Config{
+		MaxTurns:            50,
+		MaxIterations:       3,
+		MaxReviewIterations: 3,
+		DistillCooldown:     5,
+		DistillTimeout:      120,
+		LearningsBudget:     200,
+		ContextWarnPct:      55,
+		ContextCriticalPct:  65,
+		SerenaSyncTrigger:   "task",
+	}
+
+	tests := []struct {
+		name     string
+		maxTurns int
+		want     int
+	}{
+		{"zero corrected to 5", 0, 5},
+		{"negative corrected to 5", -10, 5},
+		{"one stays 1", 1, 1},
+		{"five stays 5", 5, 5},
+		{"hundred stays 100", 100, 100},
+		{"beyond range stays 200", 200, 200},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := base
+			cfg.SerenaSyncMaxTurns = tt.maxTurns
+			err := cfg.Validate()
+			if err != nil {
+				t.Fatalf("Validate: unexpected error: %v", err)
+			}
+			if cfg.SerenaSyncMaxTurns != tt.want {
+				t.Errorf("SerenaSyncMaxTurns = %d, want %d", cfg.SerenaSyncMaxTurns, tt.want)
+			}
+		})
+	}
+}
+
+// TestConfig_Load_SerenaSyncFields covers AC#5: round-trip with/without serena_sync fields.
+func TestConfig_Load_SerenaSyncFields(t *testing.T) {
+	t.Run("all fields from YAML", func(t *testing.T) {
+		dir := t.TempDir()
+		writeConfigYAML(t, dir, `serena_sync_enabled: true
+serena_sync_max_turns: 10
+serena_sync_trigger: "run"
+`)
+		t.Chdir(dir)
+
+		cfg, err := Load(CLIFlags{})
+		if err != nil {
+			t.Fatalf("Load: unexpected error: %v", err)
+		}
+		if !cfg.SerenaSyncEnabled {
+			t.Error("SerenaSyncEnabled = false, want true")
+		}
+		if cfg.SerenaSyncMaxTurns != 10 {
+			t.Errorf("SerenaSyncMaxTurns = %d, want 10", cfg.SerenaSyncMaxTurns)
+		}
+		if cfg.SerenaSyncTrigger != "run" {
+			t.Errorf("SerenaSyncTrigger = %q, want %q", cfg.SerenaSyncTrigger, "run")
+		}
+	})
+
+	t.Run("defaults when absent", func(t *testing.T) {
+		dir := t.TempDir()
+		writeConfigYAML(t, dir, "max_turns: 50\n")
+		t.Chdir(dir)
+
+		cfg, err := Load(CLIFlags{})
+		if err != nil {
+			t.Fatalf("Load: unexpected error: %v", err)
+		}
+		if cfg.SerenaSyncEnabled {
+			t.Error("SerenaSyncEnabled = true, want false (default)")
+		}
+		if cfg.SerenaSyncMaxTurns != 5 {
+			t.Errorf("SerenaSyncMaxTurns = %d, want 5 (default)", cfg.SerenaSyncMaxTurns)
+		}
+		if cfg.SerenaSyncTrigger != "task" {
+			t.Errorf("SerenaSyncTrigger = %q, want %q (default)", cfg.SerenaSyncTrigger, "task")
+		}
+	})
+}
+
+// TestConfig_ApplyCLIFlags_SerenaSyncEnabled covers AC#2: CLI override for SerenaSyncEnabled.
+func TestConfig_ApplyCLIFlags_SerenaSyncEnabled(t *testing.T) {
+	tests := []struct {
+		name       string
+		configVal  bool
+		cliVal     *bool
+		wantResult bool
+	}{
+		{"CLI true overrides config false", false, boolPtr(true), true},
+		{"CLI false overrides config true", true, boolPtr(false), false},
+		{"CLI nil keeps config value", true, nil, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			yaml := "serena_sync_enabled: " + fmt.Sprintf("%t", tt.configVal) + "\n"
+			writeConfigYAML(t, dir, yaml)
+			t.Chdir(dir)
+
+			cfg, err := Load(CLIFlags{SerenaSyncEnabled: tt.cliVal})
+			if err != nil {
+				t.Fatalf("Load: unexpected error: %v", err)
+			}
+			if cfg.SerenaSyncEnabled != tt.wantResult {
+				t.Errorf("SerenaSyncEnabled = %v, want %v", cfg.SerenaSyncEnabled, tt.wantResult)
+			}
+		})
+	}
+}
+
+func TestConfig_Load_PlanFieldsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	// Config without any plan fields — defaults should apply
+	writeConfigYAML(t, dir, "max_turns: 10\n")
+	t.Chdir(dir)
+
+	cfg, err := Load(CLIFlags{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.PlanOutputPath != "docs/sprint-tasks.md" {
+		t.Errorf("PlanOutputPath = %q, want %q", cfg.PlanOutputPath, "docs/sprint-tasks.md")
+	}
+	if cfg.PlanMaxRetries != 1 {
+		t.Errorf("PlanMaxRetries = %d, want 1", cfg.PlanMaxRetries)
+	}
+	if cfg.PlanMode != "auto" {
+		t.Errorf("PlanMode = %q, want %q", cfg.PlanMode, "auto")
+	}
+	if cfg.PlanMerge {
+		t.Error("PlanMerge = true, want false")
+	}
+	if cfg.PlanInputs != nil {
+		t.Errorf("PlanInputs = %v, want nil", cfg.PlanInputs)
+	}
+}
+
+func TestConfig_Load_PlanFieldsFromYAML(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigYAML(t, dir, `max_turns: 10
+plan_inputs:
+  - file: "requirements.md"
+    role: "requirements"
+plan_output_path: "custom/tasks.md"
+plan_max_retries: 2
+plan_merge: true
+plan_mode: "single"
+`)
+	t.Chdir(dir)
+
+	cfg, err := Load(CLIFlags{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(cfg.PlanInputs) != 1 {
+		t.Fatalf("PlanInputs len = %d, want 1", len(cfg.PlanInputs))
+	}
+	if cfg.PlanInputs[0].File != "requirements.md" {
+		t.Errorf("PlanInputs[0].File = %q, want %q", cfg.PlanInputs[0].File, "requirements.md")
+	}
+	if cfg.PlanInputs[0].Role != "requirements" {
+		t.Errorf("PlanInputs[0].Role = %q, want %q", cfg.PlanInputs[0].Role, "requirements")
+	}
+	if cfg.PlanOutputPath != "custom/tasks.md" {
+		t.Errorf("PlanOutputPath = %q, want %q", cfg.PlanOutputPath, "custom/tasks.md")
+	}
+	if cfg.PlanMaxRetries != 2 {
+		t.Errorf("PlanMaxRetries = %d, want 2", cfg.PlanMaxRetries)
+	}
+	if !cfg.PlanMerge {
+		t.Error("PlanMerge = false, want true")
+	}
+	if cfg.PlanMode != "single" {
+		t.Errorf("PlanMode = %q, want %q", cfg.PlanMode, "single")
 	}
 }

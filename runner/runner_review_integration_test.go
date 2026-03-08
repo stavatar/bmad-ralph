@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bmad-ralph/bmad-ralph/config"
 	"github.com/bmad-ralph/bmad-ralph/internal/testutil"
+	"github.com/bmad-ralph/bmad-ralph/runner"
 )
 
 // =============================================================================
@@ -172,8 +172,9 @@ func TestRunner_Execute_ReviewIntegration_FindingsFixClean(t *testing.T) {
 	}
 }
 
-// TestRunner_Execute_ReviewIntegration_MaxReviewCycles verifies emergency stop
-// when max review iterations reached. AC3.
+// TestRunner_Execute_ReviewIntegration_MaxReviewCycles verifies that review exhaust
+// continues to next task instead of aborting the run (BUG-2). Metrics record the task
+// as "error" with last known HEAD SHA (MINOR-2).
 func TestRunner_Execute_ReviewIntegration_MaxReviewCycles(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -206,25 +207,35 @@ func TestRunner_Execute_ReviewIntegration_MaxReviewCycles(t *testing.T) {
 
 	r, _ := setupReviewIntegration(t, tmpDir, oneTask, scenario, mock)
 	r.Cfg.MaxReviewIterations = 3
+	r.Cfg.MaxIterations = 1 // single outer iteration: review exhausts, then exits loop
+	mc := runner.NewMetricsCollector("test-review-exhaust-integ", nil)
+	r.Metrics = mc
 
-	_, err := r.Execute(context.Background())
+	rm, err := r.Execute(context.Background())
 
-	// AC3: ErrMaxReviewCycles
-	if !errors.Is(err, config.ErrMaxReviewCycles) {
-		t.Fatalf("errors.Is(err, ErrMaxReviewCycles): want true, got false; err = %v", err)
+	// BUG-2: Execute no longer returns error on review exhaust
+	if err != nil {
+		t.Fatalf("Execute: want nil error, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "review cycles exhausted") {
-		t.Errorf("error: want containing %q, got %q", "review cycles exhausted", err.Error())
+	// Verify task recorded as "error" in metrics
+	if rm == nil {
+		t.Fatal("RunMetrics = nil, want non-nil")
 	}
-	if !strings.Contains(err.Error(), "Task one") {
-		t.Errorf("error: want containing task name %q, got %q", "Task one", err.Error())
+	if len(rm.Tasks) != 1 {
+		t.Fatalf("len(Tasks) = %d, want 1", len(rm.Tasks))
 	}
-	// AC3: error contains cycles count
-	if !strings.Contains(err.Error(), "3/3") {
-		t.Errorf("error: want containing cycles count %q, got %q", "3/3", err.Error())
+	if rm.Tasks[0].Status != "error" {
+		t.Errorf("Tasks[0].Status = %q, want %q", rm.Tasks[0].Status, "error")
+	}
+	// MINOR-2: last known SHA recorded (last headAfter = "ddd")
+	if rm.Tasks[0].CommitSHA != "ddd" {
+		t.Errorf("Tasks[0].CommitSHA = %q, want %q", rm.Tasks[0].CommitSHA, "ddd")
+	}
+	if rm.TasksFailed != 1 {
+		t.Errorf("TasksFailed = %d, want 1", rm.TasksFailed)
 	}
 
-	// AC3: 3 execute + 3 review = 6 HeadCommit calls
+	// 3 execute + 3 review = 6 HeadCommit calls
 	if mock.HeadCommitCount != 6 {
 		t.Errorf("HeadCommitCount = %d, want 6", mock.HeadCommitCount)
 	}

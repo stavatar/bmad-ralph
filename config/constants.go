@@ -3,7 +3,7 @@ package config
 import "regexp"
 
 // String constants for sprint-tasks.md markers.
-// Used by bridge (generation) and runner (scanning) packages.
+// Used by plan (generation) and runner (scanning) packages.
 const (
 	TaskOpen       = "- [ ]"
 	TaskDone       = "- [x]"

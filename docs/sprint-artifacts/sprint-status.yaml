@@ -1,4 +1,4 @@
-# generated: 2026-02-25
+# generated: 2026-03-06
 # project: bmad-ralph
 # tracking_system: file-system
 # story_location: docs/sprint-artifacts
@@ -26,7 +26,7 @@
 # - SM typically drafts next story ONLY after previous one is 'done' to incorporate learnings
 # - Dev moves story to 'review', dev reviews, then Dev moves to 'done'
 
-generated: 2026-02-25
+generated: 2026-03-06
 project: bmad-ralph
 tracking_system: file-system
 story_location: docs/sprint-artifacts
@@ -124,3 +124,82 @@ development_status:
   7-9-error-categorization-latency: done
   7-10-run-summary-report: done
   epic-7-retrospective: done
+
+  # Epic 8: Serena Memory Sync (7 stories, FR57-FR66)
+  epic-8: done
+  8-1-config-cli-flags: done
+  8-2-sync-prompt-template: done
+  8-3-backup-rollback-memories: done
+  8-4-run-serena-sync-core: done
+  8-5-sync-metrics-summary: done
+  8-6-per-task-trigger-growth: done
+  8-7-integration-tests: done
+  epic-8-retrospective: done
+
+  # Epic 9: Ralph Run Robustness (9 stories, FR67-FR80)
+  epic-9: done
+  9-1-progressive-review-types-config-default: done
+  9-2-severity-filtering-findings-budget: done
+  9-3-scope-lock-effort-escalation: done
+  9-4-session-options-env: done
+  9-5-filepath-normalization-graceful-degradation: done
+  9-6-scope-creep-protection-prompts: done
+  9-7-preflight-taskhash-logoneline: done
+  9-8-smart-merge-x-preservation: done
+  9-9-agent-stats-review-findings: done
+  epic-9-retrospective: optional
+
+  # Epic 10: Context Window Observability (7 stories, FR81-FR92)
+  epic-10: done
+  10-1-config-fields-max-turns-default: done
+  10-2-sessionmetrics-contextwindow-parsing: done
+  10-3-core-context-functions: done
+  10-4-ensurecompacthook: done
+  10-5-metricscollector-extension: done
+  10-6-runner-integration: done
+  10-7-warning-system-summary-session-log: done
+  epic-10-retrospective: optional
+
+  # Epic 11: ralph plan — Core Generation (9 stories, FR1-3,7,9-13,18-22)
+  epic-11: in-progress
+  11-1-config-plan-fields: review
+  11-2-session-inject-feedback: review
+  11-3-plan-size-check: review
+  11-4-plan-prompt-generator: review
+  11-5-plan-core-generate-flow: review
+  11-6-role-mapping-typed-headers: review
+  11-7-bmad-autodiscovery-single-doc: review
+  11-8-cmd-plan-cli-wiring: review
+  11-9-progress-output-summary: review
+
+  # Epic 12: ralph plan — AI Review & Gates (4 stories, FR6,8,14-17)
+  epic-12: in-progress
+  12-1-plan-prompt-review: review
+  12-2-review-flow-gate: review
+  12-3-retry-inject-feedback: review
+  12-4-no-review-force-flags: review
+
+  # Epic 13: ralph plan — Merge Mode (2 stories, FR4-5)
+  epic-13: in-progress
+  13-1-merge-pure-function: review
+  13-2-merge-integration: review
+
+  # Epic 14: Bridge Deprecation & Removal (2 stories, FR23, NFR19)
+  epic-14: in-progress
+  14-1-bridge-deprecation-warning: review
+  14-2-bridge-deletion: review
+
+  # Epic 15: Growth — Acceptance Test & Research (2 stories)
+  epic-15: in-progress
+  15-1-acceptance-test-learnpracticsCodePlatform: ready-for-dev
+  15-2-research-plan-quality-metrics: review
+
+  # Epic 16: Growth — Replan & Init (2 stories, FR28-29)
+  epic-16: in-progress
+  16-1-ralph-replan: review
+  16-2-ralph-init: review
+
+# Growth Decision (Story 15.2)
+# Based on plan-quality-metrics research: proceed with Growth features
+# Condition: Story 15.1 acceptance test passes + L1 thresholds met
+growth_decision: proceed
