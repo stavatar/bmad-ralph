@@ -1,6 +1,6 @@
 # Story 9.1: Progressive Review Types + Config Default
 
-Status: Ready for Review
+Status: done
 
 ## Story
 

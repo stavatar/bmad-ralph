@@ -33,7 +33,7 @@ const (
 )
 
 // Options configures a Claude CLI session invocation.
-// The caller (runner/bridge) fills this from config.Config values.
+// The caller (runner/plan) fills this from config.Config values.
 // Session package does NOT import config — receives everything via Options.
 type Options struct {
 	Command                    string  // Claude CLI path (config.ClaudeCommand)
@@ -45,6 +45,7 @@ type Options struct {
 	Resume                     string  // --resume session_id (empty = omit)
 	DangerouslySkipPermissions bool    // --dangerously-skip-permissions
 	AppendSystemPrompt         *string           // Channel 1 delivery — critical rules via system prompt (nil = omit)
+	InjectFeedback             string            // Reviewer feedback for retry session (empty = omit)
 	Env                        map[string]string // Extra env vars merged into subprocess environment (nil = no extra vars)
 }
 
@@ -147,6 +148,10 @@ func buildArgs(opts Options) []string {
 
 	if opts.AppendSystemPrompt != nil {
 		args = append(args, flagAppendSystemPrompt, *opts.AppendSystemPrompt)
+	}
+
+	if opts.InjectFeedback != "" {
+		args = append(args, flagAppendSystemPrompt, opts.InjectFeedback)
 	}
 
 	return args

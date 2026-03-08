@@ -18,8 +18,12 @@ It manages iterative AI-driven development cycles with code review, human gates,
 - `.gitattributes` enforces LF on git add
 
 ## Project Status
-All 8 epics complete (FR1-FR66): Foundation, Bridge, Core Loop, Code Review, Human Gates, Knowledge Management, Observability & Metrics, Serena Memory Sync.
-Total: 69 stories, ~400+ acceptance criteria, ~137 testing/code quality patterns.
+Epics 1-9 complete (FR1-FR80): Foundation, Bridge, Core Loop, Code Review, Human Gates, Knowledge Management, Observability & Metrics, Serena Memory Sync, Ralph Run Robustness.
+Total: 78 stories, ~450+ acceptance criteria, ~137 testing/code quality patterns.
+
+Epic 10 (Context Window Observability): done (7 stories, FR81-FR92, 23 findings, 100% fix rate). ALL 10 EPICS COMPLETE — FR1-FR92 delivered.
+Key features: PreCompact hook for compaction counting, EstimateMaxContextFill formula, warning system, settings.json additive merge.
+
 Post-epic: Session log saving added — all Claude sessions (execute, review, resume, sync) write stdout/stderr to `.ralph/logs/sessions/<runID>/`.
 
 ## Package Structure (dependency direction: top-down, cycles forbidden)

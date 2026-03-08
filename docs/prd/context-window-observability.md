@@ -173,7 +173,7 @@
   - Тихо (только в session log) при fill ≤ warn порога
   - WARN при fill > warn порога и ≤ critical порога: `"context fill NN.N%% — consider reducing max_turns (current: N) or splitting task into smaller pieces"`
   - ERROR при fill > critical порога: `"context fill NN.N%% exceeds critical threshold — quality degradation likely, reduce max_turns (current: N)"`
-  - ERROR при compactions > 0: `"N compaction(s) detected — context was compressed at ~83%% fill, quality degraded. Reduce max_turns (current: N)"`
+  - ERROR при compactions > 0: `"N compaction(s) detected — context was compressed, quality degraded. Reduce max_turns (current: N)"`
 
   Каждый warning содержит **actionable guidance**: что сделать (reduce max_turns) и текущее значение для контекста.
 

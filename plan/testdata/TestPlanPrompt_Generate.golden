@@ -1,0 +1,51 @@
+You are a sprint planning agent. Your job is to create a sprint-tasks.md file from the input documents below.
+
+## Output Path
+
+Write the output to: `docs/sprint-tasks.md`
+
+## Input Documents
+
+Each document is wrapped with a typed header comment indicating its file name and semantic role.
+Use the file name from the typed header as the source reference in your tasks.
+
+### Document 0: requirements.md (role: requirements)
+
+<!-- file: requirements.md | role: requirements -->
+# Requirements
+
+Build a REST API.
+
+### Document 1: tech-context.md (role: technical_context)
+
+<!-- file: tech-context.md | role: technical_context -->
+# Tech
+
+Go 1.25, Cobra CLI.
+
+## Task Format
+
+Generate tasks using this exact format:
+
+- Each task line starts with `- [ ]` (open/incomplete)
+- Each task has an indented `source:` field on the next line referencing the primary AC
+- Source references MUST use real file names from typed headers above
+- Use `[GATE]` tag for tasks requiring human approval before proceeding
+- Use `[SETUP]` tag for environment/infrastructure tasks that must run first
+
+Example:
+```
+- [ ] Implement user authentication endpoint
+  source: requirements.md#AC-1,AC-2
+- [ ] [GATE] Review authentication design before proceeding
+  source: requirements.md#AC-3
+```
+
+## Instructions
+
+1. Read ALL input documents carefully
+2. Identify acceptance criteria, requirements, and technical constraints
+3. Group related requirements into atomic tasks (one task per logical code change)
+4. Each task must be self-contained — sessions are isolated without memory of previous tasks
+5. Order tasks logically: SETUP tasks first, then implementation, then GATE checkpoints
+6. Every task MUST have a `source:` field with real file names from the typed headers

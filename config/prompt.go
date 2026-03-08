@@ -30,7 +30,7 @@ type TemplateData struct {
 	// Stage 1: bool conditionals for template structure
 	SerenaEnabled     bool
 	GatesEnabled      bool
-	HasExistingTasks  bool // bridge merge mode
+	HasExistingTasks  bool // merge mode
 	HasFindings       bool // execute findings mode
 	HasLearnings      bool // true when validated LEARNINGS.md content is non-empty
 	HasCompletedTasks bool // true when completed tasks text is non-empty

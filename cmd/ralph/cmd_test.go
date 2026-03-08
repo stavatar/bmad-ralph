@@ -13,7 +13,7 @@ import (
 )
 
 func TestRootCmd_HasSubcommands(t *testing.T) {
-	want := map[string]bool{"bridge": false, "run": false, "distill": false}
+	want := map[string]bool{"run": false, "distill": false, "plan": false, "replan": false, "init": false}
 
 	for _, cmd := range rootCmd.Commands() {
 		if _, ok := want[cmd.Name()]; ok {
@@ -63,21 +63,6 @@ func TestRunCmd_Flags(t *testing.T) {
 				t.Errorf("flag --%s default = %q, want %q", tt.flag, f.DefValue, tt.defValue)
 			}
 		})
-	}
-}
-
-func TestBridgeCmd_Usage(t *testing.T) {
-	if bridgeCmd.Use == "" {
-		t.Error("bridgeCmd.Use is empty")
-	}
-	if bridgeCmd.Use != "bridge [story-files...]" {
-		t.Errorf("bridgeCmd.Use = %q, want %q", bridgeCmd.Use, "bridge [story-files...]")
-	}
-	if !strings.Contains(bridgeCmd.Long, "auto-discovers") {
-		t.Error("bridgeCmd.Long does not mention auto-discovers")
-	}
-	if !strings.Contains(bridgeCmd.Long, "StoriesDir") {
-		t.Error("bridgeCmd.Long does not mention StoriesDir")
 	}
 }
 
@@ -336,149 +321,6 @@ func writeValidConfig(t *testing.T, dir string) {
 	}
 }
 
-// --- runBridge error path tests ---
-
-func TestRunBridge_ConfigLoadError(t *testing.T) {
-	tmpDir := t.TempDir()
-	writeInvalidConfig(t, tmpDir)
-
-	origDir, _ := os.Getwd()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
-
-	cmd := &cobra.Command{Use: "bridge"}
-	cmd.SetContext(context.Background())
-
-	err := runBridge(cmd, []string{"story.md"})
-	if err == nil {
-		t.Fatal("runBridge: expected error when config.Load fails (invalid config.yaml)")
-	}
-	if !strings.Contains(err.Error(), "ralph: load config:") {
-		t.Errorf("runBridge error = %q, want containing %q", err.Error(), "ralph: load config:")
-	}
-	if !strings.Contains(err.Error(), "config:") {
-		t.Errorf("runBridge error = %q, want inner error containing %q", err.Error(), "config:")
-	}
-}
-
-func TestRunBridge_StoryReadError(t *testing.T) {
-	tmpDir := t.TempDir()
-	writeValidConfig(t, tmpDir)
-
-	origDir, _ := os.Getwd()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
-
-	cmd := &cobra.Command{Use: "bridge"}
-	cmd.SetContext(context.Background())
-
-	err := runBridge(cmd, []string{filepath.Join(tmpDir, "nonexistent-story.md")})
-	if err == nil {
-		t.Fatal("runBridge: expected error for nonexistent story file")
-	}
-	if !strings.Contains(err.Error(), "bridge: read story:") {
-		t.Errorf("runBridge error = %q, want containing %q", err.Error(), "bridge: read story:")
-	}
-}
-
-// --- runBridge autodiscovery tests ---
-
-func TestRunBridge_AutoDiscover_FindsMdFiles(t *testing.T) {
-	tmpDir := t.TempDir()
-	writeValidConfig(t, tmpDir)
-
-	// Create StoriesDir with .md entries as directories — bridge.Run will fail
-	// with "bridge: read story:" (not "no story files found"), confirming that
-	// autodiscovery found the files and passed them to bridge.Run. Using
-	// directories avoids Windows file-lock issues during TempDir cleanup.
-	storiesDir := filepath.Join(tmpDir, "docs", "sprint-artifacts")
-	for _, name := range []string{"story-a.md", "story-b.md"} {
-		if err := os.MkdirAll(filepath.Join(storiesDir, name), 0755); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	origDir, _ := os.Getwd()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
-
-	cmd := &cobra.Command{Use: "bridge"}
-	cmd.SetContext(context.Background())
-
-	// No args — autodiscovery must find the .md entries and pass them to
-	// bridge.Run, which fails with "bridge: read story:" (not "no story files found").
-	err := runBridge(cmd, []string{})
-	if err == nil {
-		t.Fatal("runBridge: expected error from bridge.Run reading directory-as-file, got nil")
-	}
-	if strings.Contains(err.Error(), "no story files found") {
-		t.Errorf("runBridge: got 'no story files found' but .md entries exist in StoriesDir: %v", err)
-	}
-	if !strings.Contains(err.Error(), "bridge: read story:") {
-		t.Errorf("runBridge error = %q, want containing %q (autodiscovery passed files to bridge.Run)", err.Error(), "bridge: read story:")
-	}
-}
-
-func TestRunBridge_AutoDiscover_NoFiles_ReturnsError(t *testing.T) {
-	tmpDir := t.TempDir()
-	writeValidConfig(t, tmpDir)
-
-	// Create StoriesDir but leave it empty (no .md files)
-	storiesDir := filepath.Join(tmpDir, "docs", "sprint-artifacts")
-	if err := os.MkdirAll(storiesDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	origDir, _ := os.Getwd()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
-
-	cmd := &cobra.Command{Use: "bridge"}
-	cmd.SetContext(context.Background())
-
-	err := runBridge(cmd, []string{})
-	if err == nil {
-		t.Fatal("runBridge: expected error when no .md files found, got nil")
-	}
-	if !strings.Contains(err.Error(), "no story files found") {
-		t.Errorf("runBridge error = %q, want containing %q", err.Error(), "no story files found")
-	}
-	if !strings.Contains(err.Error(), "ralph bridge <file.md>") {
-		t.Errorf("runBridge error = %q, want hint containing %q", err.Error(), "ralph bridge <file.md>")
-	}
-}
-
-func TestRunBridge_AutoDiscover_StoriesDirMissing_ReturnsError(t *testing.T) {
-	tmpDir := t.TempDir()
-	writeValidConfig(t, tmpDir)
-	// StoriesDir does not exist at all — glob returns no matches (not an error from filepath.Glob)
-
-	origDir, _ := os.Getwd()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
-
-	cmd := &cobra.Command{Use: "bridge"}
-	cmd.SetContext(context.Background())
-
-	err := runBridge(cmd, []string{})
-	if err == nil {
-		t.Fatal("runBridge: expected error when StoriesDir missing, got nil")
-	}
-	if !strings.Contains(err.Error(), "no story files found") {
-		t.Errorf("runBridge error = %q, want containing %q", err.Error(), "no story files found")
-	}
-}
-
 // --- runDistill error path tests ---
 
 func TestRunDistill_ConfigLoadError(t *testing.T) {
@@ -538,78 +380,158 @@ func TestRunDistill_LoadStateError(t *testing.T) {
 	}
 }
 
-func TestSplitBySize_Cases(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
+// --- Replan tests (Story 16.1) ---
 
-	// Create test files of known sizes
-	writeFile := func(name string, size int) string {
-		t.Helper()
-		p := filepath.Join(dir, name)
-		if err := os.WriteFile(p, make([]byte, size), 0644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
+func TestReplanCmd_SubcommandRegistered(t *testing.T) {
+	found := false
+	for _, cmd := range rootCmd.Commands() {
+		if cmd.Name() == "replan" {
+			found = true
+			break
 		}
-		return p
 	}
-
-	f100 := writeFile("f100", 100)
-	f200 := writeFile("f200", 200)
-	f300 := writeFile("f300", 300)
-
-	tests := []struct {
-		name       string
-		files      []string
-		maxBytes   int64
-		wantBatches int
-		wantFiles   []int // files per batch
-	}{
-		{
-			name:        "empty input",
-			files:       nil,
-			maxBytes:    1000,
-			wantBatches: 0,
-		},
-		{
-			name:        "all fit in one batch",
-			files:       []string{f100, f200},
-			maxBytes:    500,
-			wantBatches: 1,
-			wantFiles:   []int{2},
-		},
-		{
-			name:        "split into two batches",
-			files:       []string{f100, f200, f300},
-			maxBytes:    350,
-			wantBatches: 2,
-			wantFiles:   []int{2, 1},
-		},
-		{
-			name:        "each file in own batch",
-			files:       []string{f100, f200, f300},
-			maxBytes:    100,
-			wantBatches: 3,
-			wantFiles:   []int{1, 1, 1},
-		},
-		{
-			name:        "nonexistent file treated as zero size",
-			files:       []string{filepath.Join(dir, "missing"), f100},
-			maxBytes:    500,
-			wantBatches: 1,
-			wantFiles:   []int{2},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := splitBySize(tc.files, tc.maxBytes)
-			if len(got) != tc.wantBatches {
-				t.Fatalf("splitBySize batches = %d, want %d", len(got), tc.wantBatches)
-			}
-			for i, wantCount := range tc.wantFiles {
-				if len(got[i]) != wantCount {
-					t.Errorf("batch[%d] files = %d, want %d", i, len(got[i]), wantCount)
-				}
-			}
-		})
+	if !found {
+		t.Error("replan subcommand not registered on rootCmd")
 	}
 }
+
+func TestExtractCompletedTasks_Mixed(t *testing.T) {
+	content := "- [x] Task A done\n  source: prd.md#AC-1\n- [ ] Task B open\n  source: prd.md#AC-2\n- [x] Task C done\n  source: prd.md#AC-3\n"
+	got := extractCompletedTasks(content)
+	if !strings.Contains(got, "- [x] Task A done") {
+		t.Errorf("extractCompletedTasks: missing Task A, got %q", got)
+	}
+	if !strings.Contains(got, "- [x] Task C done") {
+		t.Errorf("extractCompletedTasks: missing Task C, got %q", got)
+	}
+	if strings.Contains(got, "- [ ] Task B") {
+		t.Errorf("extractCompletedTasks: should not contain open task B, got %q", got)
+	}
+	if strings.Count(got, "- [x]") != 2 {
+		t.Errorf("extractCompletedTasks: want 2 completed tasks, got %d", strings.Count(got, "- [x]"))
+	}
+}
+
+func TestExtractCompletedTasks_None(t *testing.T) {
+	content := "- [ ] Task A open\n- [ ] Task B open\n"
+	got := extractCompletedTasks(content)
+	if got != "" {
+		t.Errorf("extractCompletedTasks: want empty, got %q", got)
+	}
+}
+
+func TestRunReplan_NoExistingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeValidConfig(t, tmpDir)
+
+	// Create a docs/ dir with prd.md so autodiscovery finds input
+	docsDir := filepath.Join(tmpDir, "docs")
+	if err := os.MkdirAll(docsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(docsDir, "prd.md"), []byte("# PRD"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
+
+	cmd := replanCmd
+	cmd.SetContext(context.Background())
+
+	err := runReplan(cmd, nil)
+	if err == nil {
+		t.Fatal("runReplan: expected error when sprint-tasks.md missing")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("runReplan error = %q, want containing %q", err.Error(), "not found")
+	}
+	if !strings.Contains(err.Error(), "ralph plan") {
+		t.Errorf("runReplan error = %q, want containing %q", err.Error(), "ralph plan")
+	}
+}
+
+// --- Init tests (Story 16.2) ---
+
+func TestInitCmd_SubcommandRegistered(t *testing.T) {
+	found := false
+	for _, cmd := range rootCmd.Commands() {
+		if cmd.Name() == "init" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("init subcommand not registered on rootCmd")
+	}
+}
+
+func TestSplitInitOutput_Valid(t *testing.T) {
+	output := "# PRD\n\nSome content\n\n===FILE_SEPARATOR===\n\n# Architecture\n\nArch content"
+	prd, arch, err := splitInitOutput(output)
+	if err != nil {
+		t.Fatalf("splitInitOutput: unexpected error: %v", err)
+	}
+	if !strings.Contains(prd, "# PRD") {
+		t.Errorf("prd = %q, want containing '# PRD'", prd)
+	}
+	if !strings.Contains(arch, "# Architecture") {
+		t.Errorf("arch = %q, want containing '# Architecture'", arch)
+	}
+}
+
+func TestSplitInitOutput_NoSeparator(t *testing.T) {
+	_, _, err := splitInitOutput("just some content without separator")
+	if err == nil {
+		t.Fatal("splitInitOutput: expected error when separator missing")
+	}
+	if !strings.Contains(err.Error(), "separator") {
+		t.Errorf("error = %q, want containing 'separator'", err.Error())
+	}
+}
+
+func TestSplitInitOutput_EmptyPrd(t *testing.T) {
+	_, _, err := splitInitOutput("===FILE_SEPARATOR===\n# Arch content")
+	if err == nil {
+		t.Fatal("splitInitOutput: expected error when prd empty")
+	}
+	if !strings.Contains(err.Error(), "prd.md content is empty") {
+		t.Errorf("error = %q, want containing 'prd.md content is empty'", err.Error())
+	}
+}
+
+func TestSplitInitOutput_EmptyArch(t *testing.T) {
+	_, _, err := splitInitOutput("# PRD content\n===FILE_SEPARATOR===\n  ")
+	if err == nil {
+		t.Fatal("splitInitOutput: expected error when arch empty")
+	}
+	if !strings.Contains(err.Error(), "architecture.md content is empty") {
+		t.Errorf("error = %q, want containing 'architecture.md content is empty'", err.Error())
+	}
+}
+
+func TestRunInit_ConfigLoadError(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeInvalidConfig(t, tmpDir)
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
+
+	cmd := initCmd
+	cmd.SetContext(context.Background())
+
+	err := runInit(cmd, []string{"test project"})
+	if err == nil {
+		t.Fatal("runInit: expected error when config.Load fails")
+	}
+	if !strings.Contains(err.Error(), "ralph: load config:") {
+		t.Errorf("runInit error = %q, want containing %q", err.Error(), "ralph: load config:")
+	}
+}
+

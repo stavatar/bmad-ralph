@@ -1,6 +1,6 @@
 # Story 9.5: Filepath Normalization + Graceful Degradation
 
-Status: review
+Status: done
 
 ## Story
 

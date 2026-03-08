@@ -1,6 +1,6 @@
 # Story 9.7: Pre-flight Check + TaskHash + LogOneline
 
-Status: review
+Status: done
 
 ## Story
 

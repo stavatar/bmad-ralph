@@ -1,6 +1,6 @@
 # Story 9.9: Agent Stats in Review Findings
 
-Status: review
+Status: done
 
 ## Story
 

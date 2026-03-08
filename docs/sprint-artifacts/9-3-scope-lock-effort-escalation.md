@@ -1,6 +1,6 @@
 # Story 9.3: Scope Lock + Effort Escalation
 
-Status: review
+Status: done
 
 ## Story
 

@@ -126,7 +126,7 @@ func selectReviewModel(cfg *config.Config, ds *DiffStats, isGate bool, hydraDete
 //   - FindingsFixClean: findings → fix execute → clean review
 //   - MaxReviewCycles: emergency stop after max iterations
 //   - MultiTaskMixed: 3 tasks with mixed clean/findings outcomes
-//   - BridgeGoldenFile: bridge output as runner input end-to-end
+//   - PlanGoldenFile: plan output as runner input end-to-end
 //
 // Covered by Story 6.4 knowledge tests:
 //   - FindingsWriteLessons: ValidateNewLessons called after findings review

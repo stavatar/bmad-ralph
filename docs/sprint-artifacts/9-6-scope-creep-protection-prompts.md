@@ -1,6 +1,6 @@
 # Story 9.6: Scope Creep Protection Prompts
 
-Status: review
+Status: done
 
 ## Story
 

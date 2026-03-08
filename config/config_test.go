@@ -58,6 +58,15 @@ model_pricing:
     output_per_1m: 25.0
     cache_per_1m: 0.50
 log_dir: "/tmp/ralph-logs"
+plan_inputs:
+  - file: "docs/prd.md"
+    role: "requirements"
+  - file: "docs/arch.md"
+    role: "technical_context"
+plan_output_path: "output/tasks.md"
+plan_max_retries: 3
+plan_merge: true
+plan_mode: "bmad"
 `
 	writeConfigYAML(t, dir, yaml)
 	t.Chdir(dir)
@@ -142,6 +151,33 @@ log_dir: "/tmp/ralph-logs"
 	}
 	if cfg.LogDir != "/tmp/ralph-logs" {
 		t.Errorf("LogDir = %q, want %q", cfg.LogDir, "/tmp/ralph-logs")
+	}
+	if len(cfg.PlanInputs) != 2 {
+		t.Fatalf("PlanInputs len = %d, want 2", len(cfg.PlanInputs))
+	}
+	if cfg.PlanInputs[0].File != "docs/prd.md" {
+		t.Errorf("PlanInputs[0].File = %q, want %q", cfg.PlanInputs[0].File, "docs/prd.md")
+	}
+	if cfg.PlanInputs[0].Role != "requirements" {
+		t.Errorf("PlanInputs[0].Role = %q, want %q", cfg.PlanInputs[0].Role, "requirements")
+	}
+	if cfg.PlanInputs[1].File != "docs/arch.md" {
+		t.Errorf("PlanInputs[1].File = %q, want %q", cfg.PlanInputs[1].File, "docs/arch.md")
+	}
+	if cfg.PlanInputs[1].Role != "technical_context" {
+		t.Errorf("PlanInputs[1].Role = %q, want %q", cfg.PlanInputs[1].Role, "technical_context")
+	}
+	if cfg.PlanOutputPath != "output/tasks.md" {
+		t.Errorf("PlanOutputPath = %q, want %q", cfg.PlanOutputPath, "output/tasks.md")
+	}
+	if cfg.PlanMaxRetries != 3 {
+		t.Errorf("PlanMaxRetries = %d, want 3", cfg.PlanMaxRetries)
+	}
+	if !cfg.PlanMerge {
+		t.Error("PlanMerge = false, want true")
+	}
+	if cfg.PlanMode != "bmad" {
+		t.Errorf("PlanMode = %q, want %q", cfg.PlanMode, "bmad")
 	}
 	if cfg.ProjectRoot != dir {
 		t.Errorf("ProjectRoot = %q, want %q", cfg.ProjectRoot, dir)
@@ -1541,5 +1577,74 @@ func TestConfig_ApplyCLIFlags_SerenaSyncEnabled(t *testing.T) {
 				t.Errorf("SerenaSyncEnabled = %v, want %v", cfg.SerenaSyncEnabled, tt.wantResult)
 			}
 		})
+	}
+}
+
+func TestConfig_Load_PlanFieldsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	// Config without any plan fields — defaults should apply
+	writeConfigYAML(t, dir, "max_turns: 10\n")
+	t.Chdir(dir)
+
+	cfg, err := Load(CLIFlags{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.PlanOutputPath != "docs/sprint-tasks.md" {
+		t.Errorf("PlanOutputPath = %q, want %q", cfg.PlanOutputPath, "docs/sprint-tasks.md")
+	}
+	if cfg.PlanMaxRetries != 1 {
+		t.Errorf("PlanMaxRetries = %d, want 1", cfg.PlanMaxRetries)
+	}
+	if cfg.PlanMode != "auto" {
+		t.Errorf("PlanMode = %q, want %q", cfg.PlanMode, "auto")
+	}
+	if cfg.PlanMerge {
+		t.Error("PlanMerge = true, want false")
+	}
+	if cfg.PlanInputs != nil {
+		t.Errorf("PlanInputs = %v, want nil", cfg.PlanInputs)
+	}
+}
+
+func TestConfig_Load_PlanFieldsFromYAML(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigYAML(t, dir, `max_turns: 10
+plan_inputs:
+  - file: "requirements.md"
+    role: "requirements"
+plan_output_path: "custom/tasks.md"
+plan_max_retries: 2
+plan_merge: true
+plan_mode: "single"
+`)
+	t.Chdir(dir)
+
+	cfg, err := Load(CLIFlags{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(cfg.PlanInputs) != 1 {
+		t.Fatalf("PlanInputs len = %d, want 1", len(cfg.PlanInputs))
+	}
+	if cfg.PlanInputs[0].File != "requirements.md" {
+		t.Errorf("PlanInputs[0].File = %q, want %q", cfg.PlanInputs[0].File, "requirements.md")
+	}
+	if cfg.PlanInputs[0].Role != "requirements" {
+		t.Errorf("PlanInputs[0].Role = %q, want %q", cfg.PlanInputs[0].Role, "requirements")
+	}
+	if cfg.PlanOutputPath != "custom/tasks.md" {
+		t.Errorf("PlanOutputPath = %q, want %q", cfg.PlanOutputPath, "custom/tasks.md")
+	}
+	if cfg.PlanMaxRetries != 2 {
+		t.Errorf("PlanMaxRetries = %d, want 2", cfg.PlanMaxRetries)
+	}
+	if !cfg.PlanMerge {
+		t.Error("PlanMerge = false, want true")
+	}
+	if cfg.PlanMode != "single" {
+		t.Errorf("PlanMode = %q, want %q", cfg.PlanMode, "single")
 	}
 }

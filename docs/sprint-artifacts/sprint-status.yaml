@@ -150,12 +150,56 @@ development_status:
   epic-9-retrospective: optional
 
   # Epic 10: Context Window Observability (7 stories, FR81-FR92)
-  epic-10: in-progress
-  10-1-config-fields-max-turns-default: review
-  10-2-sessionmetrics-contextwindow-parsing: review
-  10-3-core-context-functions: review
-  10-4-ensurecompacthook: review
-  10-5-metricscollector-extension: review
-  10-6-runner-integration: review
-  10-7-warning-system-summary-session-log: ready-for-dev
+  epic-10: done
+  10-1-config-fields-max-turns-default: done
+  10-2-sessionmetrics-contextwindow-parsing: done
+  10-3-core-context-functions: done
+  10-4-ensurecompacthook: done
+  10-5-metricscollector-extension: done
+  10-6-runner-integration: done
+  10-7-warning-system-summary-session-log: done
   epic-10-retrospective: optional
+
+  # Epic 11: ralph plan — Core Generation (9 stories, FR1-3,7,9-13,18-22)
+  epic-11: in-progress
+  11-1-config-plan-fields: review
+  11-2-session-inject-feedback: review
+  11-3-plan-size-check: review
+  11-4-plan-prompt-generator: review
+  11-5-plan-core-generate-flow: review
+  11-6-role-mapping-typed-headers: review
+  11-7-bmad-autodiscovery-single-doc: review
+  11-8-cmd-plan-cli-wiring: review
+  11-9-progress-output-summary: review
+
+  # Epic 12: ralph plan — AI Review & Gates (4 stories, FR6,8,14-17)
+  epic-12: in-progress
+  12-1-plan-prompt-review: review
+  12-2-review-flow-gate: review
+  12-3-retry-inject-feedback: review
+  12-4-no-review-force-flags: review
+
+  # Epic 13: ralph plan — Merge Mode (2 stories, FR4-5)
+  epic-13: in-progress
+  13-1-merge-pure-function: review
+  13-2-merge-integration: review
+
+  # Epic 14: Bridge Deprecation & Removal (2 stories, FR23, NFR19)
+  epic-14: in-progress
+  14-1-bridge-deprecation-warning: review
+  14-2-bridge-deletion: review
+
+  # Epic 15: Growth — Acceptance Test & Research (2 stories)
+  epic-15: in-progress
+  15-1-acceptance-test-learnpracticsCodePlatform: ready-for-dev
+  15-2-research-plan-quality-metrics: review
+
+  # Epic 16: Growth — Replan & Init (2 stories, FR28-29)
+  epic-16: in-progress
+  16-1-ralph-replan: review
+  16-2-ralph-init: review
+
+# Growth Decision (Story 15.2)
+# Based on plan-quality-metrics research: proceed with Growth features
+# Condition: Story 15.1 acceptance test passes + L1 thresholds met
+growth_decision: proceed

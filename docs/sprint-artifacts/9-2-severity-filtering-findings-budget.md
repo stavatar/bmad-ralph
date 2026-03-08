@@ -1,6 +1,6 @@
 # Story 9.2: Severity Filtering + Findings Budget
 
-Status: review
+Status: done
 
 ## Story
 

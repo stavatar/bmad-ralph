@@ -1,6 +1,6 @@
 # Story 9.8: Smart Merge [x] Preservation
 
-Status: review
+Status: done
 
 ## Story
 

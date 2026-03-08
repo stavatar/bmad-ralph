@@ -13,6 +13,13 @@ import (
 //go:embed defaults.yaml
 var defaultsYAML []byte
 
+// PlanInputConfig represents a configured input file for ralph plan.
+// Parsed from YAML config; runtime PlanInput (in plan/) adds Content field.
+type PlanInputConfig struct {
+	File string `yaml:"file"`
+	Role string `yaml:"role"`
+}
+
 // Config holds all ralph configuration parameters.
 // Parsed once at startup, passed by pointer, NEVER mutated at runtime.
 // Exception: RunID is set once by cmd/ralph before entering the runner (pre-run initialization).
@@ -48,6 +55,11 @@ type Config struct {
 	ContextWarnPct      int                `yaml:"context_warn_pct"`
 	ContextCriticalPct  int                `yaml:"context_critical_pct"`
 	ModelPricing        map[string]Pricing `yaml:"model_pricing"`
+	PlanInputs          []PlanInputConfig  `yaml:"plan_inputs"`
+	PlanOutputPath      string             `yaml:"plan_output_path"`
+	PlanMaxRetries      int                `yaml:"plan_max_retries"`
+	PlanMerge           bool               `yaml:"plan_merge"`
+	PlanMode            string             `yaml:"plan_mode"`
 	LogDir              string             `yaml:"log_dir"`
 	StoriesDir          string             `yaml:"stories_dir"`
 	ProjectRoot         string             `yaml:"-"`
@@ -78,6 +90,20 @@ func defaultConfig() *Config {
 		panic("config: embedded defaults.yaml: " + err.Error())
 	}
 	return &cfg
+}
+
+// applyPlanDefaults sets default values for plan-related fields
+// when they are zero value after YAML parsing.
+func applyPlanDefaults(cfg *Config) {
+	if cfg.PlanOutputPath == "" {
+		cfg.PlanOutputPath = "docs/sprint-tasks.md"
+	}
+	if cfg.PlanMaxRetries == 0 {
+		cfg.PlanMaxRetries = 1
+	}
+	if cfg.PlanMode == "" {
+		cfg.PlanMode = "auto"
+	}
 }
 
 // applyCLIFlags applies non-nil CLI flag values to the config, overriding
@@ -132,6 +158,7 @@ func Load(flags CLIFlags) (*Config, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			applyPlanDefaults(cfg)
 			applyCLIFlags(cfg, flags)
 			if vErr := cfg.Validate(); vErr != nil {
 				return nil, vErr
@@ -149,6 +176,7 @@ func Load(flags CLIFlags) (*Config, error) {
 		return nil, fmt.Errorf("config: parse yaml: %w", err)
 	}
 	if len(probe) == 0 {
+		applyPlanDefaults(cfg)
 		applyCLIFlags(cfg, flags)
 		if vErr := cfg.Validate(); vErr != nil {
 			return nil, vErr
@@ -160,6 +188,7 @@ func Load(flags CLIFlags) (*Config, error) {
 		return nil, fmt.Errorf("config: parse yaml: %w", err)
 	}
 
+	applyPlanDefaults(cfg)
 	applyCLIFlags(cfg, flags)
 
 	if err := cfg.Validate(); err != nil {

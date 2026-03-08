@@ -104,6 +104,46 @@ func TestBuildArgs_AppendSystemPrompt_Nil(t *testing.T) {
 	}
 }
 
+func TestBuildArgs_InjectFeedback_Present(t *testing.T) {
+	feedback := "Review found 2 issues: missing error handling in foo.go"
+	got := buildArgs(Options{
+		Prompt:                     "test",
+		InjectFeedback:             feedback,
+		DangerouslySkipPermissions: true,
+	})
+
+	foundFlag := false
+	for i, arg := range got {
+		if arg == "--append-system-prompt" {
+			foundFlag = true
+			if i+1 >= len(got) {
+				t.Fatal("--append-system-prompt flag missing value")
+			}
+			if got[i+1] != feedback {
+				t.Errorf("--append-system-prompt value = %q, want %q", got[i+1], feedback)
+			}
+			break
+		}
+	}
+	if !foundFlag {
+		t.Errorf("expected --append-system-prompt flag in args: %v", got)
+	}
+}
+
+func TestBuildArgs_InjectFeedback_Empty(t *testing.T) {
+	got := buildArgs(Options{
+		Prompt:                     "test",
+		InjectFeedback:             "",
+		DangerouslySkipPermissions: true,
+	})
+
+	for _, arg := range got {
+		if arg == "--append-system-prompt" {
+			t.Errorf("--append-system-prompt flag should be absent when InjectFeedback is empty, got args: %v", got)
+		}
+	}
+}
+
 func TestBuildArgs_BasicPrompt(t *testing.T) {
 	tests := []struct {
 		name string
